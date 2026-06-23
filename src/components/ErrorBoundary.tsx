@@ -58,7 +58,9 @@ export class ErrorBoundary extends Component<Props, State> {
               Error
             </p>
             <p className="text-[12px] font-mono text-red break-all">
-              {error.message}
+              {import.meta.env.DEV
+                ? error.message
+                : "See the browser console for details."}
             </p>
           </div>
           <div className="flex items-center gap-3">

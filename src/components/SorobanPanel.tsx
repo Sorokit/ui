@@ -90,10 +90,14 @@ export function SorobanPanel() {
               disabled={state === "loading"}
             />
             <div className="flex flex-col gap-2">
-              <label className="text-[12px] font-medium text-ink-2">
+              <label
+                htmlFor="soroban-args"
+                className="text-[12px] font-medium text-ink-2"
+              >
                 Arguments (JSON array)
               </label>
               <textarea
+                id="soroban-args"
                 placeholder='["arg1", 42]'
                 value={args}
                 onChange={(e) => setArgs(e.target.value)}
