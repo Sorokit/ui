@@ -18,8 +18,7 @@ export function SorobanPanel() {
 
   const canInvoke = isConnected && contractId.trim() && method.trim();
 
-  async function invoke(e: React.FormEvent) {
-    e.preventDefault();
+  async function doInvoke() {
     if (!canInvoke) return;
     setState("loading");
     setError(null);
@@ -54,6 +53,15 @@ export function SorobanPanel() {
     }
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    doInvoke();
+  }
+
+  function handleClick() {
+    doInvoke();
+  }
+
   return (
     <div className="rounded-xl border border-line bg-surface overflow-hidden">
       <div className="flex items-center justify-between px-6 py-4 border-b border-line">
@@ -74,7 +82,7 @@ export function SorobanPanel() {
             Connect your wallet to invoke contracts
           </p>
         ) : (
-          <form onSubmit={invoke} className="flex flex-col gap-5">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <Input
               label="Contract ID"
               placeholder="C..."
@@ -144,7 +152,7 @@ export function SorobanPanel() {
           size="md"
           loading={state === "loading"}
           disabled={!canInvoke}
-          onClick={invoke as unknown as React.MouseEventHandler}
+          onClick={handleClick}
         >
           {state === "loading" ? "Invoking…" : "Invoke Contract"}
         </Button>
