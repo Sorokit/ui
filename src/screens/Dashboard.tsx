@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { Sidebar, type NavSection } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { NetworkBanner } from "@/components/NetworkBanner";
@@ -8,17 +8,19 @@ import { TransactionsScreen } from "@/screens/TransactionsScreen";
 import { SorobanScreen } from "@/screens/SorobanScreen";
 import { NetworkScreen } from "@/screens/NetworkScreen";
 
-const SCREENS: Record<NavSection, React.ReactNode> = {
-  wallet: <WalletScreen />,
-  account: <AccountScreen />,
-  transactions: <TransactionsScreen />,
-  soroban: <SorobanScreen />,
-  network: <NetworkScreen />,
+const SCREENS: Record<NavSection, ComponentType> = {
+  wallet: WalletScreen,
+  account: AccountScreen,
+  transactions: TransactionsScreen,
+  soroban: SorobanScreen,
+  network: NetworkScreen,
 };
 
 export function Dashboard() {
   const [active, setActive] = useState<NavSection>("wallet");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const ActiveScreen = SCREENS[active];
 
   return (
     <div className="flex h-screen overflow-hidden bg-base">
@@ -36,7 +38,7 @@ export function Dashboard() {
         <NetworkBanner />
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[700px] mx-auto px-6 py-8 sm:px-10 sm:py-10">
-            {SCREENS[active]}
+            <ActiveScreen />
           </div>
         </main>
       </div>
