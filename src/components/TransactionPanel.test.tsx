@@ -18,7 +18,7 @@ describe("TransactionPanel", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: "GABC",
       isConnected: true,
-    });
+    } as unknown as ReturnType<typeof useSorokit>);
   });
 
   it("handles loading, success, and error states", async () => {
@@ -32,7 +32,7 @@ describe("TransactionPanel", () => {
       transaction: {
         submit: mockSubmit,
       },
-    });
+    } as unknown as ReturnType<typeof getClient>);
 
     render(<TransactionPanel />);
 
@@ -68,7 +68,7 @@ describe("TransactionPanel", () => {
       transaction: {
         submit: mockSubmit,
       },
-    });
+    } as unknown as ReturnType<typeof getClient>);
 
     render(<TransactionPanel />);
 

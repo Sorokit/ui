@@ -17,7 +17,7 @@ describe("AccountCard", () => {
       address: "GABC",
       account: null,
       isLoadingAccount: true,
-    });
+    } as unknown as ReturnType<typeof useSorokit>);
 
     const { container } = render(<AccountCard />);
     // Skeleton renders when isLoadingAccount is true. We can check for a div with animate-pulse
@@ -35,7 +35,7 @@ describe("AccountCard", () => {
         subentryCount: 2,
       },
       isLoadingAccount: false,
-    });
+    } as unknown as ReturnType<typeof useSorokit>);
 
     render(<AccountCard />);
     
@@ -50,7 +50,7 @@ describe("AccountCard", () => {
       address: null,
       account: null,
       isLoadingAccount: false,
-    });
+    } as unknown as ReturnType<typeof useSorokit>);
 
     const { container } = render(<AccountCard />);
     expect(container).toBeEmptyDOMElement();

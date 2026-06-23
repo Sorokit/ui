@@ -2,6 +2,7 @@ import { render, screen, act, fireEvent, waitFor } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { SorokitProvider } from "./SorokitProvider";
 import { useSorokit } from "./useSorokit";
+import { getClient } from "@/lib/client";
 
 const TestComponent = () => {
   const { address, account, balances, connectWallet, disconnectWallet, switchNetwork } = useSorokit();
@@ -19,6 +20,7 @@ const TestComponent = () => {
 };
 
 describe("SorokitProvider", () => {
+  let mockClient: ReturnType<typeof getClient>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockClient: any;
 
@@ -36,7 +38,7 @@ describe("SorokitProvider", () => {
         getNetwork: vi.fn().mockResolvedValue({ data: { name: "mainnet" }, error: null }),
         switchNetwork: vi.fn().mockResolvedValue({ data: { name: "testnet" }, error: null }),
       },
-    };
+    } as unknown as ReturnType<typeof getClient>;
   });
 
   it("disconnectWallet clears address, account, and balances", async () => {

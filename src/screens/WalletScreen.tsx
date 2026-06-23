@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useSorokit } from "@/context/useSorokit";
-import { AccountCard } from "@/components/AccountCard";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { cn, truncateAddress } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import { QRCode } from "@/components/QRCode";
+import { AddressDisplay } from "@/components/AddressDisplay";
 
 export function WalletScreen() {
   const { address, isConnected, disconnectWallet, network } = useSorokit();
@@ -43,13 +44,28 @@ export function WalletScreen() {
         {/* Network info cells */}
         {network && (
           <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-line">
-            <InfoCell label="Network" value={network.name} />
+            <InfoCell label="Network" value={network.name} copyable />
             <InfoCell label="RPC Endpoint" value={network.rpcUrl} mono copyable />
           </div>
         )}
       </div>
 
-      <AccountCard />
+      {isConnected && address && (
+        <div className="rounded-xl border border-line bg-surface overflow-hidden">
+          <div className="px-6 py-5 border-b border-line">
+            <h3 className="text-[14px] font-semibold text-ink">Receive Funds</h3>
+            <p className="text-[12px] text-ink-3 mt-0.5">
+              Scan the QR code or copy the address to receive payments
+            </p>
+          </div>
+          <div className="px-6 py-6 flex flex-col sm:flex-row items-center sm:items-start gap-6">
+            <QRCode value={address} size={140} className="shrink-0" />
+            <div className="flex-1 min-w-0 w-full flex flex-col justify-center gap-1 sm:h-[164px]">
+              <AddressDisplay address={address} showFull label="Address" />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

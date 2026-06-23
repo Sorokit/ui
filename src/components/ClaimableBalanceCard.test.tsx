@@ -21,7 +21,7 @@ describe("ClaimableBalanceCard", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: "GABC123",
       isConnected: true,
-    });
+    } as unknown as ReturnType<typeof useSorokit>);
 
     const mockClaimBalance = vi.fn()
       .mockResolvedValueOnce({ data: null, error: "Network error" }) // Failure first
@@ -45,12 +45,12 @@ describe("ClaimableBalanceCard", () => {
         getClaimableBalances: mockGetClaimableBalances,
         claimBalance: mockClaimBalance,
       },
-    });
+    } as unknown as ReturnType<typeof getClient>);
 
     render(<ClaimableBalanceCard />);
 
     // Wait for the balance to load
-    expect(await screen.findByText("10")).toBeInTheDocument();
+    expect(await screen.findByText("10.00")).toBeInTheDocument();
 
     const claimButton = screen.getByRole("button", { name: "Claim" });
     

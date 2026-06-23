@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useId, useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -9,7 +9,24 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ label, error, hint, className, id, ...props }, ref) => {
-    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-");
+    const generatedId = useId();
+    const inputId = id ?? label?.toLowerCase().replace(/\s+/g, "-") ?? generatedId;
+
+    const [lastError, setLastError] = useState<string | undefined>(error);
+    const [lastHint, setLastHint] = useState<string | undefined>(hint);
+
+    useEffect(() => {
+      if (error) {
+        setLastError(error);
+      }
+    }, [error]);
+
+    useEffect(() => {
+      if (hint) {
+        setLastHint(hint);
+      }
+    }, [hint]);
+
     return (
       <div className="flex flex-col gap-1.5">
         {label && (
@@ -35,8 +52,24 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           {...props}
         />
-        {error && <p className="text-[11px] text-red">{error}</p>}
-        {hint && !error && <p className="text-[11px] text-ink-3">{hint}</p>}
+        <div className="min-h-[18px] relative">
+          <p
+            className={cn(
+              "absolute inset-x-0 top-0 text-[11px] text-red transition-opacity duration-150",
+              error ? "opacity-100" : "opacity-0 pointer-events-none",
+            )}
+          >
+            {error || lastError || ""}
+          </p>
+          <p
+            className={cn(
+              "absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150",
+              !error && hint ? "opacity-100" : "opacity-0 pointer-events-none",
+            )}
+          >
+            {!error && hint ? hint : lastHint || ""}
+          </p>
+        </div>
       </div>
     );
   },
