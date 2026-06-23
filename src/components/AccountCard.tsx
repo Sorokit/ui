@@ -17,9 +17,15 @@ export function AccountCard() {
             Stellar account details
           </p>
         </div>
-        <Badge variant="success" dot>
-          Active
-        </Badge>
+        {isLoadingAccount ? (
+          <Badge variant="default">Loading</Badge>
+        ) : (
+          account && (
+            <Badge variant="success" dot>
+              Active
+            </Badge>
+          )
+        )}
       </div>
       <div className="px-5 py-5">
         {isLoadingAccount ? (

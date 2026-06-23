@@ -20,7 +20,6 @@ function AssetRow({ b }: { b: Balance }) {
 
 export function BalanceList() {
   const { balances, isLoadingAccount, isConnected } = useSorokit();
-  if (!isConnected) return null;
 
   return (
     <div className="rounded-xl border border-line bg-surface overflow-hidden">
@@ -29,12 +28,16 @@ export function BalanceList() {
           <h3 className="text-[14px] font-semibold text-ink">Assets</h3>
           <p className="text-[12px] text-ink-3 mt-0.5">Token balances</p>
         </div>
-        {!isLoadingAccount && (
+        {isConnected && !isLoadingAccount && (
           <Badge variant="default">{balances.length} assets</Badge>
         )}
       </div>
 
-      {isLoadingAccount ? (
+      {!isConnected ? (
+        <p className="text-[13px] text-ink-3 text-center py-10">
+          Connect your wallet to view assets
+        </p>
+      ) : isLoadingAccount ? (
         <div className="px-5 py-5 flex flex-col gap-4">
           {[1, 2, 3].map((i) => (
             <SkeletonRow key={i} />
