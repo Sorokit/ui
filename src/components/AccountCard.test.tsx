@@ -56,3 +56,54 @@ describe("AccountCard", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+import { AccountCardCompact } from "./AccountCard";
+
+describe("AccountCardCompact", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null when address is null", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: null,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    const { container } = render(<AccountCardCompact />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows the first two characters of the address as the avatar (uppercase)", () => {
+    const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+    vi.mocked(useSorokit).mockReturnValue({
+      address,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCardCompact />);
+    expect(screen.getByText("GA")).toBeInTheDocument();
+  });
+
+  it("displays the truncated address", () => {
+    const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+    vi.mocked(useSorokit).mockReturnValue({
+      address,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCardCompact />);
+    const addrEl = document.querySelector("[data-address]");
+    expect(addrEl).toBeInTheDocument();
+    // Should be truncated (shorter than the full address)
+    expect(addrEl?.textContent?.length).toBeLessThan(address.length);
+    expect(addrEl?.textContent).toContain("...");
+  });
+
+  it("shows 'Connected' label", () => {
+    const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+    vi.mocked(useSorokit).mockReturnValue({
+      address,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCardCompact />);
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+  });
+});
