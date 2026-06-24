@@ -41,7 +41,7 @@ function BalanceRow({ cb }: { cb: ClaimableBalance }) {
           </span>
           <Badge variant="teal">{assetCode}</Badge>
           {claimed && (
-            <Badge variant="success" dot>
+            <Badge variant="success" dot live>
               Claimed
             </Badge>
           )}

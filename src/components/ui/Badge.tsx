@@ -12,6 +12,7 @@ type BadgeVariant =
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
   dot?: boolean;
+  live?: boolean;
 }
 
 const variants: Record<BadgeVariant, string> = {
@@ -41,6 +42,7 @@ const dots: Record<BadgeVariant, string> = {
 export function Badge({
   variant = "default",
   dot,
+  live,
   className,
   children,
   ...props
@@ -48,14 +50,18 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[9px] font-semibold tracking-wide",
+        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold tracking-wide",
         variants[variant],
         className,
       )}
+      {...(live ? { role: "status", "aria-live": "polite" } : {})}
       {...props}
     >
       {dot && (
-        <span className={cn("w-1 h-1 rounded-full shrink-0", dots[variant])} />
+        <span
+          aria-hidden="true"
+          className={cn("w-1 h-1 rounded-full shrink-0", dots[variant])}
+        />
       )}
       {children}
     </span>

@@ -2,6 +2,7 @@ import { useSorokit } from "@/context/useSorokit";
 import { Button } from "@/components/ui/Button";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import heroImg from "@/assets/hero.png";
 
 export function ConnectScreen() {
   const { connectWallet, isConnecting, error, clearError } = useSorokit();
@@ -37,6 +38,13 @@ export function ConnectScreen() {
             </p>
           </div>
         </div>
+
+        {/* Hero image */}
+        <img
+          src={heroImg}
+          alt="sorokit wallet dashboard preview"
+          className="w-full rounded-xl object-cover"
+        />
 
         {/* Card */}
         <div className="w-full rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_24px_64px_rgba(0,0,0,0.2)]">
@@ -74,6 +82,11 @@ export function ConnectScreen() {
             >
               {isConnecting ? "Connecting…" : "Connect Wallet"}
             </Button>
+            {isConnecting && (
+              <p className="text-[12px] text-ink-3 text-center">
+                Connecting to your wallet…
+              </p>
+            )}
             <p className="text-[11px] text-ink-4 text-center">
               Powered by sorokit-core · Stellar network
             </p>

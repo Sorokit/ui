@@ -56,7 +56,7 @@ function TxRow({ tx }: { tx: Transaction }) {
       </div>
 
       <div className="flex flex-col items-end gap-0.5 shrink-0">
-        <Badge variant={tx.successful ? "success" : "error"}>
+        <Badge variant={tx.successful ? "success" : "error"} live>
           {tx.successful ? "Success" : "Failed"}
         </Badge>
         <span className="text-[10px] text-ink-3">

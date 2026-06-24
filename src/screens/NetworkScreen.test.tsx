@@ -54,14 +54,14 @@ describe("NetworkScreen", () => {
     expect(switchNetwork).toHaveBeenCalledWith("mainnet");
   });
 
-  it("calls switchNetwork even when clicking the active network card", () => {
+  it("does not call switchNetwork when clicking the already active network card", () => {
     render(<NetworkScreen />);
 
-    // All four networks render as buttons; testnet is the active one
+    // Testnet is the active network — clicking it should be a no-op
     const testnetButton = screen.getByRole("button", { name: /testnet/i });
     fireEvent.click(testnetButton);
 
-    expect(switchNetwork).toHaveBeenCalledWith("testnet");
+    expect(switchNetwork).not.toHaveBeenCalled();
   });
 
   it("renders all four network cards", () => {
