@@ -1,4 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { useState } from "react";
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -14,23 +15,41 @@ const NETWORKS: { name: NetworkName; label: string; dot: string }[] = [
 
 export function NetworkSwitcher() {
   const { network, switchNetwork } = useSorokit();
+  const [isSwitching, setIsSwitching] = useState(false);
   const current = NETWORKS.find((n) => n.name === network?.name) ?? NETWORKS[1];
+
+  const handleSelect = async (name: NetworkName) => {
+    if (isSwitching) return;
+    setIsSwitching(true);
+    try {
+      await switchNetwork(name);
+    } finally {
+      setIsSwitching(false);
+    }
+  };
 
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="inline-flex items-center gap-2 h-8 px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer text-[12px] text-ink-2 focus-visible:outline-none">
+        <button
+          disabled={isSwitching}
+          className="inline-flex items-center gap-2 h-8 px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer text-[12px] text-ink-2 focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+        >
           <span
             className={cn("w-1.5 h-1.5 rounded-full shrink-0", current.dot)}
           />
           {current.label}
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            size={10}
-            color="currentColor"
-            strokeWidth={2}
-            className="opacity-40 ml-0.5"
-          />
+          {isSwitching ? (
+            <span className="ml-0.5 h-3 w-3 animate-spin rounded-full border-2 border-ink-2 border-t-transparent" />
+          ) : (
+            <HugeiconsIcon
+              icon={ArrowDown01Icon}
+              size={10}
+              color="currentColor"
+              strokeWidth={2}
+              className="opacity-40 ml-0.5"
+            />
+          )}
         </button>
       </DropdownMenu.Trigger>
 
@@ -43,7 +62,8 @@ export function NetworkSwitcher() {
           {NETWORKS.map((net) => (
             <DropdownMenu.Item
               key={net.name}
-              onSelect={() => switchNetwork(net.name)}
+              disabled={isSwitching}
+              onSelect={() => handleSelect(net.name)}
               className={cn(
                 "flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12px] cursor-pointer outline-none transition-colors",
                 network?.name === net.name

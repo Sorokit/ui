@@ -30,6 +30,13 @@ const CONFIG = {
     text: "text-ink-2",
     show: true,
   },
+  custom: {
+    label: null,
+    dot: "bg-ink-3",
+    bar: "bg-surface-2 border-b border-line",
+    text: "text-ink-2",
+    show: true,
+  },
 };
 
 interface NetworkBannerProps {
@@ -45,8 +52,10 @@ export function NetworkBanner({
   const { network } = useSorokit();
   if (!network) return null;
 
-  const cfg = CONFIG[network.name] ?? CONFIG.testnet;
+  const cfg = CONFIG[network.name] ?? CONFIG.custom;
   if (!alwaysShow && !cfg.show) return null;
+
+  const label = cfg.label ?? network.name;
 
   return (
     <div
@@ -58,7 +67,7 @@ export function NetworkBanner({
     >
       <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", cfg.dot)} />
       <span className={cfg.text}>
-        You are on <strong>{cfg.label}</strong>
+        You are on <strong>{label}</strong>
         {network.name !== "mainnet" && " — transactions use test funds only"}
       </span>
     </div>

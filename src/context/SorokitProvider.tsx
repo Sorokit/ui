@@ -86,8 +86,16 @@ export function SorokitProvider({ client, children }: SorokitProviderProps) {
   const switchNetwork = useCallback(
     async (name: NetworkName) => {
       const { data, error } = await client.network.switchNetwork(name);
-      if (data) setNetwork(data);
-      if (error) setError(error);
+      if (error) {
+        setError(error);
+        return;
+      }
+      if (data) {
+        setNetwork(data);
+        setAddress(null);
+        setAccount(null);
+        setBalances([]);
+      }
     },
     [client],
   );
