@@ -136,6 +136,7 @@ export function ContractEventFeed({
           {pollInterval > 0 && (
             <button
               onClick={() => setLive((l) => !l)}
+              aria-pressed={live}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${live ? "bg-success-dim text-green border-success-dim-strong" : "bg-surface-2 text-ink-3 border-line-2"}`}
             >
               <span
@@ -176,7 +177,7 @@ export function ContractEventFeed({
           No events found
         </p>
       ) : (
-        <div>
+        <div aria-live="polite">
           {events.map((e) => (
             <EventRow key={e.id} event={e} />
           ))}
