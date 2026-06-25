@@ -75,6 +75,7 @@ export function FeeEstimator({
           disabled={loading}
           className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
           title="Refresh"
+          aria-label="Refresh fee estimate"
         >
           <HugeiconsIcon
             icon={Refresh01Icon}
@@ -86,7 +87,7 @@ export function FeeEstimator({
         </button>
       </div>
 
-      <div className="px-5 py-4">
+      <div className="px-5 py-4" aria-live="polite" aria-atomic="true">
         {loading && !fee ? (
           <div className="flex gap-4">
             <div className="h-8 w-24 rounded-lg bg-surface-2 animate-pulse" />
