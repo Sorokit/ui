@@ -150,4 +150,36 @@ describe("TransactionHistory", () => {
     });
     expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
   });
+
+  it("clicking Prev decrements the page and re-fetches page 1", async () => {
+    const getHistory = vi.fn().mockResolvedValue({
+      data: Array.from({ length: PAGE_SIZE }, (_, i) => makeTx(i)),
+      error: null,
+      total: 25,
+    });
+    vi.mocked(getClient).mockReturnValue({
+      transaction: { getHistory },
+    } as unknown as SorokitClient);
+
+    render(<TransactionHistory />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => screen.getByText("Next"));
+
+    // Go forward to page 2…
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() =>
+      expect(getHistory).toHaveBeenCalledWith(ADDRESS, 2, PAGE_SIZE),
+    );
+
+    // …then back to page 1 via Prev.
+    fireEvent.click(screen.getByRole("button", { name: /prev/i }));
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => {
+      expect(screen.getByText(/page 1 of 3/i)).toBeInTheDocument();
+    });
+    expect(getHistory).toHaveBeenLastCalledWith(ADDRESS, 1, PAGE_SIZE);
+    // Prev is disabled again on the first page.
+    expect(screen.getByRole("button", { name: /prev/i })).toBeDisabled();
+  });
 });
