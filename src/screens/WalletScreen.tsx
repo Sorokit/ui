@@ -92,7 +92,12 @@ export function WalletScreen() {
             </p>
           </div>
           <div className="px-6 py-6 flex flex-col sm:flex-row items-center sm:items-start gap-6">
-            <QRCode value={address} size={140} className="shrink-0" />
+            <QRCode
+              value={address}
+              size={140}
+              className="shrink-0"
+              ariaLabel={`QR code to receive funds at address ${address}`}
+            />
             <div className="flex-1 min-w-0 w-full flex flex-col justify-center gap-1 sm:h-[164px]">
               <AddressDisplay address={address} showFull label="Address" />
             </div>

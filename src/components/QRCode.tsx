@@ -14,6 +14,12 @@ interface QRCodeProps {
   size?: number;
   className?: string;
   label?: string;
+  /**
+   * Accessible name for the QR code, announced by screen readers. A `<canvas>`
+   * is opaque to assistive tech, so without this the code is invisible to AT.
+   * Defaults to the `label` if provided, otherwise a generic description.
+   */
+  ariaLabel?: string;
   /** Canvas background colour. Defaults to `--color-qr-canvas-bg`. */
   canvasBackground?: string;
   /** Canvas foreground (cell) colour. Defaults to `--color-qr-canvas-fg`. */
@@ -30,6 +36,7 @@ export function QRCode({
   size = 160,
   className,
   label,
+  ariaLabel,
   canvasBackground,
   canvasForeground,
 }: QRCodeProps) {
@@ -98,6 +105,8 @@ export function QRCode({
       <div className="rounded-xl border border-line p-3 bg-[var(--color-qr-canvas-bg)] shadow-[0_4px_16px_rgba(0,0,0,0.3)]">
         <canvas
           ref={canvasRef}
+          role="img"
+          aria-label={ariaLabel ?? label ?? "QR code"}
           style={{ display: "block", borderRadius: "4px" }}
         />
       </div>

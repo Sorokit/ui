@@ -42,4 +42,27 @@ describe("QRCode", () => {
     const wrapper = container.firstElementChild;
     expect(wrapper?.classList.contains("my-qr")).toBe(true);
   });
+
+  it("exposes the canvas to assistive tech as an image", () => {
+    render(<QRCode value={value} />);
+    const img = screen.getByRole("img");
+    expect(img.tagName).toBe("CANVAS");
+  });
+
+  it("uses ariaLabel as the accessible name when provided", () => {
+    render(<QRCode value={value} ariaLabel="QR code to receive funds" />);
+    expect(
+      screen.getByRole("img", { name: "QR code to receive funds" }),
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the label for the accessible name", () => {
+    render(<QRCode value={value} label={value} />);
+    expect(screen.getByRole("img", { name: value })).toBeInTheDocument();
+  });
+
+  it("defaults the accessible name to a generic description", () => {
+    render(<QRCode value={value} />);
+    expect(screen.getByRole("img", { name: "QR code" })).toBeInTheDocument();
+  });
 });
