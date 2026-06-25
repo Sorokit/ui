@@ -1,9 +1,7 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect,it } from "vitest";
-
+import { describe, it, expect } from "vitest";
+import { AssetBadge, AssetPill } from "./AssetBadge";
 import type { Balance } from "@/lib/client";
-
-import { AssetBadge } from "./AssetBadge";
 
 const nativeBalance: Balance = {
   assetType: "native",
@@ -79,5 +77,34 @@ describe("AssetBadge", () => {
   it("renders the asset code for an unknown asset", () => {
     render(<AssetBadge balance={unknownBalance} />);
     expect(screen.getByText("WAVEX")).toBeInTheDocument();
+  });
+});
+
+describe("AssetPill", () => {
+  it("renders the asset code", () => {
+    render(<AssetPill assetCode="XLM" />);
+    expect(screen.getByText("XLM")).toBeInTheDocument();
+  });
+
+  it("applies the teal colour for XLM", () => {
+    render(<AssetPill assetCode="XLM" />);
+    expect(screen.getByText("XLM")).toHaveClass("text-teal");
+  });
+
+  it("applies the brand colour for USDC", () => {
+    render(<AssetPill assetCode="USDC" />);
+    expect(screen.getByText("USDC")).toHaveClass("text-brand");
+  });
+
+  it("falls back to grey for an unknown asset code", () => {
+    render(<AssetPill assetCode="WAVEX" />);
+    const pill = screen.getByText("WAVEX");
+    expect(pill).toHaveClass("bg-surface-2");
+    expect(pill).toHaveClass("text-ink-2");
+  });
+
+  it("merges a custom className", () => {
+    render(<AssetPill assetCode="XLM" className="my-pill" />);
+    expect(screen.getByText("XLM")).toHaveClass("my-pill");
   });
 });

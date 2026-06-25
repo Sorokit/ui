@@ -53,11 +53,11 @@ export function NetworkScreen() {
               Active Network
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-line">
-            <InfoCell label="Name" value={network.name} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 divide-line">
+            <InfoCell label="Name" value={network.name} className="sm:border-r sm:border-line" />
             <InfoCell label="Passphrase" value={network.passphrase} mono />
-            <InfoCell label="RPC URL" value={network.rpcUrl} mono />
-            <InfoCell label="Horizon URL" value={network.horizonUrl} mono />
+            <InfoCell label="RPC URL" value={network.rpcUrl} mono className="sm:border-t sm:border-r sm:border-line" />
+            <InfoCell label="Horizon URL" value={network.horizonUrl} mono className="sm:border-t sm:border-line" />
           </div>
         </div>
       )}
@@ -69,12 +69,13 @@ export function NetworkScreen() {
           return (
             <button
               key={net.name}
-              onClick={() => switchNetwork(net.name)}
+              onClick={() => { if (!isActive) switchNetwork(net.name); }}
+              disabled={isActive}
               className={cn(
-                "w-full text-left rounded-xl border px-6 py-5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
+                "w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
                 isActive
-                  ? "border-[rgba(86,69,212,0.0)] bg-brand-dim"
-                  : "border-line bg-surface hover:bg-surface-2 hover:border-line-2",
+                  ? "border-[rgba(86,69,212,0.35)] bg-brand-dim cursor-default"
+                  : "border-line bg-surface hover:bg-surface-2 hover:border-line-2 cursor-pointer",
               )}
             >
               <div className="flex items-center justify-between gap-4">
@@ -109,13 +110,15 @@ function InfoCell({
   label,
   value,
   mono,
+  className,
 }: {
   label: string;
   value: string;
   mono?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="px-6 py-4 flex flex-col gap-1.5">
+    <div className={cn("px-6 py-4 flex flex-col gap-1.5", className)}>
       <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
         {label}
       </span>

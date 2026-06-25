@@ -18,6 +18,7 @@ Closes #(issue number)
 Describe how you tested your changes:
 
 - [ ] Component renders correctly
+- [ ] Tests added or updated for this change
 - [ ] No console errors or warnings
 - [ ] Lint passes (`npm run lint`)
 - [ ] Build succeeds (`npm run build`)

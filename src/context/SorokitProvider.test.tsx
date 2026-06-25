@@ -1,10 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
-
-import { getClient } from "@/lib/client";
-
-import { SorokitProvider } from "./SorokitProvider";
+import { screen, act, fireEvent, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useSorokit } from "./useSorokit";
+import { getClient } from "@/lib/client";
+import { renderWithProvider } from "@/__tests__/utils";
 
 const TestComponent = () => {
   const { address, account, balances, connectWallet, disconnectWallet, switchNetwork } = useSorokit();
@@ -42,11 +40,7 @@ describe("SorokitProvider", () => {
   });
 
   it("disconnectWallet clears address, account, and balances", async () => {
-    render(
-      <SorokitProvider client={mockClient}>
-        <TestComponent />
-      </SorokitProvider>
-    );
+    renderWithProvider(<TestComponent />, { client: mockClient });
 
     // Initial load will hit getNetwork
     const connectBtn = screen.getByText("Connect");
@@ -73,11 +67,7 @@ describe("SorokitProvider", () => {
   });
 
   it("connectWallet populates address on success", async () => {
-    render(
-      <SorokitProvider client={mockClient}>
-        <TestComponent />
-      </SorokitProvider>
-    );
+    renderWithProvider(<TestComponent />, { client: mockClient });
     
     expect(screen.getByTestId("address")).toHaveTextContent("none");
 
@@ -89,11 +79,7 @@ describe("SorokitProvider", () => {
   });
 
   it("switchNetwork updates network state", async () => {
-    render(
-      <SorokitProvider client={mockClient}>
-        <TestComponent />
-      </SorokitProvider>
-    );
+    renderWithProvider(<TestComponent />, { client: mockClient });
 
     await act(async () => {
       fireEvent.click(screen.getByText("Switch"));

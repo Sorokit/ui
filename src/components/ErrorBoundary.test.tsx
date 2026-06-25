@@ -8,6 +8,29 @@ const ThrowError = () => {
 };
 
 describe("ErrorBoundary", () => {
+  it("renders default fallback when child throws, and resets when try again is clicked", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary>
+        <ThrowError />
+      </ErrorBoundary>
+    );
+
+    // Expect default fallback UI text
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText("Test error!")).toBeInTheDocument();
+
+    const resetBtn = screen.getByRole("button", { name: /try again/i });
+    expect(resetBtn).toBeInTheDocument();
+
+    // Clicking reset should try to re-render the children
+    // (It will just throw again because we always throw in ThrowError, but it resets state)
+    fireEvent.click(resetBtn);
+
+    consoleSpy.mockRestore();
+  });
+
   it("renders custom fallback prop and passes error and reset function", () => {
     const fallbackSpy = vi.fn().mockImplementation((error, reset) => (
       <div>
