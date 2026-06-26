@@ -36,7 +36,7 @@ export function TopBar({
           </button>
         </div>
       )}
-      <header className="flex items-center justify-between px-6 h-[60px] border-b border-line bg-surface shrink-0">
+      <header className="flex items-center justify-between px-4 sm:px-6 h-[60px] border-b border-line bg-surface shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={onMenuToggle}

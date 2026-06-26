@@ -186,6 +186,53 @@ All hooks must be used inside a `SorokitProvider`.
 
 ---
 
+## Tailwind CSS Setup
+
+`sorokit-ui` is styled with [Tailwind CSS v4](https://tailwindcss.com). To use the library in your own Tailwind project:
+
+### 1. Import the CSS file
+
+```css
+@import "sorokit-ui/style.css";
+```
+
+This imports the pre-built component styles, design tokens (surfaces, text, borders, brand colors), and all custom utility classes (`bg-surface`, `text-ink`, `border-line`, etc.).
+
+### 2. Scan library files in your Tailwind config
+
+If you are using Tailwind's JIT engine (Tailwind v3 with `tailwind.config.js`) or the automatic content detection in Tailwind v4, you may need to configure `@source` directives or the `content` glob to pick up class names used inside the library:
+
+```css
+/* Tailwind v4 — add to your main CSS file */
+@import "tailwindcss";
+@source "../node_modules/sorokit-ui";
+```
+
+For Tailwind v3, add to `tailwind.config.js`:
+
+```js
+module.exports = {
+  content: [
+    "./src/**/*.{ts,tsx}",
+    "./node_modules/sorokit-ui/dist/**/*.{js,mjs}",
+  ],
+};
+```
+
+### 3. Verify theme tokens
+
+The library exposes CSS custom properties on `:root` (see [Theming](#theming) below). Override any token to customise the appearance:
+
+```css
+:root {
+  --color-brand: #replac3;
+  --color-surface: #ffffff;
+  --color-ink: #1a1a1a;
+}
+```
+
+---
+
 ## Styling
 
 Components are unstyled by default. Every component accepts a `className` prop:

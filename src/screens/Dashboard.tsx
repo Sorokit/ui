@@ -36,8 +36,8 @@ export function Dashboard() {
           onMenuToggle={() => setSidebarOpen((o) => !o)}
         />
         <NetworkBanner />
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[700px] mx-auto px-6 py-8 sm:px-10 sm:py-10">
+        <main className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-[700px] mx-auto px-6 py-8 sm:px-10 sm:py-10 min-h-[300px]">
             <ActiveScreen />
           </div>
         </main>

@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "files": ["src/verify-exports.ts"],
+  "include": []
+}

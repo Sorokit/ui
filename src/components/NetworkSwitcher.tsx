@@ -33,12 +33,12 @@ export function NetworkSwitcher() {
       <DropdownMenu.Trigger asChild>
         <button
           disabled={isSwitching}
-          className="inline-flex items-center gap-2 h-8 px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer text-[12px] text-ink-2 focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer text-[12px] text-ink-2 focus-visible:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span
             className={cn("w-1.5 h-1.5 rounded-full shrink-0", current.dot)}
           />
-          {current.label}
+          <span className="hidden sm:inline">{current.label}</span>
           {isSwitching ? (
             <span className="ml-0.5 h-3 w-3 animate-spin rounded-full border-2 border-ink-2 border-t-transparent" />
           ) : (

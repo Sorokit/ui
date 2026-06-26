@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import QRCodeLib from "qrcode";
 import { cn } from "@/lib/utils";
 
 function readCssColor(variable: string, fallback: string): string {
@@ -14,6 +15,12 @@ interface QRCodeProps {
   size?: number;
   className?: string;
   label?: string;
+  /**
+   * Accessible name for the QR code, announced by screen readers. A `<canvas>`
+   * is opaque to assistive tech, so without this the code is invisible to AT.
+   * Defaults to the `label` if provided, otherwise a generic description.
+   */
+  ariaLabel?: string;
   /** Canvas background colour. Defaults to `--color-qr-canvas-bg`. */
   canvasBackground?: string;
   /** Canvas foreground (cell) colour. Defaults to `--color-qr-canvas-fg`. */
@@ -22,24 +29,44 @@ interface QRCodeProps {
 
 /**
  * QRCode — renders a wallet address as a scannable QR code.
- * Uses the QR SVG path algorithm (no external library needed).
- * For production, swap the inner canvas with a proper QR library like `qrcode`.
+ * Uses the qrcode library to render a valid QR code on the canvas.
  */
 export function QRCode({
   value,
   size = 160,
   className,
   label,
+  ariaLabel,
   canvasBackground,
   canvasForeground,
 }: QRCodeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [renderError, setRenderError] = useState(false);
+  const [prevProps, setPrevProps] = useState({ value, size, canvasBackground, canvasForeground });
+
+  /* eslint-disable react-hooks/refs */
+  if (
+    prevProps.value !== value ||
+    prevProps.size !== size ||
+    prevProps.canvasBackground !== canvasBackground ||
+    prevProps.canvasForeground !== canvasForeground
+  ) {
+    setPrevProps({ value, size, canvasBackground, canvasForeground });
+    setRenderError(false);
+  }
+  /* eslint-enable react-hooks/refs */
 
   useEffect(() => {
-    if (!canvasRef.current || !value) return;
+    if (renderError || !value) return;
+
     const canvas = canvasRef.current;
+    if (!canvas) return;
+
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) {
+      setRenderError(true);
+      return;
+    }
 
     const bg =
       canvasBackground ??
@@ -48,58 +75,58 @@ export function QRCode({
       canvasForeground ??
       readCssColor("--color-qr-canvas-fg", "#0d0d0d");
 
-    // Simple visual placeholder — replace with real QR generation
-    // e.g. import QRCode from 'qrcode'; QRCode.toCanvas(canvas, value)
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = size * dpr;
-    canvas.height = size * dpr;
-    canvas.style.width = `${size}px`;
-    canvas.style.height = `${size}px`;
-    ctx.scale(dpr, dpr);
+    let active = true;
 
-    // Background
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, size, size);
-
-    // Draw a placeholder grid pattern
-    const cellSize = size / 25;
-    ctx.fillStyle = fg;
-
-    // Deterministic pattern from value string
-    for (let row = 0; row < 25; row++) {
-      for (let col = 0; col < 25; col++) {
-        const charCode = value.charCodeAt((row * 25 + col) % value.length);
-        const isCorner =
-          (row < 7 && col < 7) ||
-          (row < 7 && col > 17) ||
-          (row > 17 && col < 7);
-        const shouldFill = isCorner
-          ? row === 0 ||
-            row === 6 ||
-            col === 0 ||
-            col === 6 ||
-            (row > 1 && row < 5 && col > 1 && col < 5)
-          : (charCode + row + col) % 3 === 0;
-
-        if (shouldFill) {
-          ctx.fillRect(
-            col * cellSize,
-            row * cellSize,
-            cellSize - 0.5,
-            cellSize - 0.5,
-          );
+    QRCodeLib.toCanvas(
+      canvas,
+      value,
+      {
+        width: size,
+        margin: 1,
+        color: {
+          dark: fg,
+          light: bg,
+        },
+      },
+      (error: Error | null | undefined) => {
+        if (error && active) {
+          console.error("Failed to render QR Code:", error);
+          setRenderError(true);
         }
       }
-    }
-  }, [value, size, canvasBackground, canvasForeground]);
+    );
+
+    return () => {
+      active = false;
+    };
+  }, [value, size, canvasBackground, canvasForeground, renderError]);
 
   return (
     <div className={cn("flex flex-col items-center gap-3", className)}>
-      <div className="rounded-xl border border-line p-3 bg-[var(--color-qr-canvas-bg)] shadow-[0_4px_16px_rgba(0,0,0,0.3)]">
-        <canvas
-          ref={canvasRef}
-          style={{ display: "block", borderRadius: "4px" }}
-        />
+      <div
+        className="rounded-xl border border-line p-3 bg-[var(--color-qr-canvas-bg)] shadow-[0_4px_16px_rgba(0,0,0,0.3)] flex items-center justify-center"
+        style={{ width: size + 24, height: size + 24 }}
+      >
+        {renderError ? (
+          <div
+            className="flex flex-col items-center justify-center text-center p-2"
+            style={{ width: size, height: size }}
+          >
+            <span className="text-[11px] text-ink-3 font-semibold mb-2">
+              QR Code failed to load
+            </span>
+            <span className="text-[10px] text-ink-3 break-all font-mono select-all max-w-full">
+              {value}
+            </span>
+          </div>
+        ) : (
+          <canvas
+            ref={canvasRef}
+            role="img"
+            aria-label={ariaLabel ?? label ?? `QR code for address ${value}`}
+            style={{ display: "block", borderRadius: "4px" }}
+          />
+        )}
       </div>
       {label && (
         <p className="text-[11px] text-ink-3 text-center max-w-[200px] break-all font-mono">

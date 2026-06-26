@@ -23,13 +23,29 @@
     "typescript"
   ],
   "type": "module",
+  "main": "./dist/sorokit-ui.cjs.js",
+  "module": "./dist/sorokit-ui.es.js",
+  "types": "./dist/components/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/sorokit-ui.es.js",
+      "require": "./dist/sorokit-ui.cjs.js",
+      "types": "./dist/components/index.d.ts"
+    },
+    "./style.css": "./dist/sorokit-ui.css"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run build:lib",
+    "build:lib": "vite build --config vite.lib.config.ts",
+    "build:app": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:exports": "tsc --noEmit src/verify-exports.ts"
+    "test:exports": "tsc -p tsconfig.test-exports.json"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.1.2",
@@ -46,6 +62,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
+    "qrcode": "1.5.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sorokit-core": "^0.1.0",
@@ -54,11 +71,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@testing-library/react": "^16.2.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^24.12.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
@@ -66,11 +82,11 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
-    "jsdom": "^26.1.0",
     "jsdom": "^29.1.1",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.10",
+    "vite-plugin-dts": "^5.0.3",
     "vitest": "^3.0.5"
   }
 }

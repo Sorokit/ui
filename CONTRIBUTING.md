@@ -11,6 +11,7 @@ Thanks for taking the time to contribute. This guide covers everything you need 
 - [Project Structure](#project-structure)
 - [Development Workflow](#development-workflow)
 - [Coding Standards](#coding-standards)
+- [Mocking getClient](#mocking-getclient)
 - [Commit Convention](#commit-convention)
 - [Submitting a Pull Request](#submitting-a-pull-request)
 - [Reporting Bugs](#reporting-bugs)
@@ -164,6 +165,31 @@ src/
 - Every interactive element must be keyboard-accessible and have a meaningful label.
 - Buttons that contain only icons must have an `aria-label`.
 - Form inputs must be associated with their label via `htmlFor` / `id` or `aria-labelledby`.
+
+---
+
+## Mocking getClient()
+
+Components that call `getClient()` should use Vitest module mocks in tests. The
+singleton throws when no client has been initialized, so return an explicit mock
+client from the `@/lib/client` mock:
+
+```tsx
+import { vi } from "vitest";
+import { createMockClient } from "@/lib/mock-client";
+
+const mockClient = createMockClient();
+
+vi.mock("@/lib/client", () => ({
+  getClient: vi.fn().mockReturnValue(mockClient),
+}));
+```
+
+For components that need `useSorokit()` context, prefer the shared
+`renderWithProvider()` helper from `src/__tests__/utils.tsx`. It wraps the UI in
+`SorokitProvider` with a `createMockClient()` instance, and accepts a custom
+client when a test needs to override wallet, account, network, transaction, or
+Soroban responses.
 
 ---
 

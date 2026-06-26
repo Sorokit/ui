@@ -7,14 +7,16 @@ import {
   AssetPill,
   ContractEventFeed,
   // Types
-  AccountData,
-  Balance,
-  Transaction,
-  ClaimableBalance,
-  ContractEvent,
-  NetworkInfo,
-  InvokeParams,
+  type AccountData,
+  type Balance,
+  type Transaction,
+  type ClaimableBalance,
+  type ContractEvent,
+  type NetworkInfo,
+  type InvokeParams,
 } from "./components/index";
+
+
 
 // Dummy usage to prevent unused warnings if strictly checked
 console.log({

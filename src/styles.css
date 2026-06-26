@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  --color-brand: #55852b;
+  --color-brand-hover: #426625;
+  --color-brand-dim: #17260d;
+  --color-base: #0d0d0d;
+  --color-surface: #141414;
+  --color-surface-2: #1c1c1c;
+  --color-surface-3: #1e1e1e;
+  --color-line: #2a2a2a;
+  --color-line-2: #333333;
+  --color-ink: #ebebeb;
+  --color-ink-2: #999999;
+  --color-ink-3: #555555;
+  --color-ink-4: #3a3a3a;
+  --color-green: #22c55e;
+  --color-orange: #f97316;
+  --color-red: #ef4444;
+  --color-teal: #14b8a6;
+  --color-purple: #a855f7;
+  --color-success-bg: rgba(34, 197, 94, 0.1);
+  --color-success-bg-subtle: rgba(34, 197, 94, 0.05);
+  --color-success-bg-muted: rgba(34, 197, 94, 0.06);
+  --color-success-bg-strong: rgba(34, 197, 94, 0.12);
+  --color-success-border: rgba(34, 197, 94, 0.15);
+  --color-success-border-strong: rgba(34, 197, 94, 0.2);
+  --color-error-bg: rgba(239, 68, 68, 0.1);
+  --color-error-bg-subtle: rgba(239, 68, 68, 0.05);
+  --color-error-bg-muted: rgba(239, 68, 68, 0.08);
+  --color-error-border: rgba(239, 68, 68, 0.15);
+  --color-error-border-strong: rgba(239, 68, 68, 0.2);
+  --color-error-border-input: rgba(239, 68, 68, 0.5);
+  --color-error-ring: rgba(239, 68, 68, 0.2);
+  --color-error-bg-hover: rgba(239, 68, 68, 0.15);
+  --color-qr-canvas-bg: #ffffff;
+  --color-qr-canvas-fg: #0d0d0d;
+}
+
+@layer utilities {
+  .bg-brand { background-color: var(--color-brand); }
+  .bg-brand-hover { background-color: var(--color-brand-hover); }
+  .bg-brand-dim { background-color: var(--color-brand-dim); }
+  .bg-surface { background-color: var(--color-surface); }
+  .bg-surface-2 { background-color: var(--color-surface-2); }
+  .bg-surface-3 { background-color: var(--color-surface-3); }
+  .bg-base { background-color: var(--color-base); }
+  .text-brand { color: var(--color-brand); }
+  .text-ink { color: var(--color-ink); }
+  .text-ink-2 { color: var(--color-ink-2); }
+  .text-ink-3 { color: var(--color-ink-3); }
+  .text-ink-4 { color: var(--color-ink-4); }
+  .border-line { border-color: var(--color-line); }
+  .border-line-2 { border-color: var(--color-line-2); }
+  .text-green { color: var(--color-green); }
+  .text-orange { color: var(--color-orange); }
+  .text-red { color: var(--color-red); }
+  .text-teal { color: var(--color-teal); }
+  .text-purple { color: var(--color-purple); }
+  .bg-success-dim { background-color: var(--color-success-bg); }
+  .bg-success-dim-subtle { background-color: var(--color-success-bg-subtle); }
+  .bg-success-dim-muted { background-color: var(--color-success-bg-muted); }
+  .bg-success-dim-strong { background-color: var(--color-success-bg-strong); }
+  .border-success-dim { border-color: var(--color-success-border); }
+  .border-success-dim-strong { border-color: var(--color-success-border-strong); }
+  .bg-error-dim { background-color: var(--color-error-bg); }
+  .bg-error-dim-subtle { background-color: var(--color-error-bg-subtle); }
+  .bg-error-dim-muted { background-color: var(--color-error-bg-muted); }
+  .border-error-dim { border-color: var(--color-error-border); }
+  .border-error-dim-strong { border-color: var(--color-error-border-strong); }
+  .border-error-dim-input { border-color: var(--color-error-border-input); }
+  .ring-error-dim { --tw-ring-color: var(--color-error-ring); }
+  .hover\:bg-error-dim-hover:hover { background-color: var(--color-error-bg-hover); }
+}

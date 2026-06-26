@@ -93,4 +93,25 @@ describe("FeeEstimator", () => {
     render(<FeeEstimator />);
     expect(screen.getByText("Network Fee")).toBeInTheDocument();
   });
+
+  // ── Accessibility (#120) ──────────────────────────────────────────────────
+  describe("accessibility", () => {
+    it("labels the refresh button for screen readers", () => {
+      mockEstimateFee({ data: { baseFee: "100", recommended: "200" }, error: null });
+      render(<FeeEstimator />);
+      // Announced via aria-label, not the (unreliable) title attribute.
+      expect(
+        screen.getByRole("button", { name: "Refresh fee estimate" }),
+      ).toBeInTheDocument();
+    });
+
+    it("announces fee updates via a polite live region", async () => {
+      mockEstimateFee({ data: { baseFee: "100", recommended: "500" }, error: null });
+      const { container } = render(<FeeEstimator />);
+      const liveRegion = container.querySelector('[aria-live="polite"]');
+      expect(liveRegion).toBeInTheDocument();
+      expect(liveRegion).toHaveAttribute("aria-atomic", "true");
+      await waitFor(() => expect(liveRegion).toHaveTextContent(/100/));
+    });
+  });
 });

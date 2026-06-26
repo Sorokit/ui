@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { useSorokit } from "@/context/useSorokit";
 import { AccountCardCompact } from "@/components/AccountCard";
@@ -38,11 +39,67 @@ interface SidebarProps {
 
 export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   const { isConnected } = useSorokit();
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
 
   function handleNav(id: NavSection) {
     onNavigate(id);
     onClose();
   }
+
+  useEffect(() => {
+    const isMobile = window.innerWidth < 1024;
+    if (!isMobile || !open) return;
+
+    // Keep track of the active element that triggered the open
+    triggerRef.current = document.activeElement as HTMLElement;
+
+    // Focus first nav item when open transitions to true on mobile
+    const firstNavItem = sidebarRef.current?.querySelector("button");
+    if (firstNavItem) {
+      (firstNavItem as HTMLElement).focus();
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+
+      if (e.key === "Tab") {
+        if (!sidebarRef.current) return;
+        const focusableElements = sidebarRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          if (document.activeElement === firstElement) {
+            lastElement.focus();
+            e.preventDefault();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            firstElement.focus();
+            e.preventDefault();
+          }
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      // Return focus when sidebar closes
+      if (triggerRef.current) {
+        triggerRef.current.focus();
+        triggerRef.current = null;
+      }
+    };
+  }, [open, onClose]);
 
   return (
     <>
@@ -56,6 +113,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
 
       {/* Sidebar panel */}
       <aside
+        ref={sidebarRef}
         className={cn(
           "fixed top-0 left-0 z-30 h-full w-[260px] flex flex-col",
           "bg-surface border-r border-line",
@@ -92,7 +150,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 overflow-y-auto py-3 px-3">
+        <nav aria-label="Main navigation" className="flex-1 overflow-y-auto py-3 px-3">
           <p className="px-2 mb-2 mt-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
             Navigation
           </p>
@@ -101,6 +159,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
               <button
                 key={item.id}
                 onClick={() => handleNav(item.id)}
+                aria-current={active === item.id ? "page" : undefined}
                 className={cn(
                   "relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-all cursor-pointer overflow-hidden",
                   "text-[13px] focus-visible:outline-none mb-0.5",

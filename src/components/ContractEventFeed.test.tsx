@@ -141,4 +141,44 @@ describe("ContractEventFeed", () => {
       expect(getEvents).toHaveBeenLastCalledWith(NEW_ID, 10);
     });
   });
+
+  // ── Accessibility (#120) ──────────────────────────────────────────────────
+  describe("accessibility", () => {
+    it("reflects polling state on the Live/Paused toggle via aria-pressed", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+      const toggle = screen.getByRole("button", { name: /live/i });
+      // Live while polling…
+      expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+      // …and Paused after toggling off.
+      fireEvent.click(toggle);
+      expect(
+        screen.getByRole("button", { name: /paused/i }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("announces new events through a polite live region", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { container } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() =>
+        expect(container.querySelector('[aria-live="polite"]')).toBeInTheDocument(),
+      );
+    });
+  });
 });

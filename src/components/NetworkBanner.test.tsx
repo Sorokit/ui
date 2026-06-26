@@ -1,16 +1,34 @@
-import { render, screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NetworkBanner } from "./NetworkBanner";
-import { useSorokit } from "@/context/useSorokit";
+import { renderWithProvider } from "@/__tests__/utils";
+import { createMockClient } from "@/lib/mock-client";
+import type { NetworkInfo, NetworkName } from "@/lib/client";
 
-vi.mock("@/context/useSorokit", () => ({
-  useSorokit: vi.fn(),
-}));
+function networkInfo(name: NetworkName): NetworkInfo {
+  return {
+    name,
+    passphrase: `${name} passphrase`,
+    rpcUrl: `https://${name}.example/rpc`,
+    horizonUrl: `https://${name}.example/horizon`,
+  };
+}
 
-function mockNetwork(name: string) {
-  vi.mocked(useSorokit).mockReturnValue({
-    network: { name },
-  } as unknown as ReturnType<typeof useSorokit>);
+function clientWithNetwork(name: NetworkName | null) {
+  const client = createMockClient();
+  client.network.getNetwork = vi.fn().mockResolvedValue({
+    data: name ? networkInfo(name) : null,
+    error: null,
+  });
+  return client;
+}
+
+function renderWithNetwork(name: NetworkName | null, ui = <NetworkBanner />) {
+  const client = clientWithNetwork(name);
+  return {
+    client,
+    ...renderWithProvider(ui, { client }),
+  };
 }
 
 describe("NetworkBanner", () => {
@@ -18,65 +36,65 @@ describe("NetworkBanner", () => {
     vi.clearAllMocks();
   });
 
-  it("renders nothing when network is null", () => {
-    vi.mocked(useSorokit).mockReturnValue({
-      network: null,
-    } as unknown as ReturnType<typeof useSorokit>);
-
-    const { container } = render(<NetworkBanner />);
+  it("renders nothing when network is null", async () => {
+    const { client, container } = renderWithNetwork(null);
+    await waitFor(() => {
+      expect(client.network.getNetwork).toHaveBeenCalled();
+    });
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("is hidden on mainnet by default (alwaysShow = false)", () => {
-    mockNetwork("mainnet");
-    const { container } = render(<NetworkBanner />);
-    expect(container).toBeEmptyDOMElement();
+  it("is hidden on mainnet by default (alwaysShow = false)", async () => {
+    const { container } = renderWithNetwork("mainnet");
+    await waitFor(() => {
+      expect(container).toBeEmptyDOMElement();
+    });
   });
 
-  it("shows on mainnet when alwaysShow is true", () => {
-    mockNetwork("mainnet");
-    render(<NetworkBanner alwaysShow />);
-    expect(screen.getByText(/mainnet/i)).toBeInTheDocument();
+  it("shows on mainnet when alwaysShow is true", async () => {
+    renderWithNetwork("mainnet", <NetworkBanner alwaysShow />);
+    expect(await screen.findByText(/mainnet/i)).toBeInTheDocument();
   });
 
-  it("renders the testnet banner by default", () => {
-    mockNetwork("testnet");
-    render(<NetworkBanner />);
-    expect(screen.getByText(/testnet/i)).toBeInTheDocument();
+  it("renders the testnet banner by default", async () => {
+    renderWithNetwork("testnet");
+    expect(await screen.findByText(/testnet/i)).toBeInTheDocument();
     expect(screen.getByText(/test funds only/i)).toBeInTheDocument();
   });
 
-  it("applies orange styling for testnet", () => {
-    mockNetwork("testnet");
-    const { container } = render(<NetworkBanner />);
+  it("applies orange styling for testnet", async () => {
+    const { container } = renderWithNetwork("testnet");
     // The dot span should carry the testnet orange class
-    const dot = container.querySelector(".bg-orange");
-    expect(dot).toBeInTheDocument();
+    await waitFor(() => {
+      expect(container.querySelector(".bg-orange")).toBeInTheDocument();
+    });
   });
 
-  it("renders the futurenet banner by default", () => {
-    mockNetwork("futurenet");
-    render(<NetworkBanner />);
-    expect(screen.getByText(/futurenet/i)).toBeInTheDocument();
+  it("renders the futurenet banner by default", async () => {
+    renderWithNetwork("futurenet");
+    expect(await screen.findByText(/futurenet/i)).toBeInTheDocument();
   });
 
-  it("applies purple styling for futurenet", () => {
-    mockNetwork("futurenet");
-    const { container } = render(<NetworkBanner />);
-    const dot = container.querySelector(".bg-purple");
-    expect(dot).toBeInTheDocument();
+  it("applies purple styling for futurenet", async () => {
+    const { container } = renderWithNetwork("futurenet");
+    await waitFor(() => {
+      expect(container.querySelector(".bg-purple")).toBeInTheDocument();
+    });
   });
 
-  it("renders the localnet banner by default", () => {
-    mockNetwork("localnet");
-    render(<NetworkBanner />);
-    expect(screen.getByText(/localnet/i)).toBeInTheDocument();
+  it("renders the localnet banner by default", async () => {
+    renderWithNetwork("localnet");
+    expect(await screen.findByText(/localnet/i)).toBeInTheDocument();
   });
 
-  it("accepts a custom className", () => {
-    mockNetwork("testnet");
-    const { container } = render(<NetworkBanner className="my-class" />);
-    const banner = container.firstElementChild;
-    expect(banner?.classList.contains("my-class")).toBe(true);
+  it("accepts a custom className", async () => {
+    const { container } = renderWithNetwork(
+      "testnet",
+      <NetworkBanner className="my-class" />,
+    );
+    await waitFor(() => {
+      const banner = container.firstElementChild;
+      expect(banner?.classList.contains("my-class")).toBe(true);
+    });
   });
 });
