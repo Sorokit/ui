@@ -95,6 +95,25 @@ describe("SorobanInvokeButton", () => {
     expect(screen.getByText(/something went wrong while invoking/i)).toBeInTheDocument();
   });
 
+  it("hides the result block when showResult is false", async () => {
+    mockInvokeContract({ data: { txHash: "abc" }, error: null, status: "success" });
+    render(<SorobanInvokeButton params={PARAMS} showResult={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "transfer()" }));
+
+    await waitFor(() => expect(screen.getByText("Done")).toBeInTheDocument());
+    expect(screen.queryByText("Result")).not.toBeInTheDocument();
+    expect(screen.queryByText(/txHash/)).not.toBeInTheDocument();
+  });
+
+  it("hides the error block when showResult is false", async () => {
+    mockInvokeContract({ data: null, error: "Out of gas", status: "error" });
+    render(<SorobanInvokeButton params={PARAMS} showResult={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "transfer()" }));
+
+    await waitFor(() => expect(screen.getByText("Failed")).toBeInTheDocument());
+    expect(screen.queryByText(/something went wrong/i)).not.toBeInTheDocument();
+  });
+
   it("disables the button and shows connect wallet hint when not connected", () => {
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: false,

@@ -13,8 +13,6 @@ vi.mock("@/context/useSorokit", () => ({
   })),
 }));
 
-const mockInvokeContract = vi.fn();
-
 // Mock the getClient from lib/client
 vi.mock("../lib/client", () => ({
   getClient: () => ({
