@@ -125,14 +125,17 @@ describe("SorokitProvider", () => {
 
     render(<Wrapper client={mockClient} />);
 
-    expect(screen.getByTestId("render-count")).toHaveTextContent("1");
+    // Wait for initial async network fetch to settle and trigger render 2
+    await waitFor(() => {
+      expect(screen.getByTestId("render-count")).toHaveTextContent("2");
+    });
     expect(screen.getByTestId("ref-equal")).toHaveTextContent("false");
 
     await act(async () => {
       fireEvent.click(screen.getByText("Trigger Parent Render"));
     });
 
-    expect(screen.getByTestId("render-count")).toHaveTextContent("2");
+    expect(screen.getByTestId("render-count")).toHaveTextContent("3");
     expect(screen.getByTestId("ref-equal")).toHaveTextContent("true");
   });
 

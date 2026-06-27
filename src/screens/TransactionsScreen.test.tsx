@@ -44,14 +44,14 @@ describe("TransactionsScreen", () => {
 
   it("renders TransactionPanel with its section title", () => {
     render(<TransactionsScreen />);
-    expect(screen.getByText("Send Payment")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send Payment" })).toBeInTheDocument();
   });
 
   it("renders FeeEstimator above TransactionPanel in the DOM", () => {
     const { container } = render(<TransactionsScreen />);
 
-    const feeHeading = screen.getByText("Network Fee");
-    const txHeading = screen.getByText("Send Payment");
+    const feeHeading = screen.getByRole("heading", { name: "Network Fee" });
+    const txHeading = screen.getByRole("heading", { name: "Send Payment" });
 
     const allHeadings = Array.from(container.querySelectorAll("h3"));
     const feeIndex = allHeadings.indexOf(feeHeading as HTMLHeadingElement);
@@ -62,7 +62,7 @@ describe("TransactionsScreen", () => {
 
   it("renders FeeEstimator and TransactionPanel in the same screen", () => {
     render(<TransactionsScreen />);
-    expect(screen.getByText("Network Fee")).toBeInTheDocument();
-    expect(screen.getByText("Send Payment")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Network Fee" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Send Payment" })).toBeInTheDocument();
   });
 });

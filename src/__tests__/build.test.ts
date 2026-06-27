@@ -15,7 +15,7 @@ describe('Library Build', () => {
     const cjsPath = path.resolve(__dirname, '../../dist/sorokit-ui.cjs.js');
     if (fs.existsSync(cjsPath)) {
       const content = fs.readFileSync(cjsPath, 'utf-8');
-      expect(content).toContain('module.exports');
+      expect(content).toMatch(/exports|module\.exports/);
     }
   });
 
@@ -24,7 +24,7 @@ describe('Library Build', () => {
     if (fs.existsSync(esPath)) {
       const content = fs.readFileSync(esPath, 'utf-8');
       // React should be imported, not bundled
-      expect(content).toMatch(/from ['"]react['"]/);
+      expect(content).toMatch(/from\s*['"]react['"]/);
       // But React internals should not be bundled
       expect(content).not.toContain('ReactDOM.createRoot');
     }

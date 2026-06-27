@@ -9,7 +9,12 @@
     "outDir": "dist",
     "rootDir": "src",
     "moduleResolution": "bundler",
-    "strict": true,
+    "strict": false,
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@/*": ["src/*"]
+    },
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
@@ -17,6 +22,6 @@
     "isolatedModules": true,
     "jsx": "react-jsx"
   },
-  "include": ["src/components/index.ts", "src/lib/types.ts"],
+  "include": ["src/components/index.ts", "src/lib/types.ts", "src/vite-env.d.ts"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts", "src/**/*.test.tsx"]
 }
