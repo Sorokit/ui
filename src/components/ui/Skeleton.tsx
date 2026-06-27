@@ -1,3 +1,4 @@
+import React from "react";
 import { cn } from "@/lib/utils";
 
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -20,7 +21,7 @@ export function Skeleton({ circle, className, ...props }: SkeletonProps) {
 }
 
 /** Pre-composed row skeleton: icon + two lines of text */
-export function SkeletonRow({ className, ...props }: { className?: string; [key: string]: unknown }) {
+export function SkeletonRow({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
       role="presentation"

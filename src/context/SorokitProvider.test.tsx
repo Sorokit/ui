@@ -137,4 +137,26 @@ describe("SorokitProvider", () => {
     expect(screen.getByTestId("render-count")).toHaveTextContent("2");
     expect(screen.getByTestId("ref-equal")).toHaveTextContent("true");
   });
+
+  it("re-populates address after disconnect then reconnect", async () => {
+    renderWithProvider(<TestComponent />, { client: mockClient });
+
+    // Connect
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+
+    // Disconnect
+    await act(async () => {
+      fireEvent.click(screen.getByText("Disconnect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("none");
+
+    // Reconnect
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+  });
 });

@@ -37,5 +37,12 @@ export default tseslint.config(
       'simple-import-sort/exports': 'error',
       ...reactHooks.configs.recommended.rules,
     },
-  }
+  },
+  // Relax no-explicit-any in test files where `as any` is idiomatic for mocking.
+  {
+    files: ['**/*.test.{ts,tsx}', '**/__tests__/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'warn',
+    },
+  },
 )

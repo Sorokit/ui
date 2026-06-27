@@ -19,6 +19,54 @@ describe("ClaimableBalanceCard", () => {
     vi.clearAllMocks();
   });
 
+  it("shows prompt to connect wallet when not connected", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: null,
+      isConnected: false,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<ClaimableBalanceCard />);
+    expect(screen.getByText(/connect your wallet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Claim" })).not.toBeInTheDocument();
+  });
+
+  it("shows fetch error when getClaimableBalances returns an error", async () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: "GABC123",
+      isConnected: true,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    vi.mocked(getClient).mockReturnValue({
+      account: {
+        getClaimableBalances: vi.fn().mockResolvedValue({
+          data: null,
+          error: "Failed to fetch balances",
+        }),
+        claimBalance: vi.fn(),
+      },
+    } as unknown as ReturnType<typeof getClient>);
+
+    render(<ClaimableBalanceCard />);
+    expect(await screen.findByText("Failed to fetch balances")).toBeInTheDocument();
+  });
+
+  it("shows empty state when no claimable balances exist", async () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: "GABC123",
+      isConnected: true,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    vi.mocked(getClient).mockReturnValue({
+      account: {
+        getClaimableBalances: vi.fn().mockResolvedValue({ data: [], error: null }),
+        claimBalance: vi.fn(),
+      },
+    } as unknown as ReturnType<typeof getClient>);
+
+    render(<ClaimableBalanceCard />);
+    expect(await screen.findByText(/no claimable balances/i)).toBeInTheDocument();
+  });
+
   it("renders an error message and re-enables button on claim failure, shows Claimed badge on success", async () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: "GABC123",

@@ -41,6 +41,10 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           id={inputId}
+          aria-invalid={!!error}
+          aria-describedby={
+            error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined
+          }
           className={cn(
             "h-9 w-full rounded-lg border bg-surface-2 px-3.5",
             "text-[13px] text-ink placeholder:text-ink-4",
@@ -55,6 +59,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         />
         <div className="min-h-[18px] relative">
           <p
+            id={`${inputId}-error`}
             className={cn(
               "absolute inset-x-0 top-0 text-[11px] text-red transition-opacity duration-150",
               error ? "opacity-100" : "opacity-0 pointer-events-none",
@@ -63,6 +68,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             {error || lastError || ""}
           </p>
           <p
+            id={`${inputId}-hint`}
             className={cn(
               "absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150",
               !error && hint ? "opacity-100" : "opacity-0 pointer-events-none",
