@@ -36,15 +36,27 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       className,
       disabled,
       children,
+      onClick,
       ...props
     },
     ref,
   ) => {
     const Comp = asChild ? Slot : "button";
+
+    const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (disabled || loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onClick?.(e);
+    };
+
     return (
       <Comp
         ref={ref}
         disabled={disabled || loading}
+        aria-busy={loading || undefined}
         className={cn(
           "inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
@@ -53,6 +65,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           sizes[size],
           className,
         )}
+        onClick={handleClick}
         {...props}
       >
         {asChild ? (
@@ -60,7 +73,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ) : (
           <>
             {loading && (
-              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0" />
+              <>
+                <span
+                  aria-hidden="true"
+                  className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin shrink-0"
+                />
+                <span className="sr-only">Loading</span>
+              </>
             )}
             {children}
           </>
