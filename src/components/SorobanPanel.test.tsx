@@ -1,7 +1,9 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { SorobanPanel } from "./SorobanPanel";
+import { fireEvent,render, screen } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { SorobanPanel } from "./SorobanPanel";
 
 const mockInvokeContract = vi.fn();
 
@@ -28,7 +30,7 @@ describe("SorobanPanel", () => {
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: true,
       address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
-    } as any);
+    } as unknown as ReturnType<typeof useSorokit>);
   });
 
   it("should have invoke button disabled when method is empty", () => {

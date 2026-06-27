@@ -1,8 +1,10 @@
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ContractEventFeed } from "./ContractEventFeed";
+import { act,fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
+import type { ContractEvent,SorokitClient } from "@/lib/client";
 import { getClient } from "@/lib/client";
-import type { SorokitClient, ContractEvent } from "@/lib/client";
+
+import { ContractEventFeed } from "./ContractEventFeed";
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),

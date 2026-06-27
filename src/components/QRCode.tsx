@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import QRCodeLib from "qrcode";
+import { useEffect, useRef, useState } from "react";
+
 import { cn } from "@/lib/utils";
 
 function readCssColor(variable: string, fallback: string): string {

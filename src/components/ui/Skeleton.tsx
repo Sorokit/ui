@@ -1,4 +1,5 @@
 import React from "react";
+
 import { cn } from "@/lib/utils";
 
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -38,6 +39,7 @@ export function SkeletonRow({ className, ...props }: React.HTMLAttributes<HTMLDi
 }
 
 interface SkeletonCardProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Number of skeleton rows in the body (ignored if children/structure are provided) */
   rows?: number;
   structure?: React.ReactNode;
   children?: React.ReactNode;

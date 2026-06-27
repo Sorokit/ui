@@ -1,15 +1,16 @@
-import { useRef, useEffect } from "react";
-import { cn } from "@/lib/utils";
-import { useSorokit } from "@/context/useSorokit";
-import { AccountCardCompact } from "@/components/AccountCard";
-import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import {
-  Wallet01Icon,
-  User02Icon,
   ArrowDataTransferHorizontalIcon,
   CodeIcon,
   Globe02Icon,
+  User02Icon,
+  Wallet01Icon,
 } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
+import { useEffect,useRef } from "react";
+
+import { AccountCardCompact } from "@/components/AccountCard";
+import { useSorokit } from "@/context/useSorokit";
+import { cn } from "@/lib/utils";
 
 export type NavSection =
   | "wallet"

@@ -1,8 +1,9 @@
+import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
+
 import { cn } from "@/lib/utils";
 import { truncateAddress } from "@/lib/utils";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 
 interface AddressDisplayProps {
   address: string;

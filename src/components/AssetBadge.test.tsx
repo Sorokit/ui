@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
-import { AssetBadge, AssetPill } from "./AssetBadge";
+import { describe, expect,it } from "vitest";
+
 import type { Balance } from "@/lib/client";
+
+import { AssetBadge, AssetPill } from "./AssetBadge";
 
 const nativeBalance: Balance = {
   assetType: "native",

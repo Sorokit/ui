@@ -1,10 +1,11 @@
-import { WalletConnectButton } from "@/components/WalletConnectButton";
-import { NetworkSwitcher } from "@/components/NetworkSwitcher";
-import { useSorokit } from "@/context/useSorokit";
+import { Cancel01Icon,Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Menu01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
-import { SCREEN_LABELS } from "@/lib/nav-labels";
+
+import { NetworkSwitcher } from "@/components/NetworkSwitcher";
 import type { NavSection } from "@/components/Sidebar";
+import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { useSorokit } from "@/context/useSorokit";
+import { SCREEN_LABELS } from "@/lib/nav-labels";
 
 const LABELS = SCREEN_LABELS;
 

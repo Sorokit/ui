@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { SorobanPanel } from "@/components/SorobanPanel";
+
 import { ContractEventFeed } from "@/components/ContractEventFeed";
+import { SorobanPanel } from "@/components/SorobanPanel";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
 
 export function SorobanScreen() {

@@ -1,7 +1,7 @@
-import { SorobanClient } from '@stellar/js-sdk';
+// No import needed for SorobanClient as we'll use any for the property
+
 
 export interface ClientAdapterConfig {
-  walletAdapter?: any; // Freighter, xBull, Albedo
   network?: 'testnet' | 'public';
 }
 
@@ -16,12 +16,11 @@ export interface AdapterResponse<T> {
  * Supports Freighter, xBull, Albedo, and testnet mocking
  */
 export class ClientAdapter {
-  private soroban: SorobanClient | null = null;
-  private walletAdapter: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private soroban: any = null;
   private userAddress: string | null = null;
 
-  constructor(config: ClientAdapterConfig = {}) {
-    this.walletAdapter = config.walletAdapter;
+  constructor() {
   }
 
   /**
@@ -90,10 +89,10 @@ export class ClientAdapter {
         error: null,
         status: 'success',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         data: null,
-        error: err.message || 'Connection failed',
+        error: (err instanceof Error) ? err.message : 'Connection failed',
         status: 'error',
       };
     }
@@ -108,8 +107,8 @@ export class ClientAdapter {
   async invokeContract(
     contractId: string,
     method: string,
-    params: any[] = []
-  ): Promise<AdapterResponse<any>> {
+    params: unknown[] = []
+  ): Promise<AdapterResponse<unknown>> {
     try {
       if (!this.userAddress) {
         return {
@@ -140,10 +139,10 @@ export class ClientAdapter {
         error: null,
         status: 'success',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         data: null,
-        error: `Contract invocation failed: ${err.message}`,
+        error: `Contract invocation failed: ${(err instanceof Error) ? err.message : 'Unknown error'}`,
         status: 'error',
       };
     }
@@ -157,7 +156,7 @@ export class ClientAdapter {
   async getEvents(
     contractId: string,
     limit: number = 100
-  ): Promise<AdapterResponse<any[]>> {
+  ): Promise<AdapterResponse<unknown[]>> {
     try {
       if (!this.userAddress) {
         return {
@@ -185,10 +184,10 @@ export class ClientAdapter {
         error: null,
         status: 'success',
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         data: null,
-        error: `Failed to fetch events: ${err.message}`,
+        error: `Failed to fetch events: ${(err instanceof Error) ? err.message : 'Unknown error'}`,
         status: 'error',
       };
     }
@@ -211,6 +210,6 @@ export class ClientAdapter {
 }
 
 // Factory for creating adapters
-export function createClientAdapter(config?: ClientAdapterConfig): ClientAdapter {
-  return new ClientAdapter(config);
+export function createClientAdapter(): ClientAdapter {
+  return new ClientAdapter();
 }

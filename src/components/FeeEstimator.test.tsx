@@ -1,13 +1,14 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { FeeEstimator } from "./FeeEstimator";
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
 }));
 
-import { getClient } from "@/lib/client";
 import type { SorokitClient } from "@/lib/client";
+import { getClient } from "@/lib/client";
 
 function mockEstimateFee(result: { data: { baseFee: string; recommended: string } | null; error: string | null }) {
   vi.mocked(getClient).mockReturnValue({

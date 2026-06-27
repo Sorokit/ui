@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { MOCK_ADDRESS, NETWORKS, createMockClient } from '../mock-client';
-import { DeterministicMockData, deterministicMock } from '../deterministic-mock';
+import { describe, expect,it } from 'vitest';
+
+import { deterministicMock,DeterministicMockData } from '../deterministic-mock';
+import { createMockClient,MOCK_ADDRESS, NETWORKS } from '../mock-client';
 
 describe('Mock Client - Issue #30 Fixes', () => {
   describe('Fix 1: Valid MOCK_ADDRESS', () => {
@@ -98,15 +99,16 @@ describe('Mock Client - Issue #30 Fixes', () => {
     });
 
     it('snapshots should be reproducible', () => {
+      const mock1 = new DeterministicMockData(12345);
       const snapshot1 = {
-        history: deterministicMock.generateMockHistory(5),
-        events: deterministicMock.generateMockEvents(3),
+        history: mock1.generateMockHistory(5),
+        events: mock1.generateMockEvents(3),
       };
       
-      const mock = new DeterministicMockData(12345);
+      const mock2 = new DeterministicMockData(12345);
       const snapshot2 = {
-        history: mock.generateMockHistory(5),
-        events: mock.generateMockEvents(3),
+        history: mock2.generateMockHistory(5),
+        events: mock2.generateMockEvents(3),
       };
       
       expect(snapshot1).toEqual(snapshot2);

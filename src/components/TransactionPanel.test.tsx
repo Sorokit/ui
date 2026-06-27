@@ -1,8 +1,10 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TransactionPanel } from "./TransactionPanel";
-import { getClient } from "@/lib/client";
+import { fireEvent,render, screen } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+import { getClient } from "@/lib/client";
+
+import { TransactionPanel } from "./TransactionPanel";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -110,7 +112,7 @@ describe("TransactionPanel", () => {
   });
 
   it("shows error if address is null at submit time", async () => {
-    (useSorokit as any).mockReturnValue({
+    vi.mocked(useSorokit).mockReturnValue({
       address: null,
       isConnected: true,
     });
@@ -132,7 +134,7 @@ describe("TransactionPanel", () => {
   });
 
   it("shows self-payment warning when destination equals source address", async () => {
-    (useSorokit as any).mockReturnValue({
+    vi.mocked(useSorokit).mockReturnValue({
       address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
       isConnected: true,
     });

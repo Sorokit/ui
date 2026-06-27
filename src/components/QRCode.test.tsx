@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
-import { QRCode } from "./QRCode";
 import QRCodeLib from "qrcode";
+import { describe, expect, it, vi } from "vitest";
+
+import { QRCode } from "./QRCode";
 
 vi.mock("qrcode", () => {
   return {
@@ -18,11 +19,11 @@ vi.mock("qrcode", () => {
 
 describe("QRCode", () => {
   const value = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
-  let getContextSpy: any;
+  let getContextSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     // Return a dummy context by default in jsdom tests to avoid triggering the null fallback
-    getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as any);
+    getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as unknown as CanvasRenderingContext2D);
   });
 
   afterEach(() => {

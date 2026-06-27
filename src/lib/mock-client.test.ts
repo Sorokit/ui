@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("mock-client", () => {
   it("verifies MOCK_ADDRESS is a valid Stellar address format", async () => {
@@ -16,7 +16,9 @@ describe("mock-client", () => {
     const { createMockClient } = await import("./mock-client");
     const client = createMockClient();
 
-    const res = await client.network.switchNetwork("invalid" as any);
+    const res = await client.network.switchNetwork(
+      "invalid" as unknown as Parameters<typeof client.network.switchNetwork>[0],
+    );
     expect(res.data).toBeNull();
     expect(res.error).toBe("Invalid network: invalid");
   });

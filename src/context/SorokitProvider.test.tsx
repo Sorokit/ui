@@ -1,10 +1,12 @@
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useState, useRef } from "react";
-import { useSorokit } from "./useSorokit";
-import { SorokitProvider } from "./SorokitProvider";
-import { getClient } from "@/lib/client";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef,useState } from "react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { renderWithProvider } from "@/__tests__/utils";
+import { getClient } from "@/lib/client";
+
+import { SorokitProvider } from "./SorokitProvider";
+import { useSorokit } from "./useSorokit";
 
 const TestComponent = () => {
   const { address, account, balances, connectWallet, disconnectWallet, switchNetwork } = useSorokit();

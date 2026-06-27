@@ -1,7 +1,9 @@
-import { render, screen, fireEvent, within } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TopBar } from "./TopBar";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { TopBar } from "./TopBar";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),

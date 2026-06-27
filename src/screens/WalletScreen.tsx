@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef } from "react";
-import { useSorokit } from "@/context/useSorokit";
-import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
-import { cn, truncateAddress } from "@/lib/utils";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
-import { QRCode } from "@/components/QRCode";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useRef,useState } from "react";
+
 import { AddressDisplay } from "@/components/AddressDisplay";
+import { QRCode } from "@/components/QRCode";
+import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
+import { useSorokit } from "@/context/useSorokit";
+import { cn, truncateAddress } from "@/lib/utils";
 
 export function WalletScreen() {
   const { address, isConnected, disconnectWallet, network } = useSorokit();

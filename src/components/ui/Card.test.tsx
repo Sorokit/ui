@@ -1,12 +1,13 @@
-import { createRef } from "react";
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { createRef } from "react";
+import { describe, expect,it } from "vitest";
+
 import {
   Card,
-  CardHeader,
-  CardTitle,
   CardContent,
   CardFooter,
+  CardHeader,
+  CardTitle,
 } from "./Card";
 
 describe("Card", () => {
