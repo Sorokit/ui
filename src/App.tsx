@@ -1,6 +1,8 @@
-import { useState } from 'react'
-import { ClientAdapter } from './lib/adapter'
 import './App.css'
+
+import { useState } from 'react'
+
+import { ClientAdapter } from './lib/adapter'
 
 interface AppProps {
   adapter: ClientAdapter

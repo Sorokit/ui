@@ -1,10 +1,11 @@
+import { Refresh01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
 import { AccountCard } from "@/components/AccountCard";
 import { BalanceList } from "@/components/BalanceList";
 import { ClaimableBalanceCard } from "@/components/ClaimableBalanceCard";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { Refresh01Icon } from "@hugeicons/core-free-icons";
 
 export function AccountScreen() {
   const { isConnected, isLoadingAccount, refreshAccount } = useSorokit();

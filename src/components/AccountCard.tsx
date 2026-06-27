@@ -1,7 +1,7 @@
-import { useSorokit } from "@/context/useSorokit";
+import { AddressDisplay } from "@/components/AddressDisplay";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { AddressDisplay } from "@/components/AddressDisplay";
+import { useSorokit } from "@/context/useSorokit";
 import { truncateAddress } from "@/lib/utils";
 
 export function AccountCard() {

@@ -1,7 +1,7 @@
-import { useSorokit } from "@/context/useSorokit";
 import { Badge } from "@/components/ui/Badge";
-import { cn } from "@/lib/utils";
+import { useSorokit } from "@/context/useSorokit";
 import type { NetworkName } from "@/lib/client";
+import { cn } from "@/lib/utils";
 
 const NETWORKS: {
   name: NetworkName;

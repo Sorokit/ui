@@ -2,18 +2,18 @@
 // If any of these are removed from the public API, the build will fail.
 
 import {
-  FeeEstimator,
-  AddressDisplay,
-  AssetPill,
-  ContractEventFeed,
   // Types
   type AccountData,
+  AddressDisplay,
+  AssetPill,
   type Balance,
-  type Transaction,
   type ClaimableBalance,
   type ContractEvent,
-  type NetworkInfo,
+  ContractEventFeed,
+  FeeEstimator,
   type InvokeParams,
+  type NetworkInfo,
+  type Transaction,
 } from "./components/index";
 
 

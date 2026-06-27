@@ -1,7 +1,9 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { WalletConnectButton } from "./WalletConnectButton";
+import { fireEvent,render, screen } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { WalletConnectButton } from "./WalletConnectButton";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -15,29 +17,40 @@ describe("WalletConnectButton", () => {
     vi.clearAllMocks();
   });
 
-  it("renders 'Connect Wallet' when not connected", () => {
-    (useSorokit as any).mockReturnValue({
+  function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
+    return {
+      address: null,
       isConnected: false,
       isConnecting: false,
-      address: null,
-      connectWallet: mockConnect,
+      connectWallet: vi.fn(),
+      disconnectWallet: vi.fn(),
+      account: null,
+      balances: [],
+      isLoadingAccount: false,
+      refreshAccount: vi.fn(),
+      network: null,
+      switchNetwork: vi.fn(),
       error: null,
+      clearError: vi.fn(),
+      ...overrides,
+    };
+  }
+
+  it("renders 'Connect Wallet' when not connected", () => {
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({
+      connectWallet: mockConnect,
       clearError: mockClearError,
-    });
+    }));
 
     render(<WalletConnectButton />);
     expect(screen.getByRole("button", { name: "Connect Wallet" })).toBeInTheDocument();
   });
 
   it("triggers connectWallet on click", () => {
-    (useSorokit as any).mockReturnValue({
-      isConnected: false,
-      isConnecting: false,
-      address: null,
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({
       connectWallet: mockConnect,
-      error: null,
       clearError: mockClearError,
-    });
+    }));
 
     render(<WalletConnectButton />);
     fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
@@ -45,14 +58,11 @@ describe("WalletConnectButton", () => {
   });
 
   it("renders loading state when connecting", () => {
-    (useSorokit as any).mockReturnValue({
-      isConnected: false,
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({
       isConnecting: true,
-      address: null,
       connectWallet: mockConnect,
-      error: null,
       clearError: mockClearError,
-    });
+    }));
 
     render(<WalletConnectButton />);
     expect(screen.getByRole("button", { name: "Connecting…" })).toBeInTheDocument();
@@ -60,14 +70,12 @@ describe("WalletConnectButton", () => {
 
   it("renders connected state with correct address and aria-label", () => {
     const fullAddress = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    (useSorokit as any).mockReturnValue({
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({
       isConnected: true,
-      isConnecting: false,
       address: fullAddress,
       connectWallet: mockConnect,
-      error: null,
       clearError: mockClearError,
-    });
+    }));
 
     render(<WalletConnectButton />);
     const button = screen.getByRole("button", {
@@ -78,14 +86,11 @@ describe("WalletConnectButton", () => {
   });
 
   it("renders inline error message and handles clearError", () => {
-    (useSorokit as any).mockReturnValue({
-      isConnected: false,
-      isConnecting: false,
-      address: null,
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({
       connectWallet: mockConnect,
       error: "Connection failed",
       clearError: mockClearError,
-    });
+    }));
 
     render(<WalletConnectButton />);
     expect(screen.getByText("Connection failed")).toBeInTheDocument();

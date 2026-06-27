@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AccountCard } from "./AccountCard";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { AccountCard } from "./AccountCard";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),

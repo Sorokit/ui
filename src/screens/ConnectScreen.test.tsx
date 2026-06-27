@@ -1,7 +1,9 @@
-import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ConnectScreen } from "./ConnectScreen";
+import { fireEvent,render, screen } from "@testing-library/react";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { ConnectScreen } from "./ConnectScreen";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),

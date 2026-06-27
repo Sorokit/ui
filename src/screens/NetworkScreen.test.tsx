@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { fireEvent } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NetworkScreen } from "./NetworkScreen";
+import { beforeEach,describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import { NetworkScreen } from "./NetworkScreen";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),

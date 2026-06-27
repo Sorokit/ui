@@ -1,8 +1,9 @@
-import { useSorokit } from "@/context/useSorokit";
-import { Button } from "@/components/ui/Button";
-import { truncateAddress } from "@/lib/utils";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
+import { Button } from "@/components/ui/Button";
+import { useSorokit } from "@/context/useSorokit";
+import { truncateAddress } from "@/lib/utils";
 
 export function WalletConnectButton({
   onOpenModal,

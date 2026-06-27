@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { useSorokit } from "@/context/useSorokit";
-import { getClient } from "@/lib/client";
-import { Button } from "@/components/ui/Button";
+
 import { Badge } from "@/components/ui/Badge";
-import { truncateAddress } from "@/lib/utils";
+import { Button } from "@/components/ui/Button";
+import { useSorokit } from "@/context/useSorokit";
 import type { ClaimableBalance } from "@/lib/client";
+import { getClient } from "@/lib/client";
+import { truncateAddress } from "@/lib/utils";
 
 function BalanceRow({ cb }: { cb: ClaimableBalance }) {
   const [claiming, setClaiming] = useState(false);

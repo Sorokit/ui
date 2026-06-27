@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
-import App from "./App";
+import { describe, expect, it, vi } from "vitest";
+
 import { useSorokit } from "@/context/useSorokit";
+
+import App from "./App";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),

@@ -1,10 +1,11 @@
 import { createContext } from "react";
+
 import type {
-  SorokitClient,
-  NetworkInfo,
-  Balance,
   AccountData,
+  Balance,
+  NetworkInfo,
   NetworkName,
+  SorokitClient,
 } from "@/lib/client";
 
 export interface SorokitState {

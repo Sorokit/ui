@@ -1,7 +1,7 @@
-import { useSorokit } from "@/context/useSorokit";
-import { Badge } from "@/components/ui/Badge";
 import { AssetBadge } from "@/components/AssetBadge";
+import { Badge } from "@/components/ui/Badge";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
+import { useSorokit } from "@/context/useSorokit";
 import type { Balance } from "@/lib/client";
 
 function AssetRow({ b }: { b: Balance }) {

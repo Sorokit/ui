@@ -1,6 +1,6 @@
+import type { Balance } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { truncateAddress } from "@/lib/utils";
-import type { Balance } from "@/lib/client";
 
 const ASSET_COLORS: Record<string, { bg: string; text: string }> = {
   XLM: { bg: "bg-[rgba(20,184,166,0.12)]", text: "text-teal" },
