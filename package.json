@@ -46,7 +46,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:exports": "tsc -p tsconfig.test-exports.json",
-    "size": "size-limit"
+    "size": "npm run build:lib && size-limit"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.2.2",
