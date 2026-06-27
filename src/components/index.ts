@@ -1,58 +1,36 @@
-import "../styles.css";
+/**
+ * Sorokit UI - React components for Stellar/Soroban development
+ * 
+ * @packageDocumentation
+ * 
+ * @example
+ * ```tsx
+ * import { SorokitProvider, SorobanPanel } from 'sorokit-ui';
+ * 
+ * export function App() {
+ *   return (
+ *     <SorokitProvider>
+ *       <SorobanPanel />
+ *     </SorokitProvider>
+ *   );
+ * }
+ * ```
+ */
 
-// UI primitives
-export { Button } from "./ui/Button";
-export {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from "./ui/Card";
-export { Badge } from "./ui/Badge";
-export { Input } from "./ui/Input";
-export { Skeleton, SkeletonRow, SkeletonCard, AssetRowSkeleton } from "./ui/Skeleton";
+// Export all components
+export { SorobanPanel } from './SorobanPanel';
+export { TransactionPanel } from './TransactionPanel';
+export { ErrorBoundary } from './ErrorBoundary';
+export type { ErrorBoundaryProps } from './ErrorBoundary';
+export { FeeEstimator } from './FeeEstimator';
+export type { FeeEstimatorProps } from './FeeEstimator';
+export { ContractEventFeed } from './ContractEventFeed';
+export type { ContractEventFeedProps } from './ContractEventFeed';
 
-// Error handling
-export { ErrorBoundary } from "./ErrorBoundary";
+// Export providers and hooks
+export { SorokitProvider } from './providers/SorokitProvider';
+export { useClient } from './hooks/useClient';
 
-// Wallet
-export { WalletConnectButton } from "./WalletConnectButton";
-export { AccountCard, AccountCardCompact } from "./AccountCard";
-export { BalanceList } from "./BalanceList";
-
-// Assets
-export { AssetBadge, AssetPill } from "./AssetBadge";
-
-// Address
-export { AddressDisplay } from "./AddressDisplay";
-
-// Network
-export { NetworkSwitcher } from "./NetworkSwitcher";
-export { NetworkBanner } from "./NetworkBanner";
-
-// Transactions
-export { TransactionPanel } from "./TransactionPanel";
-export { TransactionHistory } from "./TransactionHistory";
-export { FeeEstimator } from "./FeeEstimator";
-export { ClaimableBalanceCard } from "./ClaimableBalanceCard";
-
-// Soroban
-export { SorobanPanel } from "./SorobanPanel";
-export { SorobanInvokeButton } from "./SorobanInvokeButton";
-export { ContractEventFeed } from "./ContractEventFeed";
-
-// Utilities
-export { QRCode } from "./QRCode";
-
-// Types
-export type {
-  AccountData,
-  Balance,
-  Transaction,
-  ClaimableBalance,
-  ContractEvent,
-  NetworkInfo,
-  InvokeParams,
-} from "../lib/client";
+// Export types
+export type { SorokitClient } from '../lib/client';
+export type { Transaction, ContractEvent } from '../lib/types';
