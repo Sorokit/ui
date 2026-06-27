@@ -45,7 +45,7 @@ describe("truncateAddress", () => {
 
   it("uses the provided start and end parameters", () => {
     const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
-    expect(truncateAddress(address, 8, 6)).toBe("GAAZI4TC...CCWNA");
+    expect(truncateAddress(address, 8, 6)).toBe("GAAZI4TC...OCCWNA");
   });
 
   it("returns full string when exactly at start + end boundary", () => {
