@@ -38,4 +38,15 @@ describe("mock-client", () => {
 
     expect(hashes1).toEqual(hashes2);
   });
+
+  it("verifies getHistory respects the limit parameter", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+    
+    const limit = 3;
+    const res = await client.transaction.getHistory("address", 1, limit);
+    
+    expect(res.data).toBeDefined();
+    expect(res.data?.length).toBe(limit);
+  });
 });
