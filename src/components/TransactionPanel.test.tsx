@@ -1,4 +1,5 @@
 import { act,fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -17,6 +18,25 @@ vi.mock("@/lib/client", () => ({
 const DEFAULT_FEE = { baseFee: "100", recommended: "100" };
 const VALID_DEST = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
 const MOCK_SOURCE = "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA";
+
+/**
+ * Builds a useSorokit() mock return value with `client` wired to the
+ * getClient mock. Since #452/#453/#454/#455 the panel reads `client` from
+ * the useSorokit() context (via `const { client } = useSorokit()`), so a
+ * plain object literal with no `client` key makes submitTransaction short-
+ * circuit at `if (!address || !client)` and report "Wallet not connected".
+ * Every override in this file must go through this helper.
+ */
+function mockUseSorokitValue(
+  overrides: Record<string, unknown> = {},
+): ReturnType<typeof useSorokit> {
+  return {
+    ...overrides,
+    get client() {
+      return "client" in overrides ? overrides.client : getClient();
+    },
+  } as unknown as ReturnType<typeof useSorokit>;
+}
 
 function mockGetClient(
   submitImpl: ReturnType<typeof vi.fn>,
@@ -54,7 +74,9 @@ async function reviewAndConfirm() {
 describe("TransactionPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetClient(vi.fn().mockResolvedValue({ data: { hash: "h1", ledger: 1 }, error: null }));
+    vi.mocked(useSorokit).mockReturnValue(
+      mockUseSorokitValue({ address: "GABC", isConnected: true }),
+    );
   });
 
   it("opens a confirmation modal before submitting, showing the operation, fee, and source account", async () => {
@@ -188,11 +210,9 @@ describe("TransactionPanel", () => {
   });
 
   it("shows error if address is null at submit time", async () => {
-    vi.mocked(useSorokit).mockReturnValue({
-      address: null,
-      isConnected: true,
-      balances: [{ asset: "XLM", balance: "100" }],
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue(
+      mockUseSorokitValue({ address: null, isConnected: true }),
+    );
 
     render(<TransactionPanel />);
 
@@ -214,11 +234,12 @@ describe("TransactionPanel", () => {
   });
 
   it("shows self-payment warning when destination equals source address", async () => {
-    vi.mocked(useSorokit).mockReturnValue({
-      address: VALID_DEST,
-      isConnected: true,
-      balances: [{ asset: "XLM", balance: "100" }],
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue(
+      mockUseSorokitValue({
+        address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        isConnected: true,
+      }),
+    );
 
     render(<TransactionPanel />);
 
@@ -235,6 +256,100 @@ describe("TransactionPanel", () => {
       screen.getByText("Destination is the same as your wallet address"),
     ).toBeInTheDocument();
     expect(submitBtn).not.toBeDisabled();
+  });
+
+  // ── Submit guard and keyboard submission (#555) ───────────────────────────
+  describe("submit guard (#555)", () => {
+    const validDest =
+      "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+
+    it("disables the Send button when the destination is empty", () => {
+      render(<TransactionPanel />);
+
+      const submitBtn = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      expect(submitBtn).toBeDisabled();
+
+      // Even a valid amount is not enough — destination must be filled in.
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+      expect(submitBtn).toBeDisabled();
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: validDest },
+      });
+      expect(submitBtn).not.toBeDisabled();
+    });
+
+    it("disables the Send button when the amount is zero", () => {
+      render(<TransactionPanel />);
+
+      const submitBtn = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: validDest },
+      });
+
+      // Zero is below the 0.0000001 minimum, so the guard rejects it.
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "0" },
+      });
+      expect(screen.getByText("Amount must be greater than 0")).toBeInTheDocument();
+      expect(submitBtn).toBeDisabled();
+
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "0.0000001" },
+      });
+      expect(submitBtn).not.toBeDisabled();
+    });
+
+    it("opens the confirmation modal when Enter is pressed on the submit button", async () => {
+      // jsdom does not implement implicit form submission (Enter inside a
+      // text field), so the keyboard path is exercised the way a browser's
+      // implicit submission lands: Enter on the focused submit button.
+      const user = userEvent.setup();
+      mockGetClient(
+        vi.fn().mockResolvedValue({ data: { hash: "h1", ledger: 1 }, error: null }),
+      );
+      render(<TransactionPanel />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: validDest },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      screen.getByRole("button", { name: /^Send (XLM|USDC)/ }).focus();
+      await user.keyboard("{Enter}");
+
+      expect(
+        await screen.findByRole("dialog", { name: /confirm transaction/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("submits directly without a modal when Enter is pressed in previewMode=false", async () => {
+      const user = userEvent.setup();
+      const mockSubmit = vi
+        .fn()
+        .mockResolvedValue({ data: { hash: "h1", ledger: 1 }, error: null });
+      mockGetClient(mockSubmit);
+      render(<TransactionPanel previewMode={false} />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: validDest },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      screen.getByRole("button", { name: /^Send (XLM|USDC)/ }).focus();
+      await user.keyboard("{Enter}");
+
+      await screen.findByText("Transaction submitted");
+      expect(mockSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({ destination: validDest, amount: "10" }),
+      );
+    });
   });
 
   it("shows error for amount below minimum threshold", async () => {
@@ -378,7 +493,7 @@ describe("TransactionPanel", () => {
 
       const select = screen.getByLabelText("Asset");
       expect(select).toBeDisabled();
-      expect(select).toHaveValue("XLM");
+      expect(select).toHaveTextContent("Loading assets…");
     });
 
     it("includes the asset's issuer in the submitted payload for a non-native asset (#565)", async () => {
