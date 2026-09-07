@@ -5,7 +5,7 @@ import {
   CheckmarkCircle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -138,11 +138,17 @@ export const TxRow = memo(function TxRow({
     ? { href: explorerUrl, target: "_blank", rel: "noopener noreferrer" }
     : {};
 
+  const rowLabel = `Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`;
+
   return (
     <RowWrapper
       {...(wrapperProps as Record<string, string>)}
       role="article"
-      aria-label={`Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`}
+      aria-label={
+        explorerUrl
+          ? `${rowLabel} — view on Stellar Expert (opens in a new tab)`
+          : rowLabel
+      }
       className="flex items-center justify-between px-5 py-3.5 border-b border-line last:border-0 gap-4 hover:bg-surface-2 transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 min-w-0">

@@ -230,9 +230,17 @@ const MOCK_ALLOWANCES: AllowanceEntry[] = [
 ];
 
 /**
- * Create a mock client that satisfies the SorokitClient interface.
- * If called with an invalid network name, returns the error object
- * (backward compatible with simple-error tests).
+ * Mock Strategy:
+ * 
+ * Provides a canonical, standalone implementation of SorokitClient for development,
+ * demo mode (in main.tsx), and component/screen unit testing.
+ * 
+ * Design:
+ * - Single source of truth for mock blockchain data across the entire repository.
+ * - Instance-scoped state: Each invocation of createMockClient() creates an independent
+ *   instance with its own network and connection state, preventing test cross-contamination.
+ * - Proper pagination support: getHistory slices deterministic transaction records by
+ *   page and limit, providing distinct pages and accurate total count for TransactionHistory.
  */
 export function createMockClient(): SorokitClient;
 export function createMockClient(
@@ -241,8 +249,9 @@ export function createMockClient(
 export function createMockClient(
   networkName?: string,
 ): SorokitClient | { data: null; error: string } {
-  const activeNetwork =
+  let activeNetwork =
     networkName && networkName in NETWORKS ? networkName : "testnet";
+  const connectedAddress = MOCK_ADDRESS;
 
   if (networkName && !(networkName in NETWORKS)) {
     const validNetworks = Object.keys(NETWORKS).join(", ");
@@ -255,12 +264,12 @@ export function createMockClient(
   return {
     wallet: {
       connect: async () => ({
-        data: { address: MOCK_ADDRESS },
+        data: { address: connectedAddress },
         error: null,
         status: "success" as const,
       }),
       disconnect: async () => {},
-      getAddress: async () => ({ data: MOCK_ADDRESS, error: null }),
+      getAddress: async () => ({ data: connectedAddress, error: null }),
     },
     account: {
       getAccount: async () => ({
@@ -405,7 +414,11 @@ export function createMockClient(
     },
     soroban: {
       invokeContract: async (_params: InvokeParams) => ({
-        data: null,
+        data: {
+          success: true,
+          result: { status: "ok", output: "mock-invoke-output" },
+          txHash: deterministicMock.generateTransactionHash(),
+        },
         error: null,
         status: "success" as const,
       }),
@@ -433,10 +446,12 @@ export function createMockClient(
       }),
       switchNetwork: async (param: NetworkName | NetworkInfo) => {
         if (typeof param === "object" && param !== null) {
+          activeNetwork = param.name;
           return { data: { status: "online", ...param }, error: null };
         }
         const info = MOCK_NETWORK_INFO[param];
         if (info) {
+          activeNetwork = param;
           return { data: info, error: null };
         }
         return { data: null, error: `Invalid network: ${param}` };

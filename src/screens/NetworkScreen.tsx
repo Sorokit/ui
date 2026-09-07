@@ -50,7 +50,6 @@ export function NetworkScreen() {
   const [switching, setSwitching] = useState<string | null>(null);
   const activeCardRef = useRef<HTMLButtonElement | null>(null);
 
-  // Scroll active card into view on mount
   useEffect(() => {
     if (activeCardRef.current) {
       activeCardRef.current.scrollIntoView({ block: "nearest" });
@@ -69,7 +68,6 @@ export function NetworkScreen() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Active network info */}
       {network && (
         <div className="rounded-xl border border-line bg-surface overflow-hidden">
           <div className="px-6 py-4 border-b border-line">
@@ -124,7 +122,6 @@ export function NetworkScreen() {
         </div>
       )}
 
-      {/* Selector */}
       <div className="flex flex-col gap-3">
         {NETWORKS.map((net) => {
           const isActive = network?.name === net.name;

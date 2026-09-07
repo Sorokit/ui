@@ -151,6 +151,9 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       {/* Sidebar panel */}
       <aside
         ref={sidebarRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
         className={cn(
           "fixed top-0 left-0 z-30 h-full flex flex-col",
           "bg-surface border-r border-line",

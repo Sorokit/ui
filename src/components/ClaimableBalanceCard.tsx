@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -27,11 +27,20 @@ interface BalanceRowProps {
   cb: ClaimableBalance;
   confirmThreshold?: string;
   currentTime?: number;
-  /** Called with the balance's id once it has been successfully claimed. */
+  /**
+   * Issue #441: called with the balance id once a claim resolves successfully so
+   * the parent can drop the row from its list straight away (optimistic update)
+   * instead of leaving a stale row behind a "Claimed" badge.
+   */
   onClaimed?: (id: string) => void;
 }
 
-function BalanceRow({ cb, confirmThreshold, currentTime = Date.now(), onClaimed }: BalanceRowProps) {
+function BalanceRow({
+  cb,
+  confirmThreshold,
+  currentTime = Date.now(),
+  onClaimed,
+}: BalanceRowProps) {
   const { client } = useSorokit();
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
@@ -45,6 +54,7 @@ function BalanceRow({ cb, confirmThreshold, currentTime = Date.now(), onClaimed 
   const amountNum = parseFloat(cb.amount);
   const expired = cb.claimants.some((c) => isPredicateExpired(c.predicate, currentTime));
 
+  // Resolves #580: properly handles claim errors and delegates row removal on success
   async function handleClaim() {
     if (confirmThreshold && amountNum >= parseFloat(confirmThreshold)) {
       setShowConfirm(true);
@@ -54,29 +64,47 @@ function BalanceRow({ cb, confirmThreshold, currentTime = Date.now(), onClaimed 
   }
 
   async function doClaim() {
-    if (!client) return;
+    if (!client) {
+      // Issue #441: never leave the row stuck in a loading state when there is
+      // no client to claim with - surface it instead.
+      setClaimError("Wallet client unavailable");
+      return;
+    }
     setClaiming(true);
     setClaimError(null);
     setShowConfirm(false);
     try {
       const { data, error } = await client.account.claimBalance(cb.id);
       if (error) {
+        // Issue #441: a failed claim shows an inline error and returns the
+        // button to its normal state so the user can retry.
         setClaimError(error);
+        setClaiming(false);
         return;
       }
       if (!data) {
-        setClaimError("Claim did not complete — please try again");
+        setClaimError("Claim did not complete");
+        setClaiming(false);
         return;
       }
       setClaimed(true);
+      setClaiming(false);
+      // Issue #441: hand the id up so the parent removes this row immediately;
+      // the local `claimed` flag only covers the standalone/no-handler case.
       onClaimed?.(cb.id);
-    } finally {
+    } catch (err) {
+      // Issue #441: claimBalance may reject (network/wallet throw). Catching it
+      // here keeps the rejection from escaping as an unhandled promise and
+      // still re-enables the button.
+      setClaimError(err instanceof Error ? err.message : "Claim failed");
       setClaiming(false);
     }
   }
 
   function handleCopyId() {
-    navigator.clipboard.writeText(cb.id);
+    // Issue #441: writeText returns a promise that rejects when the clipboard
+    // is blocked - swallow it so it is never an unhandled rejection.
+    void Promise.resolve(navigator.clipboard?.writeText(cb.id)).catch(() => {});
     setCopiedId(true);
     setTimeout(() => setCopiedId(false), 1600);
   }
@@ -119,13 +147,19 @@ function BalanceRow({ cb, confirmThreshold, currentTime = Date.now(), onClaimed 
             size="sm"
             loading={claiming}
             disabled={expired}
-            onClick={handleClaim}
+            onClick={() => void handleClaim()}
             className={cn("shrink-0", expired && "opacity-40 cursor-not-allowed")}
           >
             Claim
           </Button>
           {claimError && (
-            <span className="text-[10px] text-red max-w-[150px] text-right truncate">
+            /* Issue #441: inline, wrapped (not truncated) and announced so a
+               failed claim is actually visible on the affected row. */
+            <span
+              role="alert"
+              data-testid={`claim-error-${cb.id}`}
+              className="text-[10px] text-red max-w-[150px] text-right break-words"
+            >
               {claimError}
             </span>
           )}
@@ -147,7 +181,7 @@ function BalanceRow({ cb, confirmThreshold, currentTime = Date.now(), onClaimed 
               <Button variant="ghost" size="sm" onClick={() => setShowConfirm(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" size="sm" onClick={doClaim}>
+              <Button variant="primary" size="sm" onClick={() => void doClaim()}>
                 Confirm
               </Button>
             </div>
@@ -167,15 +201,42 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
   const [balances, setBalances] = useState<ClaimableBalance[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Issue #441: bumped after every successful claim to re-fetch the list so it
+  // stays server-consistent.
+  const [refreshKey, setRefreshKey] = useState(0);
+  // Issue #441: ids claimed in this session. Horizon can still return a just
+  // claimed balance for a short while, so the re-fetch is filtered against this
+  // set - otherwise the row the user just claimed would pop back in.
+  const claimedIdsRef = useRef<Set<string>>(new Set());
+  // Issue #441: marks the next fetch as a post-claim refresh, which must not
+  // swap the already-rendered rows out for the loading skeleton.
+  const backgroundRefreshRef = useRef(false);
+
+  useEffect(() => {
+    claimedIdsRef.current = new Set();
+  }, [address, client]);
+
+  const handleClaimed = useCallback((id: string) => {
+    // Issue #441: optimistic removal - the row disappears as soon as the claim
+    // resolves, then we ask the server for a fresh list.
+    claimedIdsRef.current.add(id);
+    setBalances((prev) => prev.filter((b) => b.id !== id));
+    backgroundRefreshRef.current = true;
+    setRefreshKey((k) => k + 1);
+  }, []);
 
   useEffect(() => {
     if (!address || !client) {
       return;
     }
 
+    const background = backgroundRefreshRef.current;
+    backgroundRefreshRef.current = false;
+
     let active = true;
     const timerId = window.setTimeout(() => {
-      setLoading(true);
+      if (!background) setLoading(true);
+      setError(null);
       client
         .account.getClaimableBalances(address)
         .then(({ data, error: err }) => {
@@ -184,10 +245,20 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
             setError(err);
             return;
           }
-          setBalances(data ?? []);
+          setBalances(
+            (data ?? []).filter((b) => !claimedIdsRef.current.has(b.id)),
+          );
+        })
+        .catch((err: unknown) => {
+          // Issue #441: a rejected fetch used to escape as an unhandled
+          // rejection and pin the card in its loading state.
+          if (!active) return;
+          setError(
+            err instanceof Error ? err.message : "Failed to load claimable balances",
+          );
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (active && !background) setLoading(false);
         });
     }, 0);
 
@@ -195,11 +266,7 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [address, client]);
-
-  function handleClaimed(id: string) {
-    setBalances((prev) => prev.filter((b) => b.id !== id));
-  }
+  }, [address, client, refreshKey]);
 
   if (!isConnected) return null;
 

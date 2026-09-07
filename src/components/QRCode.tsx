@@ -9,7 +9,7 @@ function readCssColor(variable: string, fallback: string): string {
     .getPropertyValue(variable)
     .trim();
   return value || fallback;
-}
+}  
 
 interface QRCodeProps {
   value: string;

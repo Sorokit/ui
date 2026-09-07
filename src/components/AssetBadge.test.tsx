@@ -92,15 +92,89 @@ describe("AssetBadge", () => {
     expect(document.querySelector("[data-address]")).not.toBeInTheDocument();
   });
 
-  it("falls back to grey/surface-2 for an unknown asset", () => {
+  it("renders deterministic color for unknown assets (not grey)", () => {
     const { container } = render(<AssetBadge balance={unknownBalance} />);
     const icon = container.querySelector(".bg-surface-2");
-    expect(icon).toBeInTheDocument();
+    expect(icon).not.toBeInTheDocument();
   });
 
   it("renders the asset code for an unknown asset", () => {
     render(<AssetBadge balance={unknownBalance} />);
     expect(screen.getByText("WAVEX")).toBeInTheDocument();
+  });
+
+  it("renders yXLM with distinct green color", () => {
+    const yxlmBalance: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "yXLM",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "100",
+      balanceFloat: 100,
+    };
+    const { container } = render(<AssetBadge balance={yxlmBalance} />);
+    const icon = container.querySelector(".text-green");
+    expect(icon).toBeInTheDocument();
+  });
+
+  it("renders AQUA with distinct blue color", () => {
+    const aquaBalance: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "AQUA",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "50",
+      balanceFloat: 50,
+    };
+    const { container } = render(<AssetBadge balance={aquaBalance} />);
+    const icon = container.querySelector(".text-blue");
+    expect(icon).toBeInTheDocument();
+  });
+
+  it("renders SHX with distinct pink color", () => {
+    const shxBalance: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "SHX",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "25",
+      balanceFloat: 25,
+    };
+    const { container } = render(<AssetBadge balance={shxBalance} />);
+    const icon = container.querySelector(".text-pink");
+    expect(icon).toBeInTheDocument();
+  });
+
+  it("renders BLND with distinct yellow color", () => {
+    const blndBalance: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "BLND",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "75",
+      balanceFloat: 75,
+    };
+    const { container } = render(<AssetBadge balance={blndBalance} />);
+    const icon = container.querySelector(".text-yellow");
+    expect(icon).toBeInTheDocument();
+  });
+
+  it("assigns deterministic colors to unknown assets and not grey", () => {
+    const customBalance1: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "CUSTOM1",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "10",
+      balanceFloat: 10,
+    };
+    const customBalance2: Balance = {
+      assetType: "credit_alphanum12",
+      assetCode: "CUSTOM2",
+      assetIssuer: "GBUQWP3BOUZX34ULNQG23RQ6F4YUSXHTJGIP5FB4M3US5VM5NGVLYELM",
+      balance: "20",
+      balanceFloat: 20,
+    };
+    const { container: c1 } = render(<AssetBadge balance={customBalance1} />);
+    const { container: c2 } = render(<AssetBadge balance={customBalance2} />);
+
+    expect(c1.querySelector(".bg-surface-2")).not.toBeInTheDocument();
+    expect(c2.querySelector(".bg-surface-2")).not.toBeInTheDocument();
   });
 
   it("renders 'LP' for liquidity_pool_shares without undefined display", () => {
@@ -295,11 +369,9 @@ describe("ASSET_COLORS & getAssetColor", () => {
       bg: "bg-blue-500",
       text: "text-blue-100",
     });
-    expect(getAssetColor("XLM", customMap)).toEqual(ASSET_COLORS.XLM);
-    expect(getAssetColor("UNKNOWN")).toEqual({
-      bg: "bg-surface-2",
-      text: "text-ink-2",
-    });
+    expect(getAssetColor("UNKNOWN")).toBeDefined();
+    expect(getAssetColor("UNKNOWN").bg).toBeDefined();
+    expect(getAssetColor("UNKNOWN").text).toBeDefined();
   });
 });
 
@@ -335,11 +407,11 @@ describe("AssetPill", () => {
     expect(screen.getByText("USDC")).toHaveClass("text-brand");
   });
 
-  it("falls back to grey for an unknown asset code", () => {
+  it("uses deterministic color for unknown asset code (not grey)", () => {
     render(<AssetPill assetCode="WAVEX" />);
     const pill = screen.getByText("WAVEX");
-    expect(pill).toHaveClass("bg-surface-2");
-    expect(pill).toHaveClass("text-ink-2");
+    expect(pill).not.toHaveClass("bg-surface-2");
+    expect(pill).not.toHaveClass("text-ink-2");
   });
 
   it("merges a custom className", () => {

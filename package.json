@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "React components for Stellar/Soroban development",
-  "main": "dist/sorokit-ui.cjs",
-  "module": "dist/sorokit-ui.es.js",
-  "types": "dist/components/index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md",
@@ -25,10 +25,11 @@
   "homepage": "https://github.com/Just-Bamford/sorokit-ui#readme",
   "exports": {
     ".": {
-      "types": "./dist/components/index.d.ts",
-      "import": "./dist/sorokit-ui.es.js",
-      "require": "./dist/sorokit-ui.cjs"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
+    "./style.css": "./dist/style.css",
     "./styles": "./dist/style.css"
   },
   "scripts": {
@@ -37,6 +38,7 @@
     "build:app": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:coverage": "vitest --coverage",
     "test:exports": "tsc -p tsconfig.test-exports.json",
@@ -69,11 +71,12 @@
     "react-json-view-lite": "^2.5.0",
     "sorokit-core": ">=0.1.0",
     "tailwind-merge": "^3.5.0",
-    "tailwindcss": "^3.0.0"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@axe-core/cli": "^4.12.1",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@size-limit/preset-small-lib": "^12.1.0",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
@@ -100,9 +103,8 @@
   "size-limit": [
     {
       "name": "ES module (gzip)",
-      "path": "dist/sorokit-ui.es.js",
+      "path": "dist/index.js",
       "limit": "150 kB",
-      "gzip": true,
       "ignore": [
         "react",
         "react-dom",
@@ -116,9 +118,8 @@
     },
     {
       "name": "CommonJS (gzip)",
-      "path": "dist/sorokit-ui.cjs",
+      "path": "dist/index.cjs",
       "limit": "150 kB",
-      "gzip": true,
       "ignore": [
         "react",
         "react-dom",
@@ -134,7 +135,7 @@
   "peerDependencies": {
     "@creit.tech/stellar-wallets-kit": ">=1.0.0",
     "sorokit-core": ">=0.1.0",
-    "tailwindcss": "^3.0.0"
+    "tailwindcss": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@creit.tech/stellar-wallets-kit": {

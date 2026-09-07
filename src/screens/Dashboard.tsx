@@ -1,5 +1,6 @@
 import { type ComponentType, lazy, Suspense, useCallback, useEffect, useState } from "react";
 
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
@@ -62,6 +63,51 @@ const SCREENS: Record<NavSection, ComponentType> = {
   budget: BudgetScreen,
   nfts: NFTScreen,
 };
+
+const SCREEN_LABELS: Record<NavSection, string> = {
+  wallet: "Wallet",
+  account: "Account",
+  transactions: "Transactions",
+  soroban: "Soroban",
+  network: "Network",
+  recovery: "Recovery",
+  charts: "Charts",
+  farming: "Yield Farming",
+  budget: "Budget",
+  nfts: "NFTs",
+};
+
+/**
+ * Fallback shown when a single screen's ErrorBoundary catches a render
+ * error. Scoped to the screen's own area — Sidebar, TopBar, and the other
+ * (hidden) screens are rendered by Dashboard outside this boundary, so a
+ * crash here never tears down the rest of the shell.
+ */
+function ScreenErrorFallback({
+  screenName,
+  onRetry,
+}: {
+  screenName: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      <p className="text-[13px] font-medium text-ink">
+        {screenName} couldn't load
+      </p>
+      <p className="text-[12px] text-ink-3">
+        Something went wrong rendering this screen. The rest of the dashboard
+        is unaffected.
+      </p>
+      <button
+        onClick={onRetry}
+        className="inline-flex items-center h-8 px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 text-[12px] text-ink-2 transition-colors cursor-pointer"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
 
 export interface DashboardProps {
   /** Max width of the main content column. Defaults to "700px". */
@@ -143,9 +189,19 @@ export function Dashboard({
                   hidden={section !== active}
                   data-testid={`screen-wrapper-${section}`}
                 >
-                  <Suspense fallback={null}>
-                    <Screen />
-                  </Suspense>
+                  <ErrorBoundary
+                    isolate
+                    fallback={(_error, reset) => (
+                      <ScreenErrorFallback
+                        screenName={SCREEN_LABELS[section]}
+                        onRetry={reset}
+                      />
+                    )}
+                  >
+                    <Suspense fallback={null}>
+                      <Screen />
+                    </Suspense>
+                  </ErrorBoundary>
                 </div>
               );
             })}

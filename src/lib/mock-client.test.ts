@@ -90,9 +90,8 @@ describe("mock-client", () => {
     expect(res.total).toBe(MOCK_HISTORY.length);
   });
 
-  it("verifies getHistory returns distinct pages via the page parameter", async () => {
-    const { createMockClient } = await import("./mock-client");
-    const { MOCK_HISTORY } = await import("./mock-client");
+  it("verifies getHistory paginates correctly across multiple pages", async () => {
+    const { createMockClient, MOCK_HISTORY } = await import("./mock-client");
     const client = createMockClient();
 
     const limit = 2;
@@ -108,4 +107,53 @@ describe("mock-client", () => {
     expect(page2.data?.[0].hash).toBe(MOCK_HISTORY[limit].hash);
     expect(page1.total).toBe(MOCK_HISTORY.length);
   });
+
+  // Issue #573 — the Soroban screen must be functional against the mock
+  // client: invokeContract/simulateContract return real result data (never
+  // "Not implemented") and getEvents returns actual events.
+  it("verifySoroban invokeContract resolves with result data, not 'Not implemented'", async () => {
+    const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.invokeContract({
+      contractId: "C123",
+      method: "transfer",
+      args: [],
+      sourceAccount: mockAddress,
+    });
+
+    expect(res.error).toBeNull();
+    expect(res.status).toBe("success");
+    expect(res.data).not.toBeNull();
+    expect(res.data).not.toBe("Not implemented");
+    expect(res.data).toHaveProperty("success", true);
+    expect(res.data).toHaveProperty("txHash");
+  });
+
+  it("verifySoroban simulateContract resolves with result data", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.simulateContract({
+      contractId: "C123",
+      method: "balance",
+      args: [{ address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA" }],
+    });
+
+    expect(res.error).toBeNull();
+    expect(res.status).toBe("success");
+    expect(res.data).not.toBeNull();
+  });
+
+  it("verifySoroban getEvents returns event data for a contract", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.getEvents("C123", 10);
+
+    expect(res.error).toBeNull();
+    expect(Array.isArray(res.data)).toBe(true);
+    expect(res.data!.length).toBeGreaterThan(0);
+  });
 });
+

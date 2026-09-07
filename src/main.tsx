@@ -3,15 +3,19 @@ import './index.css'
 import React, { useCallback,useState } from 'react'
 import ReactDOM from 'react-dom/client'
 
-import App from './App.tsx'
+import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
-import type { SorokitClient } from './lib/client.ts'
+import type { SorokitClient } from './lib/client'
 import { createMockClient } from './lib/mock-client'
 
-// Client Strategy: Using createMockClient() from mock-client.ts for local development and demo mode.
-// This single authoritative mock provides realistic delays, pagination, deterministic state, and balances.
-// To connect to a live Soroban/Stellar network adapter in production, replace this factory with a real ClientAdapter.
-const createClient = (): SorokitClient => createMockClient() as SorokitClient
+const createClient = (): SorokitClient => {
+  try {
+    return createMockClient() as SorokitClient
+  } catch (err) {
+    document.getElementById('root')!.innerHTML = '<div>Failed to initialize Sorokit: ' +(err instanceof Error ? err.message : String(err)) + '</div>'
+    throw err
+  }
+}
 
 function Root() {
   const [client, setClient] = useState<SorokitClient>(createClient)

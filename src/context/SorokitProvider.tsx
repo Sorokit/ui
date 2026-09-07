@@ -149,7 +149,12 @@ export function SorokitProvider({
 
   // Load account when address changes
   useEffect(() => {
-    if (!address) return;
+    if (!address) {
+      setAccount(null);
+      setBalances([]);
+      return;
+    }
+    setAccountError(null);
 
     let active = true;
     const timerId = window.setTimeout(() => {
@@ -162,8 +167,21 @@ export function SorokitProvider({
           if (!active) return;
           if (accountRes.data) setAccount(accountRes.data);
           if (balancesRes.data) setBalances(balancesRes.data);
-          if (accountRes.error) reportError(accountRes.error, "account", "error");
-          else if (balancesRes.error) reportError(balancesRes.error, "account", "error");
+          const combined = [accountRes.error, balancesRes.error]
+            .filter(Boolean)
+            .join("; ");
+          if (combined) setAccountError(combined);
+          if (accountRes.error && balancesRes.error) {
+            reportError(
+              `${accountRes.error}; ${balancesRes.error}`,
+              "account",
+              "error",
+            );
+          } else if (accountRes.error) {
+            reportError(accountRes.error, "account", "error");
+          } else if (balancesRes.error) {
+            reportError(balancesRes.error, "account", "error");
+          }
         })
         .finally(() => {
           if (active) setIsLoadingAccount(false);
@@ -189,6 +207,8 @@ export function SorokitProvider({
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     setWalletError(null);
+    setAccountError(null);
+    setNetworkError(null);
     try {
       const name = detectWalletName();
       setWalletName(name);
@@ -323,8 +343,17 @@ export function SorokitProvider({
       ]);
       if (accountRes.data) setAccount(accountRes.data);
       if (balancesRes.data) setBalances(balancesRes.data);
-      if (accountRes.error) reportError(accountRes.error, "account", "error");
-      else if (balancesRes.error) reportError(balancesRes.error, "account", "error");
+      if (accountRes.error && balancesRes.error) {
+        reportError(
+          `${accountRes.error}; ${balancesRes.error}`,
+          "account",
+          "error",
+        );
+      } else if (accountRes.error) {
+        reportError(accountRes.error, "account", "error");
+      } else if (balancesRes.error) {
+        reportError(balancesRes.error, "account", "error");
+      }
     } finally {
       setIsLoadingAccount(false);
       isRefreshingRef.current = false;

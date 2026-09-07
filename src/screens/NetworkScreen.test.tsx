@@ -12,6 +12,7 @@ vi.mock("@/context/useSorokit", () => ({
 
 vi.mock("@hugeicons/react", () => ({
   HugeiconsIcon: "div",
+  Loading01Icon: "div",
 }));
 
 const TESTNET_NETWORK = {

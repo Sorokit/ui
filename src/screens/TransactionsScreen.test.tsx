@@ -75,7 +75,7 @@ describe("TransactionsScreen", () => {
 
   it("renders TransactionPanel with its section title", () => {
     render(<TransactionsScreen />);
-    expect(screen.getAllByText("Send Payment")[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Send (Payment|XLM)/i)[0]).toBeInTheDocument();
   });
 
   it("renders FeeEstimator above TransactionPanel in the DOM", () => {
@@ -83,7 +83,7 @@ describe("TransactionsScreen", () => {
 
     const allHeadings = Array.from(container.querySelectorAll("h3"));
     const feeHeading = screen.getByText("Network Fee");
-    const txHeading = screen.getAllByText("Send Payment").find(
+    const txHeading = screen.getAllByText(/Send (Payment|XLM)/i).find(
       (el) => el.tagName === "H3",
     );
 
@@ -103,7 +103,7 @@ describe("TransactionsScreen", () => {
 
     const allHeadings = Array.from(container.querySelectorAll("h3"));
     const feeHeading = screen.getByText("Network Fee");
-    const panelHeading = screen.getAllByText("Send Payment").find(
+    const panelHeading = screen.getAllByText(/Send (Payment|XLM)/i).find(
       (el) => el.tagName === "H3",
     );
     const timelineHeading = screen.getByText("Activity Timeline");

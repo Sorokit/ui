@@ -71,10 +71,7 @@ describe("AllowanceManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(useSorokit).mockReturnValue({
-      address: ADDRESS,
-      isConnected: true,
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue({ address: ADDRESS, isConnected: true, get client() { return getClient(); },  } as unknown as ReturnType<typeof useSorokit>);
   });
 
   afterEach(() => {

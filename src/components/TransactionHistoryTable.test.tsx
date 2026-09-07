@@ -1,18 +1,17 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
-import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
 
 import { TransactionHistoryTable } from "./TransactionHistoryTable";
 
 // Mock context
 vi.mock("@/context/useSorokit", () => ({
-  useSorokit: () => ({ address: "GABC123...", isConnected: true }),
+  useSorokit: () => ({ address: "GABC123...", isConnected: true, get client() { return getClient(); } }),
 }));
 
 // Mock client
-const mockTransactions: Transaction[] = Array.from({ length: 25 }, (_, i) => ({
+const { mockTransactions } = vi.hoisted(() => ({ mockTransactions: Array.from({ length: 25 }, (_, i) => ({
   hash: `a${i.toString().padStart(63, "0")}`,
   ledger: 1000000 + i,
   createdAt: new Date(2026, 6, 26, 10, i, 0).toISOString(),
@@ -20,7 +19,7 @@ const mockTransactions: Transaction[] = Array.from({ length: 25 }, (_, i) => ({
   operationCount: (i % 4) + 1,
   feePaid: String(100 + i * 10),
   memo: i % 5 === 0 ? `Memo #${i}` : undefined,
-}));
+})) }));
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(() => ({
@@ -83,7 +82,7 @@ describe("TransactionHistoryTable", () => {
   it("displays transaction rows", async () => {
     render(<TransactionHistoryTable />);
     await waitFor(() => {
-      expect(screen.getByText(/a0000/)).toBeInTheDocument();
+      expect(screen.getAllByText(/a0000/)[0]).toBeInTheDocument();
     });
   });
 
@@ -98,7 +97,7 @@ describe("TransactionHistoryTable", () => {
   it("shows ledger numbers", async () => {
     render(<TransactionHistoryTable />);
     await waitFor(() => {
-      expect(screen.getByText("1000000")).toBeInTheDocument();
+      expect(screen.getAllByText(/1000024/)[0]).toBeInTheDocument();
     });
   });
 

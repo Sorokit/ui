@@ -25,13 +25,87 @@ export function safeFormat(balance: string): string {
   });
 }
 
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
 /**
- * Validate a Stellar public address: must start with 'G' and be 56
- * characters of base32 (RFC 4648, no padding) — the same charset the
- * StrKey checksum encoding uses.
+ * Decodes an RFC 4648 base32 (no padding) string to raw bytes. Returns
+ * `null` for a string containing characters outside the base32 alphabet,
+ * or whose bit length doesn't cleanly resolve to a whole number of bytes
+ * with only zero-padding bits left over (a malformed encoding — a real
+ * StrKey never produces this).
+ */
+function base32Decode(input: string): Uint8Array | null {
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+
+  for (const char of input) {
+    const charValue = BASE32_ALPHABET.indexOf(char);
+    if (charValue === -1) return null;
+    value = (value << 5) | charValue;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((value >>> bits) & 0xff);
+    }
+  }
+
+  // Any bits left over must be zero padding, never real data — a decoder
+  // that ignores this would silently accept a corrupted encoding.
+  const remainderMask = (1 << bits) - 1;
+  if (bits >= 8 || (value & remainderMask) !== 0) return null;
+
+  return new Uint8Array(bytes);
+}
+
+/**
+ * CRC16/XMODEM (poly 0x1021, init 0x0000) over `bytes` — the checksum
+ * algorithm StrKey uses. Matches the reference implementation in
+ * stellar/js-stellar-base's strkey.ts.
+ */
+function crc16xmodem(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte << 8;
+    for (let i = 0; i < 8; i++) {
+      crc = crc & 0x8000 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+    }
+  }
+  return crc;
+}
+
+/** StrKey version byte for an ED25519 public key ('G...' addresses). */
+const STRKEY_VERSION_ED25519_PUBLIC_KEY = 6 << 3; // 0x30
+
+/**
+ * Validate a Stellar public address: decodes the full StrKey encoding
+ * (base32 → version byte → 32-byte raw key → CRC16/XMODEM checksum) rather
+ * than only checking the surface format. A string that merely matches
+ * `/^G[A-Z2-7]{55}$/` can still fail this — e.g. a single mistyped
+ * character produces a different checksum, so a format-only check would
+ * accept it and let it reach the network, where it fails with an opaque
+ * error rather than a clear one at input time.
+ *
+ * Deliberately re-implemented here (not imported from `@stellar/stellar-sdk`
+ * or another blockchain library) — this package has no blockchain-logic
+ * dependency by design (see README); StrKey decoding is pure data
+ * validation, not chain interaction, so it stays in scope for that
+ * constraint without pulling in a full SDK for one function.
  */
 export function validateStellarAddress(address: string): boolean {
-  return /^G[A-Z2-7]{55}$/.test(address.trim());
+  const trimmed = address.trim();
+  if (!/^G[A-Z2-7]{55}$/.test(trimmed)) return false;
+
+  const decoded = base32Decode(trimmed);
+  // 1 version byte + 32 key bytes + 2 checksum bytes = 35.
+  if (!decoded || decoded.length !== 35) return false;
+
+  const [version] = decoded;
+  if (version !== STRKEY_VERSION_ED25519_PUBLIC_KEY) return false;
+
+  const payload = decoded.subarray(0, 33); // version byte + key
+  const expectedChecksum = decoded[33] | (decoded[34] << 8); // little-endian
+  return crc16xmodem(payload) === expectedChecksum;
 }
 
 const STROOPS_PER_XLM = 10_000_000;

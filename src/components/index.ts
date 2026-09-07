@@ -36,6 +36,7 @@ export {
   CardHeader,
   CardTitle,
 } from "./ui/Card";
+export type { InfoCellProps } from "./ui/InfoCell";
 export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";

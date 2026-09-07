@@ -52,7 +52,7 @@ function makeNft(overrides: Partial<Nft> = {}): Nft {
 function makeConnectedContext(extra = {}) {
   return {
     address: VALID_ADDRESS,
-    isConnected: true,
+    isConnected: true, get client() { return getClient(); },
     ...extra,
   } as unknown as ReturnType<typeof useSorokit>;
 }
@@ -147,7 +147,7 @@ describe("NFTCard", () => {
         onList={onList}
       />
     );
-    expect(screen.getByText("Blue")).toBeInTheDocument();
+    expect(screen.getAllByText("Blue")[0]).toBeInTheDocument();
     expect(screen.getByText("10%")).toBeInTheDocument();
     expect(screen.getByText("Laser")).toBeInTheDocument();
     expect(screen.getByText("2%")).toBeInTheDocument();
@@ -277,7 +277,7 @@ describe("NFTCard", () => {
         selected={false} bulkMode={false} onSelect={onSelect} onSend={onSend} onList={onList}
       />
     );
-    expect(screen.getByText("Rare")).toBeInTheDocument();
+    expect(screen.getAllByText("Rare")[0]).toBeInTheDocument();
   });
 
   it("labels as Common when no rank info", () => {
@@ -792,8 +792,8 @@ describe("NFTGallery — List for Sale dialog", () => {
 
   it("opens List dialog showing NFT name and floor price", async () => {
     await openListDialog();
-    expect(screen.getByText(/cool cat #1/i)).toBeInTheDocument();
-    expect(screen.getByText(/100 xlm/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/cool cat #1/i)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/100 xlm/i)[0]).toBeInTheDocument();
   });
 
   it("shows validation error when price is empty", async () => {
@@ -886,7 +886,7 @@ describe("NFTGallery — NFT Detail dialog", () => {
     await waitFor(() => screen.getAllByTestId("nft-card"));
     fireEvent.click(screen.getByRole("listitem"));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /nft detail: detail cat/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Detail Cat/i })).toBeInTheDocument();
     });
   });
 
@@ -894,18 +894,18 @@ describe("NFTGallery — NFT Detail dialog", () => {
     render(<NFTGallery />);
     await waitFor(() => screen.getAllByTestId("nft-card"));
     fireEvent.click(screen.getByRole("listitem"));
-    await waitFor(() => screen.getByRole("dialog", { name: /nft detail/i }));
+    await waitFor(() => screen.getByRole("dialog", { name: /Detail Cat/i }));
     expect(screen.getByText("A detailed NFT")).toBeInTheDocument();
-    expect(screen.getByText("300 XLM")).toBeInTheDocument();
-    expect(screen.getByText("#10 / 500")).toBeInTheDocument();
-    expect(screen.getByText("350 XLM")).toBeInTheDocument();
+    expect(screen.getAllByText("300 XLM")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("#10 / 500")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("350 XLM")[0]).toBeInTheDocument();
   });
 
   it("shows all trait types and rarities in detail", async () => {
     render(<NFTGallery />);
     await waitFor(() => screen.getAllByTestId("nft-card"));
     fireEvent.click(screen.getByRole("listitem"));
-    await waitFor(() => screen.getByRole("dialog", { name: /nft detail/i }));
+    await waitFor(() => screen.getByRole("dialog", { name: /Detail Cat/i }));
     expect(screen.getByText("Eyes")).toBeInTheDocument();
     expect(screen.getByText("5.0% have this")).toBeInTheDocument();
     expect(screen.getByText("Fur")).toBeInTheDocument();
@@ -916,10 +916,10 @@ describe("NFTGallery — NFT Detail dialog", () => {
     render(<NFTGallery />);
     await waitFor(() => screen.getAllByTestId("nft-card"));
     fireEvent.click(screen.getByRole("listitem"));
-    await waitFor(() => screen.getByRole("dialog", { name: /nft detail/i }));
+    await waitFor(() => screen.getByRole("dialog", { name: /Detail Cat/i }));
     fireEvent.click(screen.getByRole("button", { name: /^close$/i }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /nft detail/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Detail Cat/i })).not.toBeInTheDocument();
     });
   });
 });

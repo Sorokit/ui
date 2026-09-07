@@ -5,6 +5,7 @@ import { afterEach } from "vitest";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
 });
 
 // Node's experimental global Web Storage API (stable default as of Node 22+)
@@ -72,3 +73,8 @@ if (!Element.prototype.hasPointerCapture) {
   Element.prototype.setPointerCapture = () => {};
   Element.prototype.releasePointerCapture = () => {};
 }
+
+vi.mock('@hugeicons/react', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, Loading01Icon: actual.Loading01Icon || (() => null) };
+});

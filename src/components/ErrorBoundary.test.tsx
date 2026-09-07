@@ -1,10 +1,22 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ErrorBoundary } from "./ErrorBoundary";
 
-const ThrowError = () => {
-  throw new Error("Test error!");
+interface ThrowingComponentProps {
+  shouldThrow?: boolean;
+  errorMessage?: string;
+}
+
+const ThrowingComponent = ({
+  shouldThrow = true,
+  errorMessage = "Test error!",
+}: ThrowingComponentProps) => {
+  if (shouldThrow) {
+    throw new Error(errorMessage);
+  }
+  return <div data-testid="child-content">Children rendered successfully</div>;
 };
 
 afterEach(() => {
@@ -13,25 +25,113 @@ afterEach(() => {
 });
 
 describe("ErrorBoundary", () => {
-  it("renders default fallback when child throws, and resets when try again is clicked", () => {
+  it("renders children normally when there is no error", () => {
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent shouldThrow={false} />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByTestId("child-content")).toBeInTheDocument();
+    expect(screen.getByText("Children rendered successfully")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
+  });
+
+  it("renders fallback UI when a child component throws during render", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     render(
       <ErrorBoundary>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
-    // Expect default fallback UI text
     expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-    expect(screen.getByText("Test error!")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "An unexpected error occurred. You can try reloading the page or resetting the component."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("child-content")).not.toBeInTheDocument();
+  });
 
-    const resetBtn = screen.getByRole("button", { name: /try again/i });
-    expect(resetBtn).toBeInTheDocument();
+  it("displays the error message text in the fallback UI", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
 
-    // Clicking reset should try to re-render the children
-    // (It will just throw again because we always throw in ThrowError, but it resets state)
-    fireEvent.click(resetBtn);
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent
+          shouldThrow={true}
+          errorMessage="Custom failed render error"
+        />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByText("Custom failed render error")).toBeInTheDocument();
+  });
+
+  it("clicking Try again resets the boundary and re-renders children", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const TestWrapper = () => {
+      const [shouldThrow, setShouldThrow] = useState(true);
+      return (
+        <div>
+          <button onClick={() => setShouldThrow(false)}>Fix Error</button>
+          <ErrorBoundary>
+            <ThrowingComponent
+              shouldThrow={shouldThrow}
+              errorMessage="Temporary crash"
+            />
+          </ErrorBoundary>
+        </div>
+      );
+    };
+
+    render(<TestWrapper />);
+
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText("Temporary crash")).toBeInTheDocument();
+    expect(screen.queryByTestId("child-content")).not.toBeInTheDocument();
+
+    // Fix the error condition in child component
+    fireEvent.click(screen.getByText("Fix Error"));
+
+    // Click 'Try again' to trigger boundary reset()
+    const tryAgainBtn = screen.getByRole("button", { name: /try again/i });
+    fireEvent.click(tryAgainBtn);
+
+    // Verify children re-rendered
+    expect(screen.getByTestId("child-content")).toBeInTheDocument();
+    expect(screen.getByText("Children rendered successfully")).toBeInTheDocument();
+    expect(screen.queryByText("Something went wrong")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Reload page' button in the fallback UI", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const originalLocation = window.location;
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, reload: reloadMock },
+    });
+
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent shouldThrow={true} />
+      </ErrorBoundary>,
+    );
+
+    const reloadBtn = screen.getByRole("button", { name: /reload page/i });
+    expect(reloadBtn).toBeInTheDocument();
+
+    fireEvent.click(reloadBtn);
+    expect(reloadMock).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: originalLocation,
+    });
   });
 
   it("renders custom fallback prop and passes error and reset function", () => {
@@ -43,12 +143,11 @@ describe("ErrorBoundary", () => {
       </div>
     ));
 
-    // Suppress console.error for expected thrown error
     vi.spyOn(console, "error").mockImplementation(() => {});
 
     render(
       <ErrorBoundary fallback={fallbackSpy}>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -59,8 +158,6 @@ describe("ErrorBoundary", () => {
     const resetBtn = screen.getByText("Reset Custom");
     expect(resetBtn).toBeInTheDocument();
 
-    // Reset should be callable and reset the error state (though it will just throw again because we still render ThrowError)
-    // but we can verify it doesn't crash.
     fireEvent.click(resetBtn);
   });
 
@@ -70,7 +167,7 @@ describe("ErrorBoundary", () => {
 
     render(
       <ErrorBoundary onError={onErrorSpy}>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -94,7 +191,7 @@ describe("ErrorBoundary", () => {
 
     render(
       <ErrorBoundary>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -112,7 +209,7 @@ describe("ErrorBoundary", () => {
 
     render(
       <ErrorBoundary onError={onErrorSpy}>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -130,7 +227,7 @@ describe("ErrorBoundary", () => {
 
     render(
       <ErrorBoundary>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -177,7 +274,7 @@ describe("ErrorBoundary", () => {
 
     render(
       <ErrorBoundary onRetry={onRetry}>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -199,7 +296,7 @@ describe("ErrorBoundary", () => {
           <button onClick={reset}>Reset Custom</button>
         )}
       >
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -240,7 +337,7 @@ describe("ErrorBoundary", () => {
 
     const { container } = render(
       <ErrorBoundary isolate>
-        <ThrowError />
+        <ThrowingComponent shouldThrow={true} />
       </ErrorBoundary>
     );
 
@@ -258,7 +355,7 @@ describe("ErrorBoundary", () => {
 
       render(
         <ErrorBoundary supportUrl="https://github.com/Sorokit/ui/issues">
-          <ThrowError />
+          <ThrowingComponent shouldThrow={true} />
         </ErrorBoundary>
       );
 
@@ -274,11 +371,13 @@ describe("ErrorBoundary", () => {
 
       render(
         <ErrorBoundary>
-          <ThrowError />
+          <ThrowingComponent shouldThrow={true} />
         </ErrorBoundary>
       );
 
-      expect(screen.queryByRole("link", { name: /report this issue/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /report this issue/i })
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -289,7 +388,7 @@ describe("ErrorBoundary", () => {
 
       render(
         <ErrorBoundary>
-          <ThrowError />
+          <ThrowingComponent shouldThrow={true} />
         </ErrorBoundary>
       );
 
@@ -297,7 +396,7 @@ describe("ErrorBoundary", () => {
       expect(details).toBeInTheDocument();
       const pre = details!.querySelector("pre");
       expect(pre).toBeInTheDocument();
-      expect(pre!.textContent).toContain("ThrowError");
+      expect(pre!.textContent).toContain("ThrowingComponent");
     });
 
     it("does not show the component stack in production mode", () => {
@@ -306,7 +405,7 @@ describe("ErrorBoundary", () => {
 
       render(
         <ErrorBoundary>
-          <ThrowError />
+          <ThrowingComponent shouldThrow={true} />
         </ErrorBoundary>
       );
 

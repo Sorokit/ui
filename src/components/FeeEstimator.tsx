@@ -1,10 +1,11 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useSorokit } from "@/context/useSorokit";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import { cn, toXLM } from "@/lib/utils";
 
 export interface FeeData {
@@ -29,15 +30,32 @@ export function FeeEstimator({
   onFeeLoad,
 }: FeeEstimatorProps) {
   const { client } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [fee, setFee] = useState<FeeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Issue #442: `onFeeLoad` is normally an inline arrow, so it had a new
+  // identity on every parent render. As a `load` dependency that rebuilt
+  // `load`, re-ran the effect and fired another request per render (and the
+  // callback itself usually sets parent state, so it fed itself). Kept in a ref
+  // instead: the latest callback is always used, but `load` only depends on
+  // `client`, so mount performs exactly one request.
+  const onFeeLoadRef = useRef(onFeeLoad);
+  useEffect(() => {
+    onFeeLoadRef.current = onFeeLoad;
+  }, [onFeeLoad]);
+  // Issue #442: generation counter - an estimate that resolves after a newer
+  // one started is discarded rather than overwriting fresher data.
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!client) return;
+    const requestId = ++requestIdRef.current;
+    const isStale = () => requestId !== requestIdRef.current;
     setLoading(true);
     try {
       const { data, error: err } = await client.transaction.estimateFee();
+      if (isStale()) return;
       if (err) {
         setError(err);
         return;
@@ -45,14 +63,26 @@ export function FeeEstimator({
       setFee(data);
       setError(null);
       if (data) {
-        onFeeLoad?.(data);
+        onFeeLoadRef.current?.(data);
       }
     } finally {
-      setLoading(false);
+      // Issue #442: a stale call must not clear the spinner owned by the
+      // request that superseded it.
+      if (!isStale()) setLoading(false);
     }
-  }, [client, onFeeLoad]);
+  }, [client]);
 
+  // Issue #442: one effect owns both the initial fetch and the poll timer, so
+  // mount makes exactly one request and a changed `refreshInterval` re-arms the
+  // timer at the new period.
   useEffect(() => {
+    // Dashboard keeps a visited screen mounted (rather than unmounting it)
+    // to preserve in-progress state — see the comment in Dashboard.tsx.
+    // That means a screen navigated away from is still mounted, just
+    // hidden; without this check, a refreshInterval keeps firing network
+    // requests for a screen the user can no longer see (#533).
+    if (!isVisible) return;
+
     const timerId = window.setTimeout(() => {
       void load();
     }, 0);
@@ -68,7 +98,7 @@ export function FeeEstimator({
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [load, refreshInterval]);
+  }, [load, refreshInterval, isVisible]);
 
   const compactContent = fee
     ? `Base: ${fee.baseFee} stroops · Recommended: ${fee.recommended} stroops`
@@ -76,6 +106,7 @@ export function FeeEstimator({
 
   return (
     <div
+      ref={containerRef}
       role="region"
       aria-label="Network fee estimate"
       className={cn(

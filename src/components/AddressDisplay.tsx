@@ -1,6 +1,6 @@
 import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Tooltip } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/utils";
@@ -36,9 +36,22 @@ const FAILED_RESET_MS = 1500;
 function copyViaExecCommand(text: string): boolean {
   const textarea = document.createElement("textarea");
   textarea.value = text;
+  // `readOnly` keeps mobile browsers from raising the on-screen keyboard for
+  // the throwaway textarea while it is focused for the copy.
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
   textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
   textarea.style.opacity = "0";
   textarea.style.pointerEvents = "none";
+
+  // `textarea.select()` replaces whatever the user currently has highlighted
+  // on the page, so capture the existing range and put it back afterwards.
+  const selection = document.getSelection();
+  const previousRange =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
   document.body.appendChild(textarea);
   textarea.select();
   textarea.setSelectionRange(0, text.length);
@@ -49,6 +62,10 @@ function copyViaExecCommand(text: string): boolean {
     succeeded = false;
   } finally {
     document.body.removeChild(textarea);
+    if (previousRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
   }
   return succeeded;
 }
@@ -75,6 +92,17 @@ export function AddressDisplay({
       resetTimerRef.current = null;
     }
   }
+
+  // Without this, unmounting inside the copied/failed reset window leaves a
+  // pending timeout that fires setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
 
   async function copy() {
     clearResetTimer();
@@ -154,6 +182,19 @@ export function AddressDisplay({
           />
         </button>
       </Tooltip>
+      {/*
+        The icon swap and the button's aria-label are not reliably announced by
+        screen readers, so the copy result - especially a failure in a
+        non-secure context - was silent for assistive technology. This live
+        region announces both outcomes.
+      */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {copyFailed
+          ? "Failed to copy address"
+          : copied
+            ? "Address copied to clipboard"
+            : ""}
+      </span>
     </div>
   );
 

@@ -209,10 +209,7 @@ describe("TransactionHistory", () => {
     });
 
     // Switch wallet address to account B
-    vi.mocked(useSorokit).mockReturnValue({
-      address: ADDRESS_B,
-      isConnected: true,
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue({ address: ADDRESS_B, isConnected: true, get client() { return getClient(); },  } as unknown as ReturnType<typeof useSorokit>);
 
     rerender(<TransactionHistory />);
     act(() => { vi.advanceTimersByTime(0); });
@@ -253,10 +250,7 @@ describe("TransactionHistory", () => {
     await waitFor(() => screen.getByText(/25 transactions/i));
 
     // Switch wallet address to account B (fetch remains pending)
-    vi.mocked(useSorokit).mockReturnValue({
-      address: ADDRESS_B,
-      isConnected: true,
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue({ address: ADDRESS_B, isConnected: true, get client() { return getClient(); },  } as unknown as ReturnType<typeof useSorokit>);
 
     rerender(<TransactionHistory />);
     act(() => { vi.advanceTimersByTime(0); });
@@ -344,12 +338,23 @@ describe("TransactionHistory", () => {
   describe("pagination reset on address change (#525)", () => {
     const OTHER_ADDRESS = "GBQMSN2ZQMXK5OBRXV5MTZ3PB4DTJVBQZTIEZTBAGMNIJ4XWVCPMFRPD";
 
-    it("resets to page 1 and clears total/txs when the connected address changes", async () => {
-      sessionStorage.setItem(`sorokit-transaction-history-page:${ADDRESS}`, "3");
-      const getHistory = vi.fn().mockResolvedValue({
-        data: Array.from({ length: PAGE_SIZE }, (_, i) => makeTx(i)),
-        error: null,
-        total: 25,
+    it("never reuses the previous account's page number after an address change", async () => {
+      // Page persistence via sessionStorage was removed (fc66b90); the
+      // regression contract is that a page reached for one address can never
+      // leak into the next account's requests.
+      const getHistory = vi.fn().mockImplementation((addr: string) => {
+        if (addr === ADDRESS) {
+          return Promise.resolve({
+            data: Array.from({ length: PAGE_SIZE }, (_, i) => makeTx(i)),
+            error: null,
+            total: 25, // 3 pages
+          });
+        }
+        return Promise.resolve({
+          data: [makeTx(0)],
+          error: null,
+          total: 1, // 1 page
+        });
       });
       vi.mocked(getClient).mockReturnValue({
         transaction: { getHistory },
@@ -357,31 +362,31 @@ describe("TransactionHistory", () => {
 
       const { rerender } = render(<TransactionHistory />);
       act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getByText("Next"));
+
+      // Reach page 2 for the original wallet.
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      act(() => { vi.advanceTimersByTime(0); });
       await waitFor(() =>
-        expect(getHistory).toHaveBeenCalledWith(ADDRESS, 3, PAGE_SIZE),
+        expect(getHistory).toHaveBeenCalledWith(ADDRESS, 2, PAGE_SIZE),
       );
-      await waitFor(() => screen.getByText(/page 3 of 3/i));
+
+      getHistory.mockClear();
 
       // Switch to a different wallet whose history only has one page.
-      getHistory.mockClear();
-      getHistory.mockResolvedValue({
-        data: [makeTx(0)],
-        error: null,
-        total: 1,
-      });
       vi.mocked(useSorokit).mockReturnValue(
         mockUseSorokit({ address: OTHER_ADDRESS, isConnected: true }),
       );
       rerender(<TransactionHistory />);
       act(() => { vi.advanceTimersByTime(0); });
 
-      // The stale page-3 request for the old address must never be issued
-      // for the new address — the reset effect fires before the fetch effect.
-      expect(getHistory).not.toHaveBeenCalledWith(OTHER_ADDRESS, 3, PAGE_SIZE);
+      // The stale page-2 state must never be requested for the new address —
+      // the reset effect fires before the fetch effect.
+      expect(getHistory).not.toHaveBeenCalledWith(OTHER_ADDRESS, 2, PAGE_SIZE);
       await waitFor(() =>
         expect(getHistory).toHaveBeenCalledWith(OTHER_ADDRESS, 1, PAGE_SIZE),
       );
-      expect(screen.queryByText(/page \d+ of 1/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/page \d+ of/i)).not.toBeInTheDocument();
       expect(screen.queryByText("Prev")).not.toBeInTheDocument();
     });
 
@@ -474,6 +479,46 @@ describe("TransactionHistory", () => {
       const row = screen.getByRole("article");
       expect(row.tagName).toBe("DIV");
       expect(row).not.toHaveAttribute("href");
+    });
+
+    it("mentions the explorer link in the row's aria-label when it is one (#563)", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          network: { name: "testnet" } as ReturnType<typeof useSorokit>["network"],
+        }),
+      );
+      const tx = makeTx(0);
+      mockGetHistory([tx], 1);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => screen.getByRole("article"));
+      expect(screen.getByRole("article")).toHaveAccessibleName(
+        expect.stringMatching(/stellar expert.*opens in a new tab/i),
+      );
+    });
+
+    it("does not mention an explorer link in the aria-label for a non-link row (#563)", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          network: { name: "futurenet" } as ReturnType<typeof useSorokit>["network"],
+        }),
+      );
+      const tx = makeTx(0);
+      mockGetHistory([tx], 1);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => screen.getByRole("article"));
+      expect(screen.getByRole("article")).not.toHaveAccessibleName(
+        expect.stringMatching(/stellar expert/i),
+      );
     });
   });
 
@@ -778,10 +823,7 @@ describe("TransactionHistory", () => {
 
       // Change the address via the mocked hook
       const NEW_ADDRESS = "GNEWADDRESS12345678901234567890123456789012345678901234";
-      vi.mocked(useSorokit).mockReturnValue({
-        address: NEW_ADDRESS,
-        isConnected: true,
-        client: mockClient,
+      vi.mocked(useSorokit).mockReturnValue({ address: NEW_ADDRESS, isConnected: true, get client() { return getClient(); },
       } as unknown as ReturnType<typeof useSorokit>);
 
       rerender(<TransactionHistory />);

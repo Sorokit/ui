@@ -78,6 +78,7 @@ function mockGetTimelineError(errorMsg: string) {
 }
 
 const DEFAULT_CONTEXT = {
+  get client() { return getClient(); },
   address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
   isConnected: true,
   network: null,

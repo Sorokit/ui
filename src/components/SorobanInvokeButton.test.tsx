@@ -32,9 +32,7 @@ function mockInvokeContract(result: { data: unknown; error: string | null; statu
 describe("SorobanInvokeButton", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useSorokit).mockReturnValue({
-      isConnected: true,
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue({ isConnected: true, get client() { return getClient(); } } as unknown as ReturnType<typeof useSorokit>);
   });
 
   it("renders the method name as the button label by default", () => {

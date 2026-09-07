@@ -8,43 +8,50 @@ import dts from "vite-plugin-dts";
  * Library build configuration for sorokit-ui
  * 
  * Produces:
- * - dist/sorokit-ui.es.js (ES modules)
- * - dist/sorokit-ui.cjs (CommonJS)
- * - dist/sorokit-ui.d.ts (TypeScript definitions)
+ * - dist/index.js (ES modules)
+ * - dist/index.cjs (CommonJS)
+ * - dist/index.d.ts (TypeScript definitions)
+ * - dist/style.css (Component CSS)
  * 
  * Use with: vite build --config vite.lib.config.ts
  */
 export default defineConfig({
-  plugins: [react(), tailwindcss(), dts({
-    tsconfigPath: path.resolve(__dirname, "tsconfig.app.json"),
-    entryRoot: path.resolve(__dirname, "src"),
-    outDir: "dist",
-    include: ["src/components", "src/lib"],
-  })],
+  plugins: [
+    react(),
+    tailwindcss(),
+    dts({
+      tsconfigPath: path.resolve(__dirname, "tsconfig.lib.json"),
+    }),
+  ],
   build: {
     lib: {
-      entry: path.resolve(__dirname, 'src/components/index.ts'),
-      name: 'SorokitUI',
-      fileName: (format) => `sorokit-ui.${format === 'es' ? 'es.js' : 'cjs'}`,
-      formats: ['es', 'cjs'],
+      entry: path.resolve(__dirname, "src/index.ts"),
+      name: "SorokitUI",
+      fileName: (format) => `index.${format === "es" ? "js" : "cjs"}`,
+      formats: ["es", "cjs"],
     },
     rollupOptions: {
       external: (id) =>
-        !id.startsWith('.') &&
-        !id.startsWith('/') &&
-        !id.startsWith('@/') &&
-        !id.startsWith('\0'),
+        !id.startsWith(".") &&
+        !id.startsWith("@/") &&
+        !id.startsWith("\0") &&
+        !path.isAbsolute(id),
       output: {
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.name?.endsWith(".css")) {
+            return "style.css";
+          }
+          return "[name][extname]";
+        },
         globals: {
-          react: 'React',
-          'react-dom': 'ReactDOM',
+          react: "React",
+          "react-dom": "ReactDOM",
         },
       },
     },
     minify: false,
     sourcemap: true,
-    // Preserve specific directory structure
-    outDir: 'dist',
+    outDir: "dist",
     emptyOutDir: true,
   },
   optimizeDeps: {
@@ -57,7 +64,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      "@": path.resolve(__dirname, "./src"),
     },
   },
-})
+});

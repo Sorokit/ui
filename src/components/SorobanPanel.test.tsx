@@ -12,6 +12,12 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(() => ({
     isConnected: true,
     address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+    client: {
+      soroban: {
+        invokeContract: mockInvokeContract,
+        simulateContract: mockSimulateContract,
+      },
+    },
   })),
 }));
 
@@ -30,6 +36,12 @@ describe("SorobanPanel", () => {
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: true,
       address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+      client: {
+        soroban: {
+          invokeContract: mockInvokeContract,
+          simulateContract: mockSimulateContract,
+        },
+      },
     } as unknown as ReturnType<typeof useSorokit>);
   });
 
@@ -37,6 +49,32 @@ describe("SorobanPanel", () => {
     it("should have invoke button disabled when method is empty", () => {
       render(<SorobanPanel contractId="" onContractIdChange={() => {}} />);
       expect(screen.getByRole("button", { name: /invoke/i })).toBeDisabled();
+    });
+
+    // Issue #581 — the Invoke button must submit the parent form natively
+    // (type="submit") instead of re-dispatching the FormEvent handler through
+    // an unsafe `as unknown as React.MouseEventHandler` onClick cast.
+    it("submits the form natively via type=submit linked to the form's id", async () => {
+      mockInvokeContract.mockResolvedValueOnce({
+        data: { success: true },
+        error: null,
+      });
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      fireEvent.change(screen.getByLabelText("Method"), {
+        target: { value: "balance" },
+      });
+
+      const invokeButton = screen.getByRole("button", { name: /invoke/i });
+      const form = document.querySelector("form");
+      expect(invokeButton).toHaveAttribute("type", "submit");
+      expect(form).not.toBeNull();
+      expect(invokeButton).toHaveAttribute("form", form!.id);
+
+      // Clicking the button reaches the form's onSubmit handler and produces
+      // a real invocation — not "Not implemented".
+      fireEvent.click(invokeButton);
+      await screen.findByText("Result");
+      expect(mockInvokeContract).toHaveBeenCalledOnce();
     });
 
     it("should show error when invalid JSON args are provided", async () => {
