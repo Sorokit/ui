@@ -95,3 +95,23 @@ html[data-theme="light"] {
   .ring-error-dim { --tw-ring-color: var(--color-error-ring); }
   .hover\:bg-error-dim-hover:hover { background-color: var(--color-error-bg-hover); }
 }
+
+/* Toasts rise into place from just below their slot in the stack. Plain CSS
+   (not a Tailwind variant) so it ships in dist/style.css, and gated on
+   prefers-reduced-motion so nothing moves for users who opted out. */
+@keyframes sorokit-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .animate-toast-in {
+    animation: sorokit-toast-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
