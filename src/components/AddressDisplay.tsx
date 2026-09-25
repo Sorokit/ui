@@ -1,5 +1,5 @@
 import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
+import { HugeiconsIcon } from "@hugeicons/react";`nimport { StrKey } from "@stellar/stellar-sdk";
 import { useEffect, useRef, useState } from "react";
 
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -136,7 +136,7 @@ export function AddressDisplay({
     : showFull
       ? address
       : truncateAddress(address, start, end);
-  const { text, icon: iconSize } = sizeConfig[size];
+  const { text, icon: iconSize } = sizeConfig[size];`n  const invalidPublicKey = address.trim().startsWith("G") && !StrKey.isValidEd25519PublicKey(address.trim());
 
   const addressSpan = (
     <div className="flex items-center gap-2 group">
