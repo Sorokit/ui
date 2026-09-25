@@ -581,6 +581,7 @@ describe("PortfolioRebalancer — issue #674", () => {
 
   describe("dust balance filtering", () => {
     it("excludes dust balances below threshold from portfolio assets and calculation inputs", async () => {
+      expect(DUST_THRESHOLD_BALANCE).toBe(0.00001);
       const BALANCES_WITH_DUST = [
         { asset: "XLM", balance: "1000.0000000", assetType: "native" as const },
         { asset: "USDC", balance: "500.0000000", assetType: "credit_alphanum4" as const, assetCode: "USDC", assetIssuer: "GA1" },

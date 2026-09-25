@@ -42,17 +42,21 @@ export function FeeEstimator({
   const [fee, setFee] = useState<FeeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [customFee, setCustomFee] = useState(customFeeProp ?? "");
+  const [internalCustomFee, setInternalCustomFee] = useState(customFeeProp ?? "");
+  const [prevCustomFeeProp, setPrevCustomFeeProp] = useState(customFeeProp);
   const [customFeeError, setCustomFeeError] = useState<string | null>(null);
 
-  useEffect(() => {
+  if (customFeeProp !== prevCustomFeeProp) {
+    setPrevCustomFeeProp(customFeeProp);
     if (customFeeProp !== undefined) {
-      setCustomFee(customFeeProp);
+      setInternalCustomFee(customFeeProp);
     }
-  }, [customFeeProp]);
+  }
+
+  const customFee = customFeeProp !== undefined ? customFeeProp : internalCustomFee;
 
   const handleCustomFeeChange = (val: string) => {
-    setCustomFee(val);
+    setInternalCustomFee(val);
     if (!val.trim()) {
       setCustomFeeError(null);
       onCustomFeeChange?.("");

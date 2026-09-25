@@ -203,7 +203,7 @@ export function StakingDashboard({
         setLocalDelegations((prev) => {
           const delta = parseFloat(amount);
           if (type === "redelegate" && targetValidatorId) {
-            let next = prev.map((d) => {
+            const next = prev.map((d) => {
               if (d.validatorId === validatorId) {
                 const current = parseFloat(d.amount);
                 return { ...d, amount: Math.max(0, current - delta).toFixed(7) };
