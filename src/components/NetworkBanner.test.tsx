@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 import type { NetworkInfo } from "@/lib/client";
@@ -44,6 +44,13 @@ const LOCALNET_NETWORK: NetworkInfo = {
   horizonUrl: "http://localhost:8000",
 };
 
+const STANDALONE_NETWORK: NetworkInfo = {
+  name: "standalone",
+  rpcUrl: "http://localhost:8000/soroban/rpc",
+  passphrase: "Standalone Network ; February 2017",
+  horizonUrl: "http://localhost:8000",
+};
+
 const CUSTOM_NETWORK: NetworkInfo = {
   name: "custom-net",
   rpcUrl: "http://custom-rpc:8000",
@@ -52,6 +59,11 @@ const CUSTOM_NETWORK: NetworkInfo = {
 };
 
 describe("NetworkBanner", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    document.documentElement.style.removeProperty("--banner-height");
+  });
+
   it("renders nothing when network is null", () => {
     mockNetwork(null);
     const { container } = render(<NetworkBanner />);
@@ -158,5 +170,154 @@ describe("NetworkBanner", () => {
     mockNetwork(TESTNET_NETWORK);
     const { container } = render(<NetworkBanner className="custom-banner-class" />);
     expect(container.firstChild).toHaveClass("custom-banner-class");
+  });
+
+  describe("Layout offset and positioning", () => {
+    it("uses relative positioning by default to prevent overlapping top-level navigation", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { container } = render(<NetworkBanner />);
+      expect(container.firstChild).toHaveClass("relative");
+      expect(container.firstChild).not.toHaveClass("fixed");
+    });
+
+    it("supports sticky and fixed positioning strategies via position prop", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { container: stickyContainer } = render(
+        <NetworkBanner position="sticky" />,
+      );
+      expect(stickyContainer.firstChild).toHaveClass("sticky");
+
+      const { container: fixedContainer } = render(
+        <NetworkBanner position="fixed" />,
+      );
+      expect(fixedContainer.firstChild).toHaveClass("fixed");
+    });
+
+    it("injects --banner-height CSS custom property on documentElement when rendered", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner />);
+      const height = document.documentElement.style.getPropertyValue("--banner-height");
+      expect(height).toBeTruthy();
+      expect(height).toMatch(/^\d+px$/);
+    });
+
+    it("resets --banner-height to 0px when unmounted", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { unmount } = render(<NetworkBanner />);
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).not.toBe("0px");
+
+      unmount();
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+  });
+
+  describe("Session dismiss behavior", () => {
+    it("renders dismiss button by default", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner />);
+      expect(
+        screen.getByRole("button", { name: /dismiss banner/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("hides banner and persists to sessionStorage when dismiss button is clicked", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const onDismiss = vi.fn();
+      render(<NetworkBanner onDismiss={onDismiss} />);
+
+      const button = screen.getByRole("button", { name: /dismiss banner/i });
+      fireEvent.click(button);
+
+      expect(screen.queryByText("Testnet")).not.toBeInTheDocument();
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(window.sessionStorage.getItem("sorokit-banner-dismissed-testnet")).toBe("true");
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+
+    it("does not render when banner has been dismissed in current session", () => {
+      window.sessionStorage.setItem("sorokit-banner-dismissed-testnet", "true");
+      mockNetwork(TESTNET_NETWORK);
+      const { container } = render(<NetworkBanner />);
+
+      expect(container).toBeEmptyDOMElement();
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+
+    it("supports custom storageKey for session dismissal", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner storageKey="custom-dismiss-key" />);
+
+      const button = screen.getByRole("button", { name: /dismiss banner/i });
+      fireEvent.click(button);
+
+      expect(window.sessionStorage.getItem("custom-dismiss-key")).toBe("true");
+    });
+
+    it("does not render dismiss button when dismissible is false", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner dismissible={false} />);
+      expect(
+        screen.queryByRole("button", { name: /dismiss banner/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("dismissing one network does not dismiss another network in same session", () => {
+      window.sessionStorage.setItem("sorokit-banner-dismissed-testnet", "true");
+      mockNetwork(FUTURENET_NETWORK);
+      render(<NetworkBanner />);
+
+      expect(screen.getByText("Futurenet")).toBeInTheDocument();
+    });
+  });
+
+  describe("Standalone mode and configurable colors", () => {
+    it("renders standalone network banner with default Standalone label", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      render(<NetworkBanner />);
+
+      expect(screen.getByText("Standalone")).toBeInTheDocument();
+      expect(
+        screen.getByText(/transactions use test funds only/i),
+      ).toBeInTheDocument();
+    });
+
+    it("supports configurable background and border colors via direct props", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      const { container } = render(
+        <NetworkBanner
+          backgroundColor="#1e293b"
+          borderColor="#334155"
+          textColor="#f8fafc"
+          dotColor="#38bdf8"
+        />,
+      );
+
+      const banner = container.firstChild as HTMLElement;
+      expect(banner.style.backgroundColor).toBe("rgb(30, 41, 59)");
+      expect(banner.style.borderColor).toBe("rgb(51, 65, 85)");
+
+      const dot = screen.getByTestId("network-banner-dot");
+      expect(dot.style.backgroundColor).toBe("rgb(56, 189, 248)");
+    });
+
+    it("supports configurable colors and labels via config prop for standalone and localnet", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      const { container } = render(
+        <NetworkBanner
+          config={{
+            standalone: {
+              label: "Private Sandbox",
+              backgroundColor: "#0f172a",
+              borderColor: "#1e293b",
+            },
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Private Sandbox")).toBeInTheDocument();
+      const banner = container.firstChild as HTMLElement;
+      expect(banner.style.backgroundColor).toBe("rgb(15, 23, 42)");
+      expect(banner.style.borderColor).toBe("rgb(30, 41, 59)");
+    });
   });
 });
