@@ -31,6 +31,7 @@ function mockUseSorokitValue(
   overrides: Record<string, unknown> = {},
 ): ReturnType<typeof useSorokit> {
   return {
+    balances: [{ asset: "XLM", balance: "100" }],
     ...overrides,
     get client() {
       return "client" in overrides ? overrides.client : getClient();
@@ -236,7 +237,7 @@ describe("TransactionPanel", () => {
   it("shows self-payment warning when destination equals source address", async () => {
     vi.mocked(useSorokit).mockReturnValue(
       mockUseSorokitValue({
-        address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        address: VALID_DEST,
         isConnected: true,
       }),
     );
@@ -260,8 +261,7 @@ describe("TransactionPanel", () => {
 
   // ── Submit guard and keyboard submission (#555) ───────────────────────────
   describe("submit guard (#555)", () => {
-    const validDest =
-      "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    const validDest = VALID_DEST;
 
     it("disables the Send button when the destination is empty", () => {
       render(<TransactionPanel />);

@@ -1,11 +1,9 @@
 import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { StrKey } from "@stellar/stellar-sdk";
 import { useEffect, useRef, useState } from "react";
 
 import { Tooltip } from "@/components/ui/Tooltip";
-import { cn } from "@/lib/utils";
-import { truncateAddress } from "@/lib/utils";
+import { cn, truncateAddress, validateStellarAddress } from "@/lib/utils";
 
 export interface AddressDisplayProps {
   address: string;
@@ -138,7 +136,7 @@ export function AddressDisplay({
       ? address
       : truncateAddress(address, start, end);
   const { text, icon: iconSize } = sizeConfig[size];
-  const invalidPublicKey = address.trim().startsWith("G") && !StrKey.isValidEd25519PublicKey(address.trim());
+  const invalidPublicKey = address.trim().startsWith("G") && !validateStellarAddress(address.trim());
 
   const addressSpan = (
     <div className="flex items-center gap-2 group">
@@ -156,7 +154,7 @@ export function AddressDisplay({
         </span>
       </Tooltip>
       {invalidPublicKey && (
-        <span className="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red" role="status">
+        <span className="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red" data-testid="invalid-address-badge">
           Invalid address
         </span>
       )}

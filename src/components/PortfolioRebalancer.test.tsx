@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
-import { PortfolioRebalancer } from "./PortfolioRebalancer";
+import { DUST_THRESHOLD_BALANCE, PortfolioRebalancer } from "./PortfolioRebalancer";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -571,3 +571,123 @@ describe("PortfolioRebalancer — accessibility", () => {
     ).toBeInTheDocument();
   });
 });
+
+// ─── Issue #674: Partial failure modal, dust filtering, and empty portfolios ───
+
+describe("PortfolioRebalancer — issue #674", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("dust balance filtering", () => {
+    it("excludes dust balances below threshold from portfolio assets and calculation inputs", async () => {
+      expect(DUST_THRESHOLD_BALANCE).toBe(0.00001);
+      const BALANCES_WITH_DUST = [
+        { asset: "XLM", balance: "1000.0000000", assetType: "native" as const },
+        { asset: "USDC", balance: "500.0000000", assetType: "credit_alphanum4" as const, assetCode: "USDC", assetIssuer: "GA1" },
+        { asset: "BTC", balance: "0.000005", assetType: "credit_alphanum4" as const, assetCode: "BTC", assetIssuer: "GA2" }, // dust < 0.00001
+      ];
+
+      mockSorokit({ balances: BALANCES_WITH_DUST });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("spinbutton", { name: /target allocation for XLM/i })).toBeInTheDocument();
+        expect(screen.getByRole("spinbutton", { name: /target allocation for USDC/i })).toBeInTheDocument();
+      });
+
+      // BTC dust balance must NOT be rendered in the allocation inputs
+      expect(screen.queryByRole("spinbutton", { name: /target allocation for BTC/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("empty portfolio onboarding state", () => {
+    it("renders onboarding empty state with clear instructions to fund the account when balance is 0", async () => {
+      mockSorokit({ balances: [] });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("empty-portfolio-onboarding")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/instructions to fund your account/i)).toBeInTheDocument();
+      expect(screen.getByText(/transfer xlm from an exchange/i)).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(MOCK_ADDRESS))).toBeInTheDocument();
+    });
+
+    it("treats an account with only dust balances as an empty portfolio with funding instructions", async () => {
+      const ONLY_DUST = [
+        { asset: "BTC", balance: "0.000001", assetType: "credit_alphanum4" as const, assetCode: "BTC", assetIssuer: "GA2" },
+      ];
+      mockSorokit({ balances: ONLY_DUST });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("empty-portfolio-onboarding")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/instructions to fund your account/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("partial rebalance failures and summary modal with retry", () => {
+    it("displays partial execution summary modal when a swap fails, lists succeeded vs failed swaps, and retries", async () => {
+      // Setup 5 balances to ensure multiple swaps
+      mockSorokit({ balances: FIVE_BALANCES });
+
+      const invokeContract = vi
+        .fn()
+        .mockResolvedValueOnce({ data: { hash: "tx-swap-1-ok" }, error: null })
+        .mockResolvedValueOnce({ data: null, error: "Insufficient liquidity in pool" })
+        .mockResolvedValueOnce({ data: { hash: "tx-swap-2-retry-ok" }, error: null })
+        .mockResolvedValue({ data: { hash: "tx-swap-rest-ok" }, error: null });
+
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { invokeContract },
+      } as unknown as ReturnType<typeof getClient>);
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
+      fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+
+      // Go to preview and then execute
+      fireEvent.click(screen.getByRole("tab", { name: /execute/i }));
+      await waitFor(() => screen.getByRole("button", { name: /execute rebalance/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /execute rebalance/i }));
+
+      // Modal should appear with partial execution summary
+      await waitFor(() => {
+        expect(screen.getByText("Partial Execution Summary")).toBeInTheDocument();
+      });
+
+      // Rollback instructions should be visible
+      expect(screen.getByText(/rollback instructions/i)).toBeInTheDocument();
+      expect(screen.getByText(/succeeded swaps cannot be automatically rolled back/i)).toBeInTheDocument();
+
+      // Check status badges in the modal
+      expect(screen.getAllByText("Succeeded").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Failed").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Insufficient liquidity in pool").length).toBeGreaterThanOrEqual(1);
+
+      // Retry button inside modal
+      const modalRetryButton = screen.getAllByRole("button", { name: "Retry" })[0];
+      expect(modalRetryButton).toBeInTheDocument();
+
+      // Click retry
+      fireEvent.click(modalRetryButton);
+
+      // Verify that retry invoked contract for remaining swaps
+      await waitFor(() => {
+        expect(invokeContract).toHaveBeenCalledTimes(3);
+      });
+    });
+  });
+});
+

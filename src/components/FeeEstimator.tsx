@@ -8,6 +8,8 @@ import { useSorokit } from "@/context/useSorokit";
 import { useIsVisible } from "@/hooks/useIsVisible";
 import { cn, toXLM } from "@/lib/utils";
 
+export const MIN_NETWORK_BASE_FEE = 100;
+
 export interface FeeData {
   baseFee: string;
   recommended: string;
@@ -21,6 +23,10 @@ interface FeeEstimatorProps {
   compact?: boolean;
   /** Callback fired when fee data loads successfully. */
   onFeeLoad?: (fee: FeeData) => void;
+  /** Custom fee override value in stroops. */
+  customFee?: string;
+  /** Callback fired when custom fee input changes. */
+  onCustomFeeChange?: (customFee: string) => void;
 }
 
 export function FeeEstimator({
@@ -28,12 +34,44 @@ export function FeeEstimator({
   refreshInterval = 0,
   compact,
   onFeeLoad,
+  customFee: customFeeProp,
+  onCustomFeeChange,
 }: FeeEstimatorProps) {
   const { client } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [fee, setFee] = useState<FeeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [internalCustomFee, setInternalCustomFee] = useState(customFeeProp ?? "");
+  const [prevCustomFeeProp, setPrevCustomFeeProp] = useState(customFeeProp);
+  const [customFeeError, setCustomFeeError] = useState<string | null>(null);
+
+  if (customFeeProp !== prevCustomFeeProp) {
+    setPrevCustomFeeProp(customFeeProp);
+    if (customFeeProp !== undefined) {
+      setInternalCustomFee(customFeeProp);
+    }
+  }
+
+  const customFee = customFeeProp !== undefined ? customFeeProp : internalCustomFee;
+
+  const handleCustomFeeChange = (val: string) => {
+    setInternalCustomFee(val);
+    if (!val.trim()) {
+      setCustomFeeError(null);
+      onCustomFeeChange?.("");
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (Number.isNaN(parsed) || parsed < MIN_NETWORK_BASE_FEE) {
+      setCustomFeeError(`Fee must be at least ${MIN_NETWORK_BASE_FEE} stroops`);
+      onCustomFeeChange?.("");
+    } else {
+      setCustomFeeError(null);
+      onCustomFeeChange?.(val);
+    }
+  };
+
   // Issue #442: `onFeeLoad` is normally an inline arrow, so it had a new
   // identity on every parent render. As a `load` dependency that rebuilt
   // `load`, re-ran the effect and fired another request per render (and the
@@ -60,11 +98,18 @@ export function FeeEstimator({
         setError(err);
         return;
       }
-      setFee(data);
-      setError(null);
       if (data) {
-        onFeeLoadRef.current?.(data);
+        const clampedData: FeeData = {
+          baseFee: Math.max(MIN_NETWORK_BASE_FEE, parseInt(data.baseFee || "0", 10) || 0).toString(),
+          recommended: Math.max(MIN_NETWORK_BASE_FEE, parseInt(data.recommended || "0", 10) || 0).toString(),
+        };
+        setFee(clampedData);
+        setError(null);
+        onFeeLoadRef.current?.(clampedData);
       }
+    } catch (e) {
+      if (isStale()) return;
+      setError(e instanceof Error ? e.message : "Request timed out");
     } finally {
       // Issue #442: a stale call must not clear the spinner owned by the
       // request that superseded it.
@@ -121,7 +166,16 @@ export function FeeEstimator({
           {loading && !fee ? (
             <span className="text-[11px] text-ink-3">Loading…</span>
           ) : error ? (
-            <span className="text-[11px] text-red">{error}</span>
+            <span className="inline-flex items-center gap-2 text-[11px] text-red">
+              <span role="alert">{error}</span>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="underline text-ink-2 hover:text-ink cursor-pointer"
+              >
+                Retry
+              </button>
+            </span>
           ) : fee ? (
             <span className="text-[11px] text-ink">{compactContent}</span>
           ) : null}
@@ -160,21 +214,65 @@ export function FeeEstimator({
                 <div className="h-8 w-24 rounded-lg bg-surface-2 animate-pulse" />
               </div>
             ) : error ? (
-              <p className="text-[12px] text-red">{error}</p>
-            ) : fee ? (
-              <div className="flex items-center gap-4">
-                <FeeCell label="Base Fee" value={fee.baseFee} unit="stroops" />
-                <div className="w-px h-8 bg-line" />
-                <FeeCell
-                  label="Recommended"
-                  value={fee.recommended}
-                  unit="stroops"
-                  highlight
-                  highFee={
-                    parseInt(fee.recommended, 10) > parseInt(fee.baseFee, 10) * 2
-                  }
-                />
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <p className="text-[12px] text-red" role="alert">{error}</p>
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  disabled={loading}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 hover:bg-surface-3 text-ink transition-colors border border-line"
+                >
+                  Retry
+                </button>
               </div>
+            ) : fee ? (
+              <>
+                <div className="flex items-center gap-4">
+                  <FeeCell label="Base Fee" value={fee.baseFee} unit="stroops" />
+                  <div className="w-px h-8 bg-line" />
+                  <FeeCell
+                    label="Recommended"
+                    value={fee.recommended}
+                    unit="stroops"
+                    highlight
+                    highFee={
+                      parseInt(fee.recommended, 10) > parseInt(fee.baseFee, 10) * 2
+                    }
+                  />
+                </div>
+                <div className="mt-4 pt-4 border-t border-line">
+                  <label
+                    htmlFor="custom-fee-input"
+                    className="block text-[11px] font-medium text-ink-2 mb-1.5"
+                  >
+                    Custom Fee Override (stroops/op)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="custom-fee-input"
+                      type="number"
+                      min={MIN_NETWORK_BASE_FEE}
+                      placeholder={`Min ${MIN_NETWORK_BASE_FEE}`}
+                      value={customFee}
+                      onChange={(e) => handleCustomFeeChange(e.target.value)}
+                      className="px-3 py-1.5 text-[12px] bg-surface-2 border border-line rounded-lg text-ink focus:outline-none focus:border-brand w-36"
+                      aria-label="Custom fee in stroops"
+                      aria-invalid={!!customFeeError}
+                      aria-describedby={customFeeError ? "custom-fee-error" : undefined}
+                    />
+                    {customFee && !customFeeError && (
+                      <span className="text-[11px] text-ink-3">
+                        (≈ {toXLM(customFee)} XLM)
+                      </span>
+                    )}
+                  </div>
+                  {customFeeError && (
+                    <p id="custom-fee-error" role="alert" className="text-[11px] text-red mt-1">
+                      {customFeeError}
+                    </p>
+                  )}
+                </div>
+              </>
             ) : null}
           </div>
         </>

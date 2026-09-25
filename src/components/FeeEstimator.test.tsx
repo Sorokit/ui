@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
-import { FeeCell,FeeEstimator } from "./FeeEstimator";
+import { FeeCell, FeeEstimator, MIN_NETWORK_BASE_FEE } from "./FeeEstimator";
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
@@ -385,3 +385,153 @@ describe("FeeEstimator — issue #442", () => {
     expect(first).toHaveBeenCalledTimes(1);
   });
 });
+
+// ── Issue #670: Surge fee clamping, custom fee overrides, and retry on error ───
+describe("FeeEstimator — issue #670", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("fee clamping", () => {
+    it("clamps negative or sub-minimum base fee and recommended fee to 100 stroops", async () => {
+      const onFeeLoad = vi.fn();
+      mockEstimateFee({
+        data: { baseFee: "-20", recommended: "50" },
+        error: null,
+      });
+
+      render(<FeeEstimator onFeeLoad={onFeeLoad} />);
+
+      await waitFor(() => {
+        const feeValues = screen.getAllByText(MIN_NETWORK_BASE_FEE.toString());
+        expect(feeValues.length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(onFeeLoad).toHaveBeenCalledWith({
+        baseFee: "100",
+        recommended: "100",
+      });
+    });
+
+    it("clamps zero or empty fee values to minimum 100 stroops", async () => {
+      const onFeeLoad = vi.fn();
+      mockEstimateFee({
+        data: { baseFee: "0", recommended: "0" },
+        error: null,
+      });
+
+      render(<FeeEstimator onFeeLoad={onFeeLoad} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("100").length).toBeGreaterThanOrEqual(1);
+      });
+
+      expect(onFeeLoad).toHaveBeenCalledWith({
+        baseFee: "100",
+        recommended: "100",
+      });
+    });
+  });
+
+  describe("custom fee override input", () => {
+    it("renders custom fee input and allows entering a valid override", async () => {
+      mockEstimateFee({
+        data: { baseFee: "100", recommended: "200" },
+        error: null,
+      });
+      const onCustomFeeChange = vi.fn();
+
+      render(<FeeEstimator onCustomFeeChange={onCustomFeeChange} />);
+
+      await waitFor(() => expect(screen.getByText("Base Fee")).toBeInTheDocument());
+
+      const input = screen.getByLabelText("Custom fee in stroops");
+      expect(input).toBeInTheDocument();
+
+      fireEvent.change(input, { target: { value: "250" } });
+      expect(input).toHaveValue(250);
+      expect(onCustomFeeChange).toHaveBeenCalledWith("250");
+      expect(screen.getByText("(≈ 0.0000250 XLM)")).toBeInTheDocument();
+    });
+
+    it("displays validation error when custom fee is below minimum 100 stroops", async () => {
+      mockEstimateFee({
+        data: { baseFee: "100", recommended: "200" },
+        error: null,
+      });
+      const onCustomFeeChange = vi.fn();
+
+      render(<FeeEstimator onCustomFeeChange={onCustomFeeChange} />);
+
+      await waitFor(() => expect(screen.getByText("Base Fee")).toBeInTheDocument());
+
+      const input = screen.getByLabelText("Custom fee in stroops");
+      fireEvent.change(input, { target: { value: "50" } });
+
+      expect(screen.getByRole("alert")).toHaveTextContent("Fee must be at least 100 stroops");
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(onCustomFeeChange).toHaveBeenCalledWith("");
+    });
+  });
+
+  describe("network failure, timeout and retry actions", () => {
+    it("catches RPC timeout rejections, displays error message and retries on button click", async () => {
+      const estimateFee = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Request timed out"))
+        .mockResolvedValueOnce({
+          data: { baseFee: "100", recommended: "300" },
+          error: null,
+        });
+
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      render(<FeeEstimator />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Request timed out")).toBeInTheDocument();
+      });
+
+      const retryButton = screen.getByRole("button", { name: "Retry" });
+      expect(retryButton).toBeInTheDocument();
+
+      fireEvent.click(retryButton);
+
+      await waitFor(() => {
+        expect(estimateFee).toHaveBeenCalledTimes(2);
+        expect(screen.getByText("300")).toBeInTheDocument();
+      });
+    });
+
+    it("renders retry button in compact mode on error and triggers retry", async () => {
+      const estimateFee = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: "Gateway Timeout" })
+        .mockResolvedValueOnce({
+          data: { baseFee: "100", recommended: "200" },
+          error: null,
+        });
+
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      render(<FeeEstimator compact />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Gateway Timeout")).toBeInTheDocument();
+      });
+
+      const retryButton = screen.getByRole("button", { name: "Retry" });
+      fireEvent.click(retryButton);
+
+      await waitFor(() => {
+        expect(estimateFee).toHaveBeenCalledTimes(2);
+        expect(screen.getByText(/Base: 100 stroops/)).toBeInTheDocument();
+      });
+    });
+  });
+});
+
