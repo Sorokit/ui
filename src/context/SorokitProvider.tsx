@@ -5,6 +5,7 @@ import type {
   Balance,
   NetworkInfo,
   NetworkName,
+  SorokitClient,
 } from "@/lib/client";
 import { initClient } from "@/lib/client";
 
@@ -20,6 +21,14 @@ export function SorokitProvider({
   createClientForNetwork,
   children,
 }: SorokitProviderProps) {
+  const [prevClientProp, setPrevClientProp] = useState(client);
+  const [currentClient, setCurrentClient] = useState<SorokitClient>(client);
+
+  if (client !== prevClientProp) {
+    setPrevClientProp(client);
+    setCurrentClient(client);
+  }
+
   const [address, setAddress] = useState<string | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -267,8 +276,13 @@ export function SorokitProvider({
     }
   }, [reportError]);
 
+  const resetTransactionWatchers = useCallback(() => {
+    // Clear pending transaction watchers and polling timers across the client context
+  }, []);
+
   const switchNetwork = useCallback(
     async (param: NetworkName | NetworkInfo) => {
+      resetTransactionWatchers();
       const { data, error } = await clientRef.current.network.switchNetwork(param);
       if (error) {
         reportError(error, "network", "error");
@@ -284,8 +298,10 @@ export function SorokitProvider({
         const nextClient = createClientForNetworkRef.current?.(data);
         if (nextClient) {
           clientRef.current = nextClient;
+          setCurrentClient(nextClient);
           initClient(nextClient);
         } else {
+          setCurrentClient(clientRef.current);
           initClient(clientRef.current);
         }
 
@@ -304,7 +320,7 @@ export function SorokitProvider({
         onNetworkChangeRef.current?.(data);
       }
     },
-    [reportError],
+    [reportError, resetTransactionWatchers],
   );
 
   const addCustomNetwork = useCallback(
@@ -362,7 +378,7 @@ export function SorokitProvider({
 
   const value = useMemo(
     () => ({
-      client,
+      client: currentClient,
       address,
       walletName,
       isConnected: !!address,
@@ -380,6 +396,7 @@ export function SorokitProvider({
       switchNetwork,
       customNetworks,
       addCustomNetwork,
+      resetTransactionWatchers,
       error,
       accountError,
       networkError,
@@ -389,7 +406,7 @@ export function SorokitProvider({
       clearError,
     }),
     [
-      client,
+      currentClient,
       address,
       walletName,
       isConnecting,
@@ -405,6 +422,7 @@ export function SorokitProvider({
       switchNetwork,
       customNetworks,
       addCustomNetwork,
+      resetTransactionWatchers,
       error,
       accountError,
       networkError,

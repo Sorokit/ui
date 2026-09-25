@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StrictMode, useRef, useState } from "react";
+import { StrictMode, useEffect, useRef, useState } from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
@@ -957,6 +957,45 @@ describe("SorokitProvider", () => {
       });
 
       expect(getClient()).toBe(mockClient);
+    });
+
+    it("updates the Sorokit client context and provides resetTransactionWatchers on network switch", async () => {
+      const switchedClient = {
+        ...mockClient,
+        isSwitched: true,
+      } as unknown as ReturnType<typeof getClient>;
+      const createClientForNetwork = vi.fn().mockReturnValue(switchedClient);
+
+      let capturedClient: unknown = null;
+      let capturedReset: unknown = null;
+      const Consumer = () => {
+        const { client, resetTransactionWatchers } = useSorokit();
+        useEffect(() => {
+          capturedClient = client;
+          capturedReset = resetTransactionWatchers;
+        }, [client, resetTransactionWatchers]);
+        return <TestComponent />;
+      };
+
+      await act(async () => {
+        render(
+          <SorokitProvider
+            client={mockClient}
+            createClientForNetwork={createClientForNetwork}
+          >
+            <Consumer />
+          </SorokitProvider>,
+        );
+      });
+
+      expect(capturedClient).toBe(mockClient);
+      expect(typeof capturedReset).toBe("function");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Switch"));
+      });
+
+      expect(capturedClient).toBe(switchedClient);
     });
 
     it("fires onNetworkChange with the new network after a successful switch", async () => {

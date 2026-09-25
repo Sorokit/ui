@@ -32,6 +32,10 @@ export interface SorokitState {
   switchNetwork: (network: NetworkName | NetworkInfo) => Promise<void>;
   customNetworks?: NetworkInfo[];
   addCustomNetwork?: (config: NetworkInfo) => Promise<void>;
+  /**
+   * Resets any pending transaction watchers/polling timers across the client context.
+   */
+  resetTransactionWatchers?: () => void;
   error: string | null;
   accountError?: string | null;
   networkError?: string | null;

@@ -76,6 +76,19 @@ export const STANDARD_NETWORKS: NetworkPreset[] = [
  */
 export const NETWORK_SWITCHER_SHORTCUT = "Alt+N";
 
+/**
+ * Validates that a URL string is formatted properly and uses http:// or https:// protocol.
+ */
+export function isValidHttpUrl(urlString: string): boolean {
+  if (!urlString || typeof urlString !== "string") return false;
+  try {
+    const url = new URL(urlString.trim());
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function NetworkSwitcher() {
   const {
     network,
@@ -83,6 +96,7 @@ export function NetworkSwitcher() {
     switchNetwork,
     customNetworks = [],
     addCustomNetwork,
+    resetTransactionWatchers,
   } = useSorokit();
 
   const [isSwitching, setIsSwitching] = useState(false);
@@ -112,6 +126,20 @@ export function NetworkSwitcher() {
   const [customPassphrase, setCustomPassphrase] = useState("");
   const [formError, setFormError] = useState("");
 
+  // Escape key closes the custom network dialog
+  useEffect(() => {
+    if (!isCustomDialogOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setIsCustomDialogOpen(false);
+        setFormError("");
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isCustomDialogOpen]);
+
   const activePreset = STANDARD_NETWORKS.find(
     (n) => n.name === network?.name,
   );
@@ -137,6 +165,7 @@ export function NetworkSwitcher() {
     if (isSwitching) return;
     setIsSwitching(true);
     try {
+      resetTransactionWatchers?.();
       await switchNetwork(target);
       const targetLabel =
         typeof target === "string"
@@ -158,6 +187,14 @@ export function NetworkSwitcher() {
       setFormError("RPC URL is required");
       return;
     }
+    if (!isValidHttpUrl(customRpcUrl)) {
+      setFormError("RPC URL must be a valid HTTP or HTTPS URL");
+      return;
+    }
+    if (customHorizonUrl.trim() && !isValidHttpUrl(customHorizonUrl)) {
+      setFormError("Horizon URL must be a valid HTTP or HTTPS URL");
+      return;
+    }
 
     setFormError("");
     const newConfig: NetworkInfo = {
@@ -170,6 +207,7 @@ export function NetworkSwitcher() {
 
     setIsSwitching(true);
     try {
+      resetTransactionWatchers?.();
       if (addCustomNetwork) {
         await addCustomNetwork(newConfig);
       } else {
@@ -182,6 +220,7 @@ export function NetworkSwitcher() {
       setCustomRpcUrl("");
       setCustomHorizonUrl("");
       setCustomPassphrase("");
+      setFormError("");
     } catch (err: unknown) {
       setFormError(
         err instanceof Error ? err.message : "Failed to add custom network",
@@ -482,10 +521,30 @@ export function NetworkSwitcher() {
       </DropdownMenu.Root>
 
       {/* Custom Network Dialog Modal */}
-      <Dialog.Root open={isCustomDialogOpen} onOpenChange={setIsCustomDialogOpen}>
+      <Dialog.Root
+        open={isCustomDialogOpen}
+        onOpenChange={(open) => {
+          setIsCustomDialogOpen(open);
+          if (!open) {
+            setFormError("");
+          }
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs animate-in fade-in" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none">
+          <Dialog.Content
+            onEscapeKeyDown={() => {
+              setIsCustomDialogOpen(false);
+              setFormError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setIsCustomDialogOpen(false);
+                setFormError("");
+              }
+            }}
+            className="fixed top-1/2 left-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none"
+          >
             <div className="flex items-center justify-between pb-4 border-b border-line mb-4">
               <div>
                 <Dialog.Title className="text-[16px] font-semibold text-ink">
