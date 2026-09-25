@@ -31,8 +31,7 @@ const FAILED_RESET_MS = 1500;
 
 /**
  * `document.execCommand("copy")` fallback for non-secure contexts (plain
- * HTTP), where 
-avigator.clipboard` is undefined. Deprecated but still the
+ * HTTP), where navigator.clipboard is undefined. Deprecated but still the
  * only synchronous copy mechanism outside a secure context.
  */
 function copyViaExecCommand(text: string): boolean {
