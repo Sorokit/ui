@@ -133,9 +133,12 @@ function LineChart({
     <svg
       width="100%"
       viewBox={`0 0 ${width} ${height}`}
-      className="overflow-visible"
+      className="overflow-visible touch-pan-y"
       role="img"
       aria-label={`Line chart with ${data.length} data points`}
+      onTouchStart={handleTouch}
+      onTouchMove={handleTouch}
+      onTouchEnd={() => onHover?.(null)}
     >
       <defs>
         <linearGradient

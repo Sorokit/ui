@@ -1,5 +1,6 @@
 import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";`nimport { StrKey } from "@stellar/stellar-sdk";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { StrKey } from "@stellar/stellar-sdk";
 import { useEffect, useRef, useState } from "react";
 
 import { Tooltip } from "@/components/ui/Tooltip";
@@ -30,7 +31,8 @@ const FAILED_RESET_MS = 1500;
 
 /**
  * `document.execCommand("copy")` fallback for non-secure contexts (plain
- * HTTP), where `navigator.clipboard` is undefined. Deprecated but still the
+ * HTTP), where 
+avigator.clipboard` is undefined. Deprecated but still the
  * only synchronous copy mechanism outside a secure context.
  */
 function copyViaExecCommand(text: string): boolean {
@@ -136,7 +138,8 @@ export function AddressDisplay({
     : showFull
       ? address
       : truncateAddress(address, start, end);
-  const { text, icon: iconSize } = sizeConfig[size];`n  const invalidPublicKey = address.trim().startsWith("G") && !StrKey.isValidEd25519PublicKey(address.trim());
+  const { text, icon: iconSize } = sizeConfig[size];
+  const invalidPublicKey = address.trim().startsWith("G") && !StrKey.isValidEd25519PublicKey(address.trim());
 
   const addressSpan = (
     <div className="flex items-center gap-2 group">
@@ -153,6 +156,11 @@ export function AddressDisplay({
           {display}
         </span>
       </Tooltip>
+      {invalidPublicKey && (
+        <span className="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red" role="status">
+          Invalid address
+        </span>
+      )}
       <Tooltip
         content={copyFailed ? "Copy failed" : copied ? "Copied!" : "Copy address to clipboard"}
       >
