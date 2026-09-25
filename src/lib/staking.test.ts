@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateDailyRewards,
+  computeUptimePct,
   createDefaultFilter,
   estimateDelegationFeeXlm,
   filterValidators,
@@ -413,5 +414,48 @@ describe("createDefaultFilter", () => {
     expect(f.sortField).toBe("apy");
     expect(f.sortDirection).toBe("desc");
     expect(f.status).toBe("all");
+  });
+});
+
+describe("computeUptimePct (#689)", () => {
+  it("returns null for a new validator with 0 recorded pings", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 0, successfulPings: 0 }),
+    ).toBeNull();
+  });
+
+  it("returns null when pingCount is 0 even if uptimePct is set", () => {
+    expect(computeUptimePct({ uptimePct: 100, pingCount: 0 })).toBeNull();
+  });
+
+  it("derives the percentage from ping counts", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 400, successfulPings: 398 }),
+    ).toBeCloseTo(99.5);
+  });
+
+  it("clamps inconsistent ping counts into 0–100", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 10, successfulPings: 12 }),
+    ).toBe(100);
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 10, successfulPings: -1 }),
+    ).toBe(0);
+  });
+
+  it("falls back to uptimePct when only pingCount is known", () => {
+    expect(computeUptimePct({ uptimePct: 97.2, pingCount: 50 })).toBe(97.2);
+  });
+
+  it("uses uptimePct when no ping data is provided", () => {
+    expect(computeUptimePct({ uptimePct: 99.9 })).toBe(99.9);
+  });
+
+  it("returns null instead of NaN or Infinity", () => {
+    expect(computeUptimePct({ uptimePct: Number.NaN })).toBeNull();
+    expect(computeUptimePct({ uptimePct: Infinity })).toBeNull();
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: Number.NaN }),
+    ).toBeNull();
   });
 });

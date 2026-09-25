@@ -28,6 +28,13 @@ export interface Validator {
   apyPct: number;
   /** Historical uptime as a percentage 0–100 */
   uptimePct: number;
+  /**
+   * Total uptime checks (pings) recorded for this validator. A newly
+   * registered validator has 0, in which case uptime cannot be computed yet.
+   */
+  pingCount?: number;
+  /** Number of recorded pings that succeeded. Used with `pingCount`. */
+  successfulPings?: number;
   /** Total amount staked with this validator (in XLM) */
   totalStaked: string;
   /** Number of unique delegators */
@@ -193,6 +200,26 @@ export function formatXlm(value: number | string, decimals = 4): string {
 /**
  * Format a percentage value to one decimal place.
  */
+/**
+ * Resolve a validator's uptime percentage, or `null` when there is no data to
+ * base it on yet — a newly registered validator with 0 recorded pings, or an
+ * upstream value that isn't a finite number. Never returns NaN, so callers
+ * can't end up rendering "NaN%".
+ */
+export function computeUptimePct(
+  validator: Pick<Validator, "uptimePct" | "pingCount" | "successfulPings">,
+): number | null {
+  const { uptimePct, pingCount, successfulPings } = validator;
+  if (pingCount !== undefined) {
+    if (!Number.isFinite(pingCount) || pingCount <= 0) return null;
+    if (successfulPings !== undefined && Number.isFinite(successfulPings)) {
+      const pct = (successfulPings / pingCount) * 100;
+      return Math.min(100, Math.max(0, pct));
+    }
+  }
+  return Number.isFinite(uptimePct) ? uptimePct : null;
+}
+
 export function formatPct(value: number): string {
   return `${value.toFixed(1)}%`;
 }
