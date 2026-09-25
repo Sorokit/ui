@@ -35,18 +35,50 @@ const VALID_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 const VALID_AMOUNT_RE = /^\d+(\.\d+)?$/;
 const MAX_RETRY_OPTIONS = [1, 2, 3, 4, 5];
 
-function parseCSV(text: string): BatchEntry[] {
+function tokenizeCSVLine(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (i === line.length) { tokens.push(""); break; }
+    if (line[i] === '"') {
+      i++;
+      let field = "";
+      while (i < line.length) {
+        if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+        else if (line[i] === '"') { i++; break; }
+        else { field += line[i++]; }
+      }
+      tokens.push(field);
+      if (i < line.length && line[i] === ",") i++;
+    } else {
+      const start = i;
+      while (i < line.length && line[i] !== ",") i++;
+      tokens.push(line.slice(start, i).trim());
+      if (i < line.length) i++;
+    }
+  }
+  return tokens;
+}
+
+export function parseCSV(text: string): BatchEntry[] {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
-  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const header = tokenizeCSVLine(lines[0]).map((h) => h.toLowerCase());
   const addrIdx = header.indexOf("address");
   const amtIdx = header.indexOf("amount");
   if (addrIdx === -1 || amtIdx === -1) return [];
+  const assetIdx = header.indexOf("asset");
+  const memoIdx = header.indexOf("memo");
   return lines
     .slice(1)
     .map((line) => {
-      const cols = line.split(",");
-      return { address: (cols[addrIdx] ?? "").trim(), amount: (cols[amtIdx] ?? "").trim(), asset: "", memo: "" };
+      const cols = tokenizeCSVLine(line);
+      return {
+        address: cols[addrIdx] ?? "",
+        amount: cols[amtIdx] ?? "",
+        asset: assetIdx !== -1 ? (cols[assetIdx] ?? "") : "",
+        memo: memoIdx !== -1 ? (cols[memoIdx] ?? "") : "",
+      };
     })
     .filter((e) => e.address && e.amount);
 }
@@ -69,7 +101,7 @@ function parseJSON(text: string): BatchEntry[] {
   }
 }
 
-function validateEntries(entries: BatchEntry[]): string[] {
+export function validateEntries(entries: BatchEntry[]): string[] {
   const errors: string[] = [];
   entries.forEach((entry, i) => {
     if (!VALID_ADDRESS_RE.test(entry.address)) {
@@ -77,6 +109,9 @@ function validateEntries(entries: BatchEntry[]): string[] {
     }
     if (!VALID_AMOUNT_RE.test(entry.amount) || parseFloat(entry.amount) <= 0) {
       errors.push(`Row ${i + 2}: Invalid amount "${entry.amount}"`);
+    }
+    if (entry.memo && new TextEncoder().encode(entry.memo).length > 28) {
+      errors.push(`Row ${i + 2}: memo exceeds 28 bytes (Stellar MEMO_TEXT limit)`);
     }
   });
   const seen = new Set<string>();
