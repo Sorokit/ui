@@ -12,6 +12,7 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import React, { useEffect, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
+import { useOutsideClick } from "@/hooks/useOutsideClick";
 import type { NetworkInfo, NetworkName } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +104,10 @@ export function NetworkSwitcher() {
   const [announcement, setAnnouncement] = useState("");
   const [isCustomDialogOpen, setIsCustomDialogOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+
+  const menuRef = useOutsideClick<HTMLDivElement>(() => {
+    setIsOpen(false);
+  }, isOpen);
 
   // Alt+N toggles the picker from anywhere in the app.
   useEffect(() => {
@@ -266,8 +271,37 @@ export function NetworkSwitcher() {
                   />
                 </span>
 
+                <HugeiconsIcon
+                  icon={
+                    currentInfo.status === "offline" || currentInfo.status === "error"
+                      ? Cancel01Icon
+                      : isMismatched || currentInfo.status === "warning" || currentInfo.status === "degraded"
+                        ? Alert01Icon
+                        : Tick01Icon
+                  }
+                  size={11}
+                  strokeWidth={2.5}
+                  data-testid="network-status-icon"
+                  className={cn(
+                    "shrink-0",
+                    currentInfo.status === "offline" || currentInfo.status === "error"
+                      ? "text-red"
+                      : isMismatched || currentInfo.status === "warning" || currentInfo.status === "degraded"
+                        ? "text-orange"
+                        : "text-green",
+                  )}
+                  aria-hidden="true"
+                />
+
                 <span className="hidden sm:inline font-medium text-ink" aria-hidden="true">
                   {currentInfo.label}
+                </span>
+
+                <span
+                  data-testid="network-status-label"
+                  className="text-[10px] font-semibold uppercase tracking-wider text-ink-3 hidden md:inline"
+                >
+                  {currentInfo.status === "online" ? "Active" : currentInfo.status}
                 </span>
 
                 {isMismatched && (
@@ -325,10 +359,12 @@ export function NetworkSwitcher() {
 
         <DropdownMenu.Portal>
           <DropdownMenu.Content
+            ref={menuRef}
             align="end"
             sideOffset={6}
             avoidCollisions={true}
             collisionPadding={12}
+            onPointerDownOutside={() => setIsOpen(false)}
             className="z-50 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
           >
             {/* Header info */}

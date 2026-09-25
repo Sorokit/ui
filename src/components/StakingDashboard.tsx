@@ -190,8 +190,9 @@ export function StakingDashboard({
   const handleAdjust = useCallback(
     async (
       validatorId: string,
-      type: "delegate" | "undelegate",
+      type: "delegate" | "undelegate" | "redelegate",
       amount: string,
+      targetValidatorId?: string,
     ) => {
       setActingValidatorId(validatorId);
       try {
@@ -200,16 +201,42 @@ export function StakingDashboard({
         await new Promise<void>((resolve) => setTimeout(resolve, 800));
 
         setLocalDelegations((prev) => {
-          const existing = prev.find((d) => d.validatorId === validatorId);
           const delta = parseFloat(amount);
-          if (existing) {
-            return prev.map((d) => {
-              if (d.validatorId !== validatorId) return d;
-              const current = parseFloat(d.amount);
-              const next =
-                type === "delegate" ? current + delta : Math.max(0, current - delta);
-              return { ...d, amount: next.toFixed(7) };
+          if (type === "redelegate" && targetValidatorId) {
+            let next = prev.map((d) => {
+              if (d.validatorId === validatorId) {
+                const current = parseFloat(d.amount);
+                return { ...d, amount: Math.max(0, current - delta).toFixed(7) };
+              }
+              if (d.validatorId === targetValidatorId) {
+                const current = parseFloat(d.amount);
+                return { ...d, amount: (current + delta).toFixed(7) };
+              }
+              return d;
             });
+            if (!next.some((d) => d.validatorId === targetValidatorId)) {
+              next.push({
+                validatorId: targetValidatorId,
+                amount: delta.toFixed(7),
+                pendingReward: "0",
+                claimableReward: "0",
+                delegatedAt: new Date().toISOString(),
+              });
+            }
+            return next.filter((d) => parseFloat(d.amount) > 0);
+          }
+
+          const existing = prev.find((d) => d.validatorId === validatorId);
+          if (existing) {
+            return prev
+              .map((d) => {
+                if (d.validatorId !== validatorId) return d;
+                const current = parseFloat(d.amount);
+                const next =
+                  type === "delegate" ? current + delta : Math.max(0, current - delta);
+                return { ...d, amount: next.toFixed(7) };
+              })
+              .filter((d) => parseFloat(d.amount) > 0);
           }
           // New delegation
           return [

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
+import { useOutsideClick } from "@/hooks/useOutsideClick";
 import { truncateAddress } from "@/lib/utils";
 
 import { WalletConnectModal } from "./WalletConnectModal";
@@ -27,6 +28,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
   } = useSorokit();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const menuRef = useOutsideClick<HTMLDivElement>(() => {
+    setDropdownOpen(false);
+  }, dropdownOpen);
 
   useEffect(() => {
     if (isConnected) {
@@ -65,8 +70,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         {!onOpenModal && (
           <DropdownMenu.Portal>
             <DropdownMenu.Content
+              ref={menuRef}
               align="end"
               sideOffset={6}
+              onPointerDownOutside={() => setDropdownOpen(false)}
               className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-top-1 duration-200"
             >
               {/* Wallet info header */}
