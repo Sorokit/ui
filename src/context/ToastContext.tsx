@@ -46,6 +46,9 @@ interface ToastContextValue {
     title: string,
     options?: Omit<Partial<Toast>, "id" | "title" | "type">,
   ) => string;
+  /** Dismiss every active toast and cancel their auto-dismiss timers. */
+  dismissAll: () => void;
+  /** @deprecated Alias of `dismissAll`, kept for backwards compatibility. */
   clearAll: () => void;
 }
 
@@ -96,7 +99,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [removeToast],
   );
 
-  const clearAll = useCallback(() => {
+  const dismissAll = useCallback(() => {
     timersRef.current.forEach((timer) => clearTimeout(timer));
     timersRef.current.clear();
     setToasts([]);
@@ -145,7 +148,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         error,
         warning,
         info,
-        clearAll,
+        dismissAll,
+        clearAll: dismissAll,
       }}
     >
       {children}

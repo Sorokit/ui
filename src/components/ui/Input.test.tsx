@@ -1,4 +1,6 @@
 import { fireEvent,render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { createRef, useState } from "react";
 import { afterEach,describe, expect,it, vi } from "vitest";
 
 import { Input } from "./Input";
@@ -291,6 +293,151 @@ describe("Input", () => {
 
       expect(warnSpy).not.toHaveBeenCalled();
       warnSpy.mockRestore();
+    });
+  });
+
+  describe("clearable (#694)", () => {
+    function Controlled({
+      initial = "hello",
+      onClear,
+    }: {
+      initial?: string;
+      onClear?: () => void;
+    }) {
+      const [value, setValue] = useState(initial);
+      return (
+        <>
+          <Input
+            label="Search"
+            clearable
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onClear={onClear}
+          />
+          <output data-testid="state">{value}</output>
+        </>
+      );
+    }
+
+    it("does not render a clear button unless clearable is set", () => {
+      render(<Input defaultValue="text" />);
+      expect(
+        screen.queryByRole("button", { name: "Clear input" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides the clear button while the input is empty", () => {
+      render(<Input clearable defaultValue="" />);
+      expect(
+        screen.queryByRole("button", { name: "Clear input" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears a controlled input through onChange", async () => {
+      const user = userEvent.setup();
+      const onClear = vi.fn();
+      render(<Controlled onClear={onClear} />);
+
+      await user.click(screen.getByRole("button", { name: "Clear input" }));
+
+      expect(screen.getByLabelText("Search")).toHaveValue("");
+      expect(screen.getByTestId("state")).toHaveTextContent("");
+      expect(onClear).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByRole("button", { name: "Clear input" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("clears an uncontrolled input and calls the consumer onChange with ''", async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(<Input label="Memo" clearable defaultValue="abc" onChange={onChange} />);
+
+      await user.click(screen.getByRole("button", { name: "Clear input" }));
+
+      expect(screen.getByLabelText("Memo")).toHaveValue("");
+      expect(onChange).toHaveBeenCalledTimes(1);
+      expect(onChange.mock.calls[0][0].target.value).toBe("");
+    });
+
+    it("shows the clear button once the user types into an uncontrolled input", async () => {
+      const user = userEvent.setup();
+      render(<Input label="Name" clearable />);
+      expect(
+        screen.queryByRole("button", { name: "Clear input" }),
+      ).not.toBeInTheDocument();
+
+      await user.type(screen.getByLabelText("Name"), "x");
+      expect(
+        screen.getByRole("button", { name: "Clear input" }),
+      ).toBeInTheDocument();
+    });
+
+    it("is reachable and operable with the keyboard", async () => {
+      const user = userEvent.setup();
+      render(<Controlled />);
+      const input = screen.getByLabelText("Search");
+
+      await user.click(input);
+      await user.tab();
+      const clear = screen.getByRole("button", { name: "Clear input" });
+      expect(clear).toHaveFocus();
+
+      await user.keyboard("{Enter}");
+      expect(input).toHaveValue("");
+      // Focus returns to the field once the button disappears.
+      expect(input).toHaveFocus();
+    });
+
+    it("can be activated with Space", async () => {
+      const user = userEvent.setup();
+      render(<Controlled />);
+      screen.getByRole("button", { name: "Clear input" }).focus();
+      await user.keyboard(" ");
+      expect(screen.getByLabelText("Search")).toHaveValue("");
+    });
+
+    it("links the clear button to its input and supports a custom label", () => {
+      render(
+        <Input id="addr" clearable clearLabel="Clear address" defaultValue="G" />,
+      );
+      const clear = screen.getByRole("button", { name: "Clear address" });
+      expect(clear).toHaveAttribute("type", "button");
+      expect(clear).toHaveAttribute("aria-controls", "addr");
+    });
+
+    it("does not offer clearing when disabled or read-only", () => {
+      const { rerender } = render(<Input clearable disabled defaultValue="x" />);
+      expect(screen.queryByRole("button", { name: "Clear input" })).toBeNull();
+      rerender(<Input clearable readOnly value="x" />);
+      expect(screen.queryByRole("button", { name: "Clear input" })).toBeNull();
+    });
+
+    it("does not submit an enclosing form", async () => {
+      const user = userEvent.setup();
+      const onSubmit = vi.fn((e: React.FormEvent) => e.preventDefault());
+      render(
+        <form onSubmit={onSubmit}>
+          <Input clearable defaultValue="x" />
+        </form>,
+      );
+      await user.click(screen.getByRole("button", { name: "Clear input" }));
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("sits beside a suffix or password toggle instead of on top of it", () => {
+      render(<Input clearable type="password" defaultValue="secret" />);
+      const clear = screen.getByRole("button", { name: "Clear input" });
+      expect(clear).toHaveClass("right-8");
+      expect(screen.getByRole("button", { name: "Show password" })).toBeInTheDocument();
+      expect(document.querySelector("input")).toHaveClass("pr-14");
+    });
+
+    it("still forwards the ref to the input element", () => {
+      const ref = createRef<HTMLInputElement>();
+      render(<Input ref={ref} clearable defaultValue="x" />);
+      expect(ref.current).toBeInstanceOf(HTMLInputElement);
+      expect(ref.current?.value).toBe("x");
     });
   });
 });

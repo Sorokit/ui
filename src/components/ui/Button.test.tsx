@@ -174,4 +174,173 @@ describe("Button component", () => {
       expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
     });
   });
+
+  describe("click prevention (#694)", () => {
+    it("never calls onClick when aria-disabled='true'", async () => {
+      const user = userEvent.setup();
+      const handleClick = vi.fn();
+      render(
+        <Button aria-disabled="true" onClick={handleClick}>
+          Soft disabled
+        </Button>,
+      );
+      const button = screen.getByRole("button", { name: /soft disabled/i });
+      // aria-disabled keeps the button focusable (unlike native disabled)…
+      expect(button).not.toBeDisabled();
+      expect(button).toHaveAttribute("aria-disabled", "true");
+
+      // …but it must still never activate, by mouse or keyboard.
+      await user.click(button);
+      button.focus();
+      await user.keyboard("{Enter}");
+      await user.keyboard(" ");
+      expect(handleClick).not.toHaveBeenCalled();
+    });
+
+    it("never calls onClick when aria-disabled={true} (boolean)", () => {
+      const handleClick = vi.fn();
+      render(
+        <Button aria-disabled onClick={handleClick}>
+          Bool
+        </Button>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Bool" }));
+      expect(handleClick).not.toHaveBeenCalled();
+    });
+
+    it("still calls onClick when aria-disabled='false'", () => {
+      const handleClick = vi.fn();
+      render(
+        <Button aria-disabled="false" onClick={handleClick}>
+          Enabled
+        </Button>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Enabled" }));
+      expect(handleClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks the click when the inner label span is the event target", () => {
+      const handleClick = vi.fn();
+      render(
+        <Button aria-disabled="true" onClick={handleClick}>
+          <span>Inner</span>
+        </Button>,
+      );
+      fireEvent.click(screen.getByText("Inner"));
+      expect(handleClick).not.toHaveBeenCalled();
+    });
+
+    it("does not bubble a blocked click to ancestor handlers", () => {
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <Button aria-disabled="true">Contained</Button>
+        </div>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Contained" }));
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("blocks a slotted anchor's own onClick when disabled", () => {
+      const childClick = vi.fn();
+      const buttonClick = vi.fn();
+      render(
+        <Button asChild disabled onClick={buttonClick}>
+          <a href="#docs" onClick={childClick}>
+            Docs
+          </a>
+        </Button>,
+      );
+      const link = screen.getByText("Docs");
+      expect(link).toHaveAttribute("aria-disabled", "true");
+
+      const notPrevented = fireEvent.click(link);
+      expect(childClick).not.toHaveBeenCalled();
+      expect(buttonClick).not.toHaveBeenCalled();
+      // preventDefault stops the anchor from navigating.
+      expect(notPrevented).toBe(false);
+    });
+
+    it("blocks a slotted child's onClick when aria-disabled is set on <Button>", () => {
+      const childClick = vi.fn();
+      render(
+        <Button asChild aria-disabled="true">
+          <div role="button" tabIndex={0} onClick={childClick}>
+            Custom slot
+          </div>
+        </Button>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Custom slot" }));
+      expect(childClick).not.toHaveBeenCalled();
+    });
+
+    it("blocks a slotted child that carries aria-disabled itself", () => {
+      const childClick = vi.fn();
+      const buttonClick = vi.fn();
+      render(
+        <Button asChild onClick={buttonClick}>
+          <a href="#x" aria-disabled="true" onClick={childClick}>
+            Self disabled
+          </a>
+        </Button>,
+      );
+      fireEvent.click(screen.getByText("Self disabled"));
+      expect(childClick).not.toHaveBeenCalled();
+      expect(buttonClick).not.toHaveBeenCalled();
+    });
+
+    it("blocks a slotted child's onClick while loading", () => {
+      const childClick = vi.fn();
+      render(
+        <Button asChild loading>
+          <a href="#y" onClick={childClick}>
+            Busy
+          </a>
+        </Button>,
+      );
+      fireEvent.click(screen.getByText("Busy"));
+      expect(childClick).not.toHaveBeenCalled();
+    });
+
+    it("lets an enabled slotted child's onClick through", () => {
+      const childClick = vi.fn();
+      render(
+        <Button asChild>
+          <a href="#z" onClick={childClick}>
+            Live
+          </a>
+        </Button>,
+      );
+      fireEvent.click(screen.getByText("Live"));
+      expect(childClick).toHaveBeenCalledTimes(1);
+    });
+
+    it("blocks href links that are aria-disabled", () => {
+      const handleClick = vi.fn();
+      render(
+        <Button href="https://stellar.org" aria-disabled="true" onClick={handleClick}>
+          External
+        </Button>,
+      );
+      const link = screen.getByText("External").closest("a")!;
+      const notPrevented = fireEvent.click(link);
+      expect(handleClick).not.toHaveBeenCalled();
+      expect(notPrevented).toBe(false);
+    });
+
+    it("forwards onClickCapture when the button is enabled", () => {
+      const capture = vi.fn();
+      render(<Button onClickCapture={capture}>Capture</Button>);
+      fireEvent.click(screen.getByRole("button", { name: "Capture" }));
+      expect(capture).toHaveBeenCalledTimes(1);
+    });
+
+    it("styles aria-disabled buttons as disabled", () => {
+      render(<Button aria-disabled="true">Styled</Button>);
+      expect(screen.getByRole("button", { name: "Styled" })).toHaveClass(
+        "aria-disabled:opacity-40",
+        "aria-disabled:cursor-not-allowed",
+      );
+    });
+  });
 });
