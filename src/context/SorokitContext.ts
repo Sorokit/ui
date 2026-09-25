@@ -9,6 +9,7 @@ import type {
 } from "@/lib/client";
 
 export interface SorokitState {
+  client: SorokitClient;
   address: string | null;
   walletName: string | null;
   isConnected: boolean;
@@ -33,6 +34,9 @@ export interface SorokitState {
   customNetworks?: NetworkInfo[];
   addCustomNetwork?: (config: NetworkInfo) => Promise<void>;
   error: string | null;
+  accountError?: string | null;
+  networkError?: string | null;
+  walletError?: string | null;
   errorSeverity?: "info" | "error";
   errorHistory: string[];
   clearError: () => void;

@@ -31,40 +31,36 @@ interface BaseProps {
   children?: ReactNode;
 }
 
-export const Card = forwardRef(function Card<E extends ElementType = "div">(
-  { as, className, children, ...props }: PolymorphicProps<E, BaseProps>,
-  ref: PolymorphicRef<E>,
-) {
-  const Component = (as ?? "div") as ElementType;
-  return (
-    <Component
-      ref={ref}
-      className={cn("rounded-xl border border-line bg-surface", className)}
-      {...props}
-    >
-      {children}
-    </Component>
-  );
-}) as PolymorphicComponent<"div", BaseProps>;
+export const Card = forwardRef<HTMLElement, BaseProps & { as?: ElementType }>(
+  function Card({ as, className, children, ...props }, ref) {
+    const Component = (as ?? "div") as ElementType;
+    return (
+      <Component
+        ref={ref}
+        className={cn("rounded-xl border border-line bg-surface", className)}
+        {...props}
+      >
+        {children}
+      </Component>
+    );
+  },
+) as PolymorphicComponent<"div", BaseProps>;
 Card.displayName = "Card";
 
-export const CardHeader = forwardRef(function CardHeader<
-  E extends ElementType = "div",
->(
-  { as, className, children, ...props }: PolymorphicProps<E, BaseProps>,
-  ref: PolymorphicRef<E>,
-) {
-  const Component = (as ?? "div") as ElementType;
-  return (
-    <Component
-      ref={ref}
-      className={cn("px-5 py-4 border-b border-line", className)}
-      {...props}
-    >
-      {children}
-    </Component>
-  );
-}) as PolymorphicComponent<"div", BaseProps>;
+export const CardHeader = forwardRef<HTMLElement, BaseProps & { as?: ElementType }>(
+  function CardHeader({ as, className, children, ...props }, ref) {
+    const Component = (as ?? "div") as ElementType;
+    return (
+      <Component
+        ref={ref}
+        className={cn("px-5 py-4 border-b border-line", className)}
+        {...props}
+      >
+        {children}
+      </Component>
+    );
+  },
+) as PolymorphicComponent<"div", BaseProps>;
 CardHeader.displayName = "CardHeader";
 
 type HeadingLevel = "h1" | "h2" | "h3" | "h4";
@@ -87,23 +83,20 @@ export const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(
 );
 CardTitle.displayName = "CardTitle";
 
-export const CardDescription = forwardRef(function CardDescription<
-  E extends ElementType = "p",
->(
-  { as, className, children, ...props }: PolymorphicProps<E, BaseProps>,
-  ref: PolymorphicRef<E>,
-) {
-  const Component = (as ?? "p") as ElementType;
-  return (
-    <Component
-      ref={ref}
-      className={cn("text-[12px] text-ink-3 mt-1", className)}
-      {...props}
-    >
-      {children}
-    </Component>
-  );
-}) as PolymorphicComponent<"p", BaseProps>;
+export const CardDescription = forwardRef<HTMLElement, BaseProps & { as?: ElementType }>(
+  function CardDescription({ as, className, children, ...props }, ref) {
+    const Component = (as ?? "p") as ElementType;
+    return (
+      <Component
+        ref={ref}
+        className={cn("text-[12px] text-ink-3 mt-1", className)}
+        {...props}
+      >
+        {children}
+      </Component>
+    );
+  },
+) as PolymorphicComponent<"p", BaseProps>;
 CardDescription.displayName = "CardDescription";
 
 interface CardContentOwnProps extends BaseProps {
@@ -111,49 +104,40 @@ interface CardContentOwnProps extends BaseProps {
   noPadding?: boolean;
 }
 
-export const CardContent = forwardRef(function CardContent<
-  E extends ElementType = "div",
->(
-  {
-    as,
-    className,
-    children,
-    noPadding,
-    ...props
-  }: PolymorphicProps<E, CardContentOwnProps>,
-  ref: PolymorphicRef<E>,
-) {
-  const Component = (as ?? "div") as ElementType;
-  return (
-    <Component
-      ref={ref}
-      className={cn(noPadding ? "p-0" : "p-5", className)}
-      {...props}
-    >
-      {children}
-    </Component>
-  );
-}) as PolymorphicComponent<"div", CardContentOwnProps>;
+export const CardContent = forwardRef<HTMLElement, CardContentOwnProps & { as?: ElementType }>(
+  function CardContent(
+    { as, className, children, noPadding, ...props },
+    ref,
+  ) {
+    const Component = (as ?? "div") as ElementType;
+    return (
+      <Component
+        ref={ref}
+        className={cn(noPadding ? "p-0" : "p-5", className)}
+        {...props}
+      >
+        {children}
+      </Component>
+    );
+  },
+) as PolymorphicComponent<"div", CardContentOwnProps>;
 CardContent.displayName = "CardContent";
 
-export const CardFooter = forwardRef(function CardFooter<
-  E extends ElementType = "div",
->(
-  { as, className, children, ...props }: PolymorphicProps<E, BaseProps>,
-  ref: PolymorphicRef<E>,
-) {
-  const Component = (as ?? "div") as ElementType;
-  return (
-    <Component
-      ref={ref}
-      className={cn(
-        "px-5 pb-5 pt-4 border-t border-line flex gap-3",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </Component>
-  );
-}) as PolymorphicComponent<"div", BaseProps>;
+export const CardFooter = forwardRef<HTMLElement, BaseProps & { as?: ElementType }>(
+  function CardFooter({ as, className, children, ...props }, ref) {
+    const Component = (as ?? "div") as ElementType;
+    return (
+      <Component
+        ref={ref}
+        className={cn(
+          "px-5 pb-5 pt-4 border-t border-line flex gap-3",
+          className,
+        )}
+        {...props}
+      >
+        {children}
+      </Component>
+    );
+  },
+) as PolymorphicComponent<"div", BaseProps>;
 CardFooter.displayName = "CardFooter";

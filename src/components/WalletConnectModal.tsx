@@ -38,6 +38,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Separator } from "@/components/ui/Separator";
 import { useSorokit } from "@/context/useSorokit";
 import { truncateAddress } from "@/lib/utils";
 
@@ -162,7 +163,7 @@ export function WalletConnectModal({
               </button>
             </Dialog.Close>
           </div>
-          <p id="wallet-connect-desc" className="text-[12px] text-ink-3 mb-5">
+          <p id="wallet-connect-desc" className="text-[12px] text-ink-3 mb-4">
             {step === "select" &&
               "Choose a Stellar wallet to connect to this app."}
             {step === "connecting" &&
@@ -171,6 +172,7 @@ export function WalletConnectModal({
               "Your wallet is connected and ready to use."}
             {step === "error" && "We couldn't complete the connection."}
           </p>
+          <Separator spacing="sm" />
 
           {step === "select" && (
             <div

@@ -48,7 +48,7 @@ interface SwapSimulatorProps {
 }
 
 export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
-  const { address, isConnected, connectWallet } = useSorokit();
+  const { isConnected, connectWallet } = useSorokit();
 
   // Swap State
   const [fromAsset, setFromAsset] = useState("XLM");

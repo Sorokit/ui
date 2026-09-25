@@ -27,7 +27,7 @@ jobs:
         run: npm run lint
 
       - name: Typecheck
-        run: npx tsc --noEmit -p tsconfig.app.json
+        run: npm run typecheck
 
       - name: Build
         run: npm run build

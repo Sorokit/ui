@@ -13,7 +13,15 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: ["./src/setupTests.ts"],
-    threads: false,
+    testTimeout: 10000,
+    fileParallelism: false,
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
   },
 });

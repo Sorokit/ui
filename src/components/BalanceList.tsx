@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { AssetBadge } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -12,6 +12,17 @@ type SortMode = "default" | "balance-desc" | "alpha";
 
 function getAssetCode(balance: Balance) {
   return balance.assetType === "native" ? "XLM" : balance.assetCode ?? balance.asset;
+}
+
+/**
+ * Composite React key for a balance row: `asset` alone collides for two
+ * balances with the same code but different issuers (e.g. two USDC
+ * balances from different issuers), silently dropping re-renders and
+ * mixing up row state (issue #524). `assetIssuer` is undefined for native
+ * XLM and for liquidity-pool-share balances, hence the "native" fallback.
+ */
+export function balanceKey(balance: Balance): string {
+  return `${getAssetCode(balance)}-${balance.assetIssuer ?? "native"}`;
 }
 
 function compareBalances(a: Balance, b: Balance) {
@@ -48,22 +59,33 @@ const sortLabels: Record<SortMode, string> = {
   alpha: "A-Z",
 };
 
-function AssetRow({
+const AssetRow = memo(function AssetRow({
   b,
-  onClick,
+  onAssetClick,
+  detailRef,
+  showIssuerSuffix,
 }: {
   b: Balance;
-  onClick?: () => void;
+  onAssetClick?: (balance: Balance) => void;
+  detailRef?: React.RefObject<HTMLElement | null>;
+  showIssuerSuffix?: boolean;
 }) {
   const isZeroBalance = Number(b.balance) === 0;
+  const onClick = useCallback(() => {
+    onAssetClick?.(b);
+    requestAnimationFrame(() => {
+      detailRef?.current?.focus();
+    });
+  }, [b, detailRef, onAssetClick]);
+  const hasClickHandler = Boolean(onAssetClick);
 
   return (
     <div
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
+      role={hasClickHandler ? "button" : undefined}
+      tabIndex={hasClickHandler ? 0 : undefined}
+      onClick={hasClickHandler ? onClick : undefined}
       onKeyDown={
-        onClick
+        hasClickHandler
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -75,10 +97,10 @@ function AssetRow({
       className={cn(
         "flex items-center justify-between px-5 py-4 border-b border-line last:border-0",
         isZeroBalance && "opacity-50",
-        onClick && "cursor-pointer hover:bg-surface-2 transition-colors",
+        hasClickHandler && "cursor-pointer hover:bg-surface-2 transition-colors",
       )}
     >
-      <AssetBadge balance={b} />
+      <AssetBadge balance={b} showIssuerSuffix={showIssuerSuffix} />
       <div className="flex flex-col items-end gap-0.5">
         <span
           className={cn(
@@ -94,7 +116,7 @@ function AssetRow({
       </div>
     </div>
   );
-}
+});
 
 export interface BalanceListProps {
   onAssetClick?: (balance: Balance) => void;
@@ -120,40 +142,52 @@ export function BalanceList({
 
   const skeletonCount = balances.length > 0 ? balances.length : 3;
 
-  const filtered = search
-    ? balances.filter((b) =>
-        getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
-      )
-    : balances;
+  const codeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of balances) {
+      const code = getAssetCode(b);
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+    return counts;
+  }, [balances]);
 
-  const regularBalances = filtered.filter(
-    (b) => b.assetType !== "liquidity_pool_shares",
-  );
-  const lpBalances = filtered.filter(
-    (b) => b.assetType === "liquidity_pool_shares",
+  const filtered = useMemo(
+    () =>
+      search
+        ? balances.filter((b) =>
+            getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
+          )
+        : balances,
+    [balances, search],
   );
 
-  const sorted = sortBalances(regularBalances, sortMode);
-  const sortedLp = sortBalances(lpBalances, sortMode);
+  const { sorted, sortedLp } = useMemo(() => {
+    const regularBalances = filtered.filter(
+      (b) => b.assetType !== "liquidity_pool_shares",
+    );
+    const lpBalances = filtered.filter(
+      (b) => b.assetType === "liquidity_pool_shares",
+    );
+    return {
+      sorted: sortBalances(regularBalances, sortMode),
+      sortedLp: sortBalances(lpBalances, sortMode),
+    };
+  }, [filtered, sortMode]);
 
   // Approximate — only native XLM balances are summed since other assets
   // have no price feed available here.
-  const xlmTotal = balances
-    .filter((b) => b.assetType === "native")
-    .reduce((sum, b) => sum + Number(b.balance), 0);
+  const xlmTotal = useMemo(
+    () =>
+      balances
+        .filter((b) => b.assetType === "native")
+        .reduce((sum, b) => sum + Number(b.balance), 0),
+    [balances],
+  );
 
   const cycleSort = () => {
     setSortMode((m) =>
       m === "default" ? "balance-desc" : m === "balance-desc" ? "alpha" : "default",
     );
-  };
-
-  const handleAssetClick = (b: Balance) => {
-    onAssetClick?.(b);
-    // Move focus to the detail view if a ref is provided
-    requestAnimationFrame(() => {
-      detailRef?.current?.focus();
-    });
   };
 
   return (
@@ -228,9 +262,13 @@ export function BalanceList({
             <div>
               {sorted.map((b) => (
                 <AssetRow
-                  key={b.asset}
+                  key={balanceKey(b)}
                   b={b}
-                  onClick={onAssetClick ? () => handleAssetClick(b) : undefined}
+                  showIssuerSuffix={Boolean(
+                    b.assetIssuer && (codeCounts.get(getAssetCode(b)) ?? 0) > 1,
+                  )}
+                  onAssetClick={onAssetClick}
+                  detailRef={detailRef}
                 />
               ))}
             </div>
@@ -244,9 +282,13 @@ export function BalanceList({
               </div>
               {sortedLp.map((b) => (
                 <AssetRow
-                  key={b.asset}
+                  key={balanceKey(b)}
                   b={b}
-                  onClick={onAssetClick ? () => handleAssetClick(b) : undefined}
+                  showIssuerSuffix={Boolean(
+                    b.assetIssuer && (codeCounts.get(getAssetCode(b)) ?? 0) > 1,
+                  )}
+                  onAssetClick={onAssetClick}
+                  detailRef={detailRef}
                 />
               ))}
             </div>

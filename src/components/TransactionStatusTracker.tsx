@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient, type NetworkInfo, type TxStatus } from "@/lib/client";
+import { type NetworkInfo, type TxStatus } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 type TrackerStatus = "pending" | "confirmed" | "failed" | "network_error";
@@ -96,7 +96,7 @@ export function TransactionStatusTracker({
   pollIntervalMs = 2000,
   className,
 }: TransactionStatusTrackerProps) {
-  const { network } = useSorokit();
+  const { network, client } = useSorokit();
   const initialHashes = useMemo(() => {
     const combined = [hash, ...hashes].filter(Boolean) as string[];
     return [...new Set(combined)];
@@ -129,7 +129,7 @@ export function TransactionStatusTracker({
   }, [initialHashes]);
 
   useEffect(() => {
-    if (tracked.length === 0) return;
+    if (tracked.length === 0 || !client) return;
 
     const pollTransactions = async () => {
       const unresolved = trackedRef.current.filter((entry) => !isTerminalStatus(entry.status));
@@ -138,7 +138,7 @@ export function TransactionStatusTracker({
       await Promise.all(
         unresolved.map(async (entry) => {
           try {
-            const { data, error } = await getClient().transaction.getStatus(entry.hash);
+            const { data, error } = await client.transaction.getStatus(entry.hash);
             const nextStatus = mapStatus(data, error);
             setTracked((prev) =>
               prev.map((item) => {
@@ -180,7 +180,7 @@ export function TransactionStatusTracker({
     }, pollIntervalMs);
 
     return () => window.clearInterval(timerId);
-  }, [pollIntervalMs, tracked.length]);
+  }, [client, pollIntervalMs, tracked.length]);
 
   const addTrackedHash = () => {
     const nextHash = inputValue.trim();

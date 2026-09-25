@@ -355,7 +355,7 @@ export function ChartingScreen() {
                     className="bg-surface-2 border border-line rounded px-2 text-[12px] text-ink"
                     value={newAlertCond}
                     onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                      setNewAlertCond(e.target.value)
+                      setNewAlertCond(e.target.value as "above" | "below")
                     }
                   >
                     <option value="above">Above</option>

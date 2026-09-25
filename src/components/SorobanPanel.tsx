@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient } from "@/lib/client";
 
 import { ContractInteractionDebugger } from "./ContractInteractionDebugger";
 
@@ -88,7 +87,7 @@ export function SorobanPanel({
   onContractIdChange,
   mode = "invoke",
 }: SorobanPanelProps) {
-  const { isConnected, address } = useSorokit();
+  const { isConnected, address, client } = useSorokit();
   const [method, setMethod] = useState("");
   const [args, setArgs] = useState("");
   const [state, setState] = useState<State>("idle");
@@ -105,17 +104,35 @@ export function SorobanPanel({
   const [abiError, setAbiError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const argsRef = useRef(args);
-  argsRef.current = args;
+  const formId = useId();
 
-  // Clear result and error when contractId changes
   useEffect(() => {
-    setResult(null);
-    setError(null);
-    setState("idle");
+    argsRef.current = args;
+  });
+
+  const prevContractIdRef = useRef(contractId);
+  useEffect(() => {
+    if (prevContractIdRef.current !== contractId) {
+      prevContractIdRef.current = contractId;
+      setResult(null);
+      setError(null);
+      setState("idle");
+    }
   }, [contractId]);
+
+  const isArgsJsonValid = useMemo(() => {
+    if (!args.trim()) return true;
+    try {
+      JSON.parse(args);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [args]);
 
   const canInvoke =
     Boolean(isConnected && contractId.trim() && method.trim()) &&
+    isArgsJsonValid &&
     state !== "loading";
 
   async function doInvoke() {
@@ -136,7 +153,8 @@ export function SorobanPanel({
         if (!signal.aborted) setState("error");
         return;
       }
-      const soroban = getClient().soroban;
+      if (!client) return;
+      const soroban = client.soroban;
       if (mode === "simulate") {
         const { data, error: err } = await soroban.simulateContract({
           contractId: contractId.trim(),
@@ -176,22 +194,21 @@ export function SorobanPanel({
           addContractToHistory(contractId.trim(), prev),
         );
       }
-    } catch (e) {
-      if (!signal.aborted) {
-        const message = e instanceof Error ? e.message : "Unknown error";
-        setError(message);
-        setState("error");
-      }
+    } catch (e: unknown) {
+      if (signal.aborted) return;
+      const message =
+        e instanceof Error
+          ? e.message
+          : typeof e === "string"
+            ? e
+            : "An unexpected error occurred while invoking the contract.";
+      setError(message);
+      setState("error");
     }
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (state === "loading") return;
-    doInvoke();
-  }
-
-  function handleClick() {
     if (state === "loading") return;
     doInvoke();
   }
@@ -219,7 +236,6 @@ export function SorobanPanel({
         return;
       }
       setAbiMethods(methods);
-      setAbiOpen(false);
     } catch {
       setAbiError("Invalid JSON — check the format and try again");
     }
@@ -255,7 +271,7 @@ export function SorobanPanel({
             Connect your wallet to {mode === "simulate" ? "simulate" : "invoke"} contracts
           </p>
         ) : (
-          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+          <form id={formId} onSubmit={handleSubmit} className="flex flex-col gap-5">
             <Input
               label="Contract ID"
               placeholder="C..."
@@ -334,9 +350,20 @@ export function SorobanPanel({
                   }
                 }}
                 disabled={state === "loading"}
-                rows={3}
-                className="w-full resize-y rounded-lg border border-line bg-surface-2 px-4 py-3 text-[13px] font-mono text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
+                rows={4}
+                aria-invalid={args.trim() !== "" && !isArgsJsonValid}
+                aria-describedby={
+                  args.trim() !== "" && !isArgsJsonValid
+                    ? "soroban-args-error"
+                    : undefined
+                }
+                className="w-full resize-y min-h-[80px] rounded-lg border border-line bg-surface-2 px-4 py-3 text-[13px] font-mono text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
               />
+              {args.trim() !== "" && !isArgsJsonValid && (
+                <p id="soroban-args-error" className="text-[11px] text-red">
+                  Invalid JSON in arguments
+                </p>
+              )}
             </div>
 
             {state !== "idle" && (
@@ -444,11 +471,12 @@ export function SorobanPanel({
           </Button>
         )}
         <Button
+          type="submit"
+          form={formId}
           size="md"
           loading={state === "loading"}
           // `canInvoke` already requires state !== "loading".
           disabled={!canInvoke}
-          onClick={handleClick}
         >
           {state === "loading"
             ? mode === "simulate"

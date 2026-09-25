@@ -3,6 +3,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { FeeEstimator } from "@/components/FeeEstimator";
 import { GasOptimizer } from "@/components/GasOptimizer";
 import { MultiSigTransactionBuilder } from "@/components/MultiSigTransactionBuilder";
+import { TransactionHistory } from "@/components/TransactionHistory";
 import { TransactionPanel } from "@/components/TransactionPanel";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
 
@@ -22,6 +23,9 @@ export function TransactionsScreen() {
       <MultiSigTransactionBuilder />
       <ErrorBoundary isolate>
         <TransactionPanel />
+      </ErrorBoundary>
+      <ErrorBoundary isolate>
+        <TransactionHistory />
       </ErrorBoundary>
       <ActivityTimeline />
     </div>

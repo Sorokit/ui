@@ -9,7 +9,7 @@ import { getClient, initClient } from "@/lib/client";
 
 describe("Payment Flow Integration", () => {
   let mockClient: ReturnType<typeof getClient>;
-  const mockAddress = "GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+  const mockAddress = "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA";
 
   beforeEach(() => {
     mockClient = {
@@ -73,11 +73,15 @@ describe("Payment Flow Integration", () => {
       fireEvent.click(screen.getByRole("button", { name: "Test Connect" }));
     });
 
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /XLM/ })).toHaveTextContent("100.5");
+    });
+
     const destInput = screen.getByLabelText("Destination Address");
     const amountInput = screen.getByLabelText("Amount (XLM)");
-    const submitBtn = screen.getByRole("button", { name: "Send Payment" });
+    const submitBtn = screen.getByRole("button", { name: /Send (Payment|XLM|USDC)/i });
 
-    const validDest = "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC";
+    const validDest = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
     const validAmount = "15.5";
 
     fireEvent.change(destInput, { target: { value: validDest } });

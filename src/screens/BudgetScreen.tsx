@@ -28,6 +28,7 @@ export function BudgetScreen() {
     "monthly",
   );
   const [budgetLimit, setBudgetLimit] = useState(1500);
+  const [currentSpent] = useState(1280);
   const [warningThreshold, setWarningThreshold] = useState(80); // 80% default
   const [lockTransactions, setLockTransactions] = useState(false);
 
@@ -105,7 +106,7 @@ export function BudgetScreen() {
                 className="bg-surface-2 border border-line rounded px-2.5 py-1 text-[12px] text-ink font-semibold"
                 value={period}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
-                  setPeriod(e.target.value)
+                  setPeriod(e.target.value as "daily" | "weekly" | "monthly")
                 }
               >
                 <option value="daily">Daily Period</option>

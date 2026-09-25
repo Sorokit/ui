@@ -1,6 +1,10 @@
+import { useCallback, useEffect, useState } from 'react';
+
+import type { NavSection } from './components/Sidebar';
 import { SorokitProvider } from './context/SorokitProvider';
 import { useSorokit } from './context/useSorokit';
 import type { SorokitClient } from './lib/client';
+import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
 import { ConnectScreen } from './screens/ConnectScreen';
 import { Dashboard } from './screens/Dashboard';
 
@@ -89,7 +93,7 @@ export function AppContent() {
     return <ConnectScreen />;
   }
 
-  return <Dashboard />;
+  return <Dashboard activeSection={section} onSectionChange={handleSectionChange} />;
 }
 
 function App({ client }: AppProps) {

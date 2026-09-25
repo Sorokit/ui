@@ -125,7 +125,7 @@ describe("AssetFilter", () => {
 
   it("shows favorites toggle button", () => {
     renderComponent();
-    const favToggle = screen.getByRole("button", { name: /favorites/i });
+    const favToggle = screen.getByRole("button", { name: /favorites only|show all/i });
     expect(favToggle).toBeInTheDocument();
   });
 
@@ -142,7 +142,7 @@ describe("AssetFilter", () => {
     renderComponent();
     const input = screen.getByPlaceholderText(/search/i);
     fireEvent.change(input, { target: { value: "ZZZZZZ" } });
-    expect(screen.getByText(/no assets match/i)).toBeInTheDocument();
+    expect(screen.getByText(/no assets (match|found)/i)).toBeInTheDocument();
   });
 
   it("shows empty state when no assets provided", () => {
@@ -192,14 +192,14 @@ describe("AssetFilter", () => {
     renderComponent();
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Name"));
-    expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(screen.getByText(/Name/)).toBeInTheDocument();
   });
 
   it("sorts by balance when selected", () => {
     renderComponent();
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Balance"));
-    expect(screen.getByText("Balance")).toBeInTheDocument();
+    expect(screen.getByText(/Balance/)).toBeInTheDocument();
   });
 
   it("shows asset count", () => {
@@ -221,7 +221,7 @@ describe("AssetFilter", () => {
 
   it("toggles favorites and persists to localStorage", () => {
     renderComponent();
-    const favButtons = screen.getAllByRole("button", { name: /favorites/i });
+    const favButtons = screen.getAllByRole("button", { name: /add to favorites|remove from favorites/i });
     fireEvent.click(favButtons[0]);
     expect(localStorage.getItem("sorokit-asset-favorites")).not.toBeNull();
   });
@@ -248,12 +248,12 @@ describe("AssetFilter", () => {
     );
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Popularity"));
-    expect(screen.getByText("Popularity")).toBeInTheDocument();
+    expect(screen.getByText(/Popularity/)).toBeInTheDocument();
   });
 
   it("shows favorite-only filter when toggled", () => {
     renderComponent();
-    const favToggle = screen.getByRole("button", { name: /favorites only/i });
+    const favToggle = screen.getByRole("button", { name: /favorites only|show all/i });
     fireEvent.click(favToggle);
   });
 

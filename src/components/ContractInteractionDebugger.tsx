@@ -5,7 +5,6 @@ import { JsonView } from "react-json-view-lite";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { cn } from "@/lib/utils";
 
 type DebuggerState = "idle" | "loading" | "success" | "error";
 
@@ -171,7 +170,7 @@ function collectDiffEntries(before: unknown, after: unknown, basePath = ""): Dif
   }
 
   return [{
-    path: basePath || "value",
+    path: basePath || "root",
     beforeValue: before,
     afterValue: after,
     beforeType: describeValue(before),
@@ -186,7 +185,7 @@ export function ContractInteractionDebugger({
   state = "idle",
   result,
   txHash,
-  error,
+  error: _error,
   stateBefore,
   stateAfter,
 }: ContractInteractionDebuggerProps) {
@@ -214,7 +213,7 @@ export function ContractInteractionDebugger({
   }, [state, txHash]);
 
   const stateDiffEntries = useMemo(() => {
-    if (typeof stateBefore === "undefined" || typeof stateAfter === "undefined") return [];
+    if (stateBefore === undefined || stateAfter === undefined) return [];
     return collectDiffEntries(stateBefore, stateAfter);
   }, [stateAfter, stateBefore]);
 
@@ -236,12 +235,32 @@ export function ContractInteractionDebugger({
         : null,
       timestamp: new Date().toISOString(),
     };
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistory((current) => addDebugHistory(entry, current));
   }, [args, attempts, contractId, method, preparedCall, result, simulation, state, txHash]);
 
   const handleCopy = async (key: string, value: string) => {
     await copyToClipboard(value);
     setCopiedKey(key);
+    if (contractId && method) {
+      const entry: DebuggerEntry = {
+        contractId,
+        method,
+        args,
+        preparedCall,
+        simulation,
+        attempts,
+        result: txHash || result
+          ? {
+              txHash: txHash ?? undefined,
+              status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
+              summary: typeof result === "string" ? result : result ? JSON.stringify(result) : undefined,
+            }
+          : null,
+        timestamp: new Date().toISOString(),
+      };
+      setHistory((current) => addDebugHistory(entry, current));
+    }
     window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1600);
   };
 

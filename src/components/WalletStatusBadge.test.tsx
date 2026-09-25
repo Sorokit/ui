@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
+import { getClient } from "@/lib/client";
 
 import { WalletStatusBadge } from "./WalletStatusBadge";
 
@@ -15,7 +16,8 @@ describe("WalletStatusBadge", () => {
   });
 
   function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
-    return {
+  return {
+    get client() { return getClient(); },
       address: null,
       walletName: null,
       isConnected: false,

@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import type { InvokeParams } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn, friendlyError } from "@/lib/utils";
 
 type InvokeState = "idle" | "loading" | "success" | "error";
@@ -44,7 +43,7 @@ export function SorobanInvokeButton({
   size = "md",
   className,
 }: SorobanInvokeButtonProps) {
-  const { isConnected } = useSorokit();
+  const { isConnected, client } = useSorokit();
   const [state, setState] = useState<InvokeState>("idle");
   const [result, setResult] = useState<unknown>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +52,7 @@ export function SorobanInvokeButton({
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function invoke() {
-    if (!isConnected || isInvokingRef.current) return;
+    if (!isConnected || isInvokingRef.current || !client) return;
 
     // Cancel previous requests
     abortControllerRef.current?.abort();
@@ -67,7 +66,7 @@ export function SorobanInvokeButton({
 
     try {
       const { data, error: err } =
-        await getClient().soroban.invokeContract(params);
+        await client.soroban.invokeContract(params);
       if (signal.aborted) return;
       if (err) {
         const message = friendlyError(err);

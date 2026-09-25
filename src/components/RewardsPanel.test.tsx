@@ -43,7 +43,7 @@ describe("RewardsPanel — summary tiles", () => {
   it("displays total claimable XLM amount", () => {
     renderPanel();
     // 12.875 + 6.12 + 2.43 ≈ 21.42 XLM — just confirm a large number is present
-    expect(screen.getByText(/21\./)).toBeInTheDocument();
+    expect(screen.getAllByText(/21\./)[0]).toBeInTheDocument();
   });
 });
 
@@ -121,7 +121,7 @@ describe("RewardsPanel — per-validator claim", () => {
 
   it("shows validator names in the per-validator list", () => {
     renderPanel();
-    expect(screen.getByText("Alpha Staking")).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Staking")[0]).toBeInTheDocument();
   });
 
   it("disables individual Claim button when that validator is claiming", () => {

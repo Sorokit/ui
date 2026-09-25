@@ -44,7 +44,7 @@ describe("ValidatorCard — rendering", () => {
 
   it("renders uptime metric", () => {
     render(<ValidatorCard validator={ALPHA} />);
-    expect(screen.getByText("99.9%")).toBeInTheDocument();
+    expect(screen.getByText(/100\.0%/i)).toBeInTheDocument();
   });
 
   it("renders delegator count", () => {

@@ -37,9 +37,6 @@
 :root {
   color-scheme: dark;
 
-  /* ── Brand ── */lette swap since QR codes need consistent contrast.
-───────────────────────────────────────────────────────── */
-:root {
   /* ── Brand ── */
   --color-brand: #55852b; /* — change this to rebrand */
   --color-brand-hover: #426625; /* brand hover/pressed state */

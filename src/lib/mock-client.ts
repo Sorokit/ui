@@ -2,6 +2,7 @@ import type {
   AccountData,
   AllowanceEntry,
   Balance,
+  GasEstimate,
   GasPriceData,
   GroupedTransaction,
   InvokeParams,
@@ -20,7 +21,7 @@ export const MOCK_ADDRESS =
   "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA";
 
 // Generate deterministic mock data (consistent across test runs)
-export const MOCK_HISTORY = deterministicMock.generateMockHistory(5);
+export const MOCK_HISTORY = deterministicMock.generateMockHistory(25);
 export const MOCK_EVENTS = deterministicMock.generateMockEvents(3);
 
 export const NETWORKS = {
@@ -229,9 +230,17 @@ const MOCK_ALLOWANCES: AllowanceEntry[] = [
 ];
 
 /**
- * Create a mock client that satisfies the SorokitClient interface.
- * If called with an invalid network name, returns the error object
- * (backward compatible with simple-error tests).
+ * Mock Strategy:
+ * 
+ * Provides a canonical, standalone implementation of SorokitClient for development,
+ * demo mode (in main.tsx), and component/screen unit testing.
+ * 
+ * Design:
+ * - Single source of truth for mock blockchain data across the entire repository.
+ * - Instance-scoped state: Each invocation of createMockClient() creates an independent
+ *   instance with its own network and connection state, preventing test cross-contamination.
+ * - Proper pagination support: getHistory slices deterministic transaction records by
+ *   page and limit, providing distinct pages and accurate total count for TransactionHistory.
  */
 export function createMockClient(): SorokitClient;
 export function createMockClient(
@@ -240,8 +249,9 @@ export function createMockClient(
 export function createMockClient(
   networkName?: string,
 ): SorokitClient | { data: null; error: string } {
-  const activeNetwork =
+  let activeNetwork =
     networkName && networkName in NETWORKS ? networkName : "testnet";
+  const connectedAddress = MOCK_ADDRESS;
 
   if (networkName && !(networkName in NETWORKS)) {
     const validNetworks = Object.keys(NETWORKS).join(", ");
@@ -254,18 +264,18 @@ export function createMockClient(
   return {
     wallet: {
       connect: async () => ({
-        data: { address: MOCK_ADDRESS },
+        data: { address: connectedAddress },
         error: null,
         status: "success" as const,
       }),
       disconnect: async () => {},
-      getAddress: async () => ({ data: MOCK_ADDRESS, error: null }),
+      getAddress: async () => ({ data: connectedAddress, error: null }),
     },
     account: {
       getAccount: async () => ({
         data: MOCK_ACCOUNT,
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       getBalances: async () => ({ data: MOCK_BALANCES, error: null }),
       getClaimableBalances: async () => ({ data: [], error: null }),
@@ -279,12 +289,22 @@ export function createMockClient(
           successful: true,
         },
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       getStatus: async () => ({ data: "success" as TxStatus, error: null }),
-      getHistory: async (_address: string, _page?: number, limit?: number) => {
-        const history = MOCK_HISTORY.slice(0, limit ?? MOCK_HISTORY.length);
-        return { data: history, error: null, total: history.length };
+      getHistory: async (
+        _address: string,
+        page: number = 1,
+        limit?: number,
+      ) => {
+        const safePage = Math.max(1, page || 1);
+        const pageSize =
+          limit !== undefined && limit > 0 ? limit : MOCK_HISTORY.length;
+        const total = MOCK_HISTORY.length;
+        const start = (safePage - 1) * pageSize;
+        const end = start + pageSize;
+        const history = MOCK_HISTORY.slice(start, end);
+        return { data: history, error: null, total };
       },
       estimateFee: async () => ({
         data: { baseFee: "100", recommended: "1000" },
@@ -394,14 +414,18 @@ export function createMockClient(
     },
     soroban: {
       invokeContract: async (_params: InvokeParams) => ({
-        data: null,
+        data: {
+          success: true,
+          result: { status: "ok", output: "mock-invoke-output" },
+          txHash: deterministicMock.generateTransactionHash(),
+        },
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       simulateContract: async (_params: InvokeParams) => ({
         data: { simulated: true, result: "simulated-output" },
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       getEvents: async (
         _contractId: string,
@@ -422,10 +446,12 @@ export function createMockClient(
       }),
       switchNetwork: async (param: NetworkName | NetworkInfo) => {
         if (typeof param === "object" && param !== null) {
+          activeNetwork = param.name;
           return { data: { status: "online", ...param }, error: null };
         }
         const info = MOCK_NETWORK_INFO[param];
         if (info) {
+          activeNetwork = param;
           return { data: info, error: null };
         }
         return { data: null, error: `Invalid network: ${param}` };
@@ -533,7 +559,7 @@ export function createMockClient(
           successful: true,
         },
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       revokeAllowance: async (_params: {
         sourceAccount: string;
@@ -546,7 +572,7 @@ export function createMockClient(
           successful: true,
         },
         error: null,
-        status: "success",
+        status: "success" as const,
       }),
       estimateAllowanceFee: async (_params: {
         asset: string;
@@ -555,6 +581,25 @@ export function createMockClient(
         mode: "increase" | "decrease" | "revoke";
       }) => ({
         data: { baseFee: "100", recommended: "1000" },
+        error: null,
+      }),
+    },
+    batch: {
+      submitBatch: async () => ({
+        data: null,
+        error: null,
+        batchId: "batch-mock-123",
+      }),
+      getBatchStatus: async () => ({
+        data: null,
+        error: null,
+      }),
+      cancelBatch: async () => ({
+        data: true,
+        error: null,
+      }),
+      retryEntry: async () => ({
+        data: null,
         error: null,
       }),
     },

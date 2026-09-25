@@ -66,7 +66,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 // ────────────────────────────────────────────────────────────────────────────
 
 function getAssetCode(asset: AssetItem): string {
-  if (asset.assetType === "native") return "XLM";
+  if (asset.assetType === "native" && !asset.assetCode && !asset.asset) return "XLM";
   return asset.assetCode ?? asset.asset;
 }
 
@@ -76,7 +76,14 @@ function getAssetKey(asset: AssetItem): string {
 }
 
 function getAssetName(asset: AssetItem): string {
-  if (asset.assetType === "native") return "Stellar Lumens";
+  if (
+    asset.assetType === "native" &&
+    (!asset.assetCode || asset.assetCode === "XLM") &&
+    (!asset.asset || asset.asset === "XLM") &&
+    !asset.displayName
+  ) {
+    return "Stellar Lumens";
+  }
   return asset.displayName ?? asset.assetCode ?? asset.asset;
 }
 
@@ -173,7 +180,7 @@ interface DefaultAssetRowProps {
   asset: AssetItem;
   isFavorite: boolean;
   onFavoriteToggle: (asset: AssetItem) => void;
-  onSelect: (asset: AssetItem) => void;
+  onSelect?: (asset: AssetItem) => void;
   isFocused: boolean;
 }
 
@@ -190,13 +197,20 @@ function DefaultAssetRow({
   const shortCode = code.slice(0, 2).toUpperCase();
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={cn(
-        "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors",
+        "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors cursor-pointer",
         isFocused ? "bg-surface-2" : "hover:bg-surface-2",
       )}
-      onClick={() => onSelect(asset)}
+      onClick={() => onSelect?.(asset)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(asset);
+        }
+      }}
       data-asset-row={getAssetKey(asset)}
     >
       <button
@@ -250,7 +264,7 @@ function DefaultAssetRow({
           </span>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -450,7 +464,7 @@ function AssetFilter({
       asset: code,
       assetCode: code,
       assetIssuer: issuer,
-      assetType: issuer ? "credit_alphanum4" : "native",
+      assetType: code === "XLM" && !issuer ? "native" : "credit_alphanum4",
       balance: "0",
       isVerified: false,
     };
@@ -471,7 +485,7 @@ function AssetFilter({
         if (!listRef.current) return;
         const rows = listRef.current.querySelectorAll("[data-asset-row]");
         const row = rows[index] as HTMLElement | undefined;
-        if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (row) row.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
       };
 
       const clamp = (i: number) => Math.max(0, Math.min(i, filtered.length - 1));
@@ -479,13 +493,19 @@ function AssetFilter({
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setFocusedIndex(clamp(focusedIndex + 1));
-          scrollIntoView(clamp(focusedIndex + 1));
+          setFocusedIndex((prev) => {
+            const next = clamp(prev + 1);
+            scrollIntoView(next);
+            return next;
+          });
           break;
         case "ArrowUp":
           e.preventDefault();
-          setFocusedIndex(clamp(focusedIndex - 1));
-          scrollIntoView(clamp(focusedIndex - 1));
+          setFocusedIndex((prev) => {
+            const next = clamp(prev - 1);
+            scrollIntoView(next);
+            return next;
+          });
           break;
         case "Home":
           e.preventDefault();
@@ -498,17 +518,36 @@ function AssetFilter({
           scrollIntoView(filtered.length - 1);
           break;
         case "Enter":
-          e.preventDefault();
-          if (filtered[focusedIndex]) {
-            onSelect(filtered[focusedIndex]);
+          if (focusedIndex >= 0 && focusedIndex < filtered.length) {
+            e.preventDefault();
+            onSelect?.(filtered[focusedIndex]);
           }
-          return;
-        default:
-          return;
+          break;
+        case "Escape":
+          setSearch("");
+          setShowSortDropdown(false);
+          setFocusedIndex(-1);
+          break;
       }
     },
     [filtered, focusedIndex, onSelect],
   );
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        sortDropdownRef.current &&
+        !sortDropdownRef.current.contains(e.target as Node) &&
+        sortBtnRef.current &&
+        !sortBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowSortDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // ── Extract unique networks ────────────────────────────────────────────────
   const extractedNetworks = useMemo<string[]>(() => {
@@ -518,23 +557,6 @@ function AssetFilter({
     });
     return [...nets];
   }, [assets]);
-
-  // ── Click-outside for sort dropdown ────────────────────────────────────────
-  useEffect(() => {
-    if (!showSortDropdown) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        sortBtnRef.current &&
-        !sortBtnRef.current.contains(e.target as Node) &&
-        sortDropdownRef.current &&
-        !sortDropdownRef.current.contains(e.target as Node)
-      ) {
-        setShowSortDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showSortDropdown]);
 
   // ── Reset focused index when filtered list changes ─────────────────────────
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -564,9 +586,10 @@ function AssetFilter({
           <button
             type="button"
             onClick={() => setSearch("")}
-            className="absolute right-6 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
+            aria-label="Clear search"
           >
-            <HugeiconsIcon icon={Cancel01Icon} size={16} />
+            <HugeiconsIcon icon={Cancel01Icon} size={14} />
           </button>
         )}
       </div>
@@ -636,7 +659,7 @@ function AssetFilter({
                   : "bg-surface-3 text-ink-4 hover:text-ink-2",
               )}
             >
-              {net}
+              {net.charAt(0).toUpperCase() + net.slice(1)}
             </button>
           ))}
         </div>
@@ -656,7 +679,7 @@ function AssetFilter({
             onClick={() => setShowSortDropdown((p) => !p)}
             className="flex items-center gap-1 text-[12px] text-ink-4 hover:text-ink-2"
           >
-            {SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? "Sort"}
+            Sort: {SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? "Default"}
             <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5" />
           </button>
           {showSortDropdown && (
@@ -790,5 +813,4 @@ function AssetFilter({
 }
 
 export { AssetFilter };
-export type { AssetItem, AssetMeta, SortKey, VerifiedFilter };
 

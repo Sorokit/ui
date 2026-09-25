@@ -21,13 +21,17 @@ export interface AdapterResponse<T> {
   status: "success" | "error" | "pending";
 }
 
+import type { InvokeParams } from "./client";
+
 /**
  * Universal client adapter for Stellar wallet connections
  * Supports Freighter, xBull, Albedo, and testnet mocking
  */
 export class ClientAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private soroban: any = null;
+  private soroban: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number }) => Promise<unknown[]>;
+  } | null = null;
   private userAddress: string | null = null;
 
   constructor() {
@@ -119,8 +123,11 @@ export class ClientAdapter {
    * @param params - Method parameters
    */
   async invokeContract(
-    contractId: string,
-    method: string,
+    params: InvokeParams
+  ): Promise<AdapterResponse<unknown>>;
+  async invokeContract(
+    contractId: string | InvokeParams,
+    method?: string,
     params: unknown[] = []
   ): Promise<AdapterResponse<unknown>> {
     try {
@@ -140,13 +147,12 @@ export class ClientAdapter {
         };
       }
 
-      // Actual implementation would invoke the contract
-      // This is a stub for now
-      const result = await this.soroban.invokeContract({
-        contractId,
-        method,
-        params,
-      });
+      const invokeParams: InvokeParams =
+        typeof contractId === "object"
+          ? contractId
+          : { contractId, method: method ?? "", args: params };
+
+      const result = await this.soroban.invokeContract(invokeParams);
 
       return {
         data: result,

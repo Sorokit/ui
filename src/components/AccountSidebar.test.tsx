@@ -53,6 +53,7 @@ async function flushTxFetch() {
 
 function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
   return {
+    get client() { return getClient(); },
     address: null,
     isConnected: false,
     isConnecting: false,
@@ -113,8 +114,8 @@ describe("AccountSidebar", () => {
     render(<AccountSidebar open={true} onClose={vi.fn()} />);
     await flushTxFetch();
     expect(screen.getByText("Assets (2)")).toBeInTheDocument();
-    expect(screen.getByText("XLM")).toBeInTheDocument();
-    expect(screen.getByText("USDC")).toBeInTheDocument();
+    expect(screen.getAllByText("XLM")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("USDC")[0]).toBeInTheDocument();
   });
 
   it("fetches and displays up to 5 recent transactions", async () => {

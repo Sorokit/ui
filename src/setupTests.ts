@@ -1,5 +1,13 @@
 import "@testing-library/jest-dom";
 
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
 // Node's experimental global Web Storage API (stable default as of Node 22+)
 // shadows jsdom's own working localStorage implementation. Without a
 // configured --localstorage-file it exposes a non-functional stub missing

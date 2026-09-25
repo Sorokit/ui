@@ -33,7 +33,8 @@ describe("TransactionStatusTracker", () => {
     vi.useFakeTimers();
     mockUseSorokit.mockReturnValue({
       network: { name: "testnet", rpcUrl: "", horizonUrl: "", passphrase: "" },
-    } as ReturnType<typeof useSorokit>);
+      get client() { return getClient(); }
+    } as unknown as ReturnType<typeof useSorokit>);
     Object.defineProperty(navigator, "clipboard", {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
@@ -70,7 +71,7 @@ describe("TransactionStatusTracker", () => {
     await flushAsyncUpdates();
 
     expect(
-      screen.getByText("Confirmed", { selector: "span" }),
+      screen.getByText(/Confirmed/i, { selector: "span" }),
     ).toBeInTheDocument();
 
     expect(
@@ -94,7 +95,7 @@ describe("TransactionStatusTracker", () => {
 
     await flushAsyncUpdates();
     expect(
-      screen.getByText("Failed", { selector: "span" }),
+      screen.getByText(/Failed/i, { selector: "span" }),
     ).toBeInTheDocument();
 
     await act(async () => {

@@ -1,8 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
-import type { AllowanceEntry,SorokitClient } from "@/lib/client";
+import type { AllowanceEntry, SorokitClient } from "@/lib/client";
 import { getClient } from "@/lib/client";
 
 import { AllowanceManager } from "./AllowanceManager";
@@ -37,30 +37,41 @@ function mockGetAllowances(allowances: AllowanceEntry[]) {
   } as unknown as SorokitClient);
 }
 
-function mockApproveAllowance(shouldSucceed = true) {
-  vi.mocked(getClient).allowance.approveAllowance = vi.fn().mockResolvedValue({
-    data: { hash: "hash1234567890", ledger: 12345, successful: shouldSucceed },
-    error: null,
-    status: "success",
-  });
+function mockApproveAllowance(shouldSucceed = true, allowances: AllowanceEntry[] = [MOCK_ALLOWANCE]) {
+  vi.mocked(getClient).mockReturnValue({
+    allowance: {
+      getAllowances: vi.fn().mockResolvedValue({ data: allowances, error: null }),
+      approveAllowance: vi.fn().mockResolvedValue({
+        data: { hash: "hash1234567890", ledger: 12345, successful: shouldSucceed },
+        error: null,
+        status: "success",
+      }),
+      revokeAllowance: vi.fn(),
+      estimateAllowanceFee: vi.fn(),
+    },
+  } as unknown as SorokitClient);
 }
 
-function mockRevokeAllowance(shouldSucceed = true) {
-  vi.mocked(getClient).allowance.revokeAllowance = vi.fn().mockResolvedValue({
-    data: { hash: "hash1234567890", ledger: 12345, successful: shouldSucceed },
-    error: null,
-    status: "success",
-  });
+function mockRevokeAllowance(shouldSucceed = true, allowances: AllowanceEntry[] = [MOCK_ALLOWANCE]) {
+  vi.mocked(getClient).mockReturnValue({
+    allowance: {
+      getAllowances: vi.fn().mockResolvedValue({ data: allowances, error: null }),
+      approveAllowance: vi.fn(),
+      revokeAllowance: vi.fn().mockResolvedValue({
+        data: { hash: "hash1234567890", ledger: 12345, successful: shouldSucceed },
+        error: null,
+        status: "success",
+      }),
+      estimateAllowanceFee: vi.fn(),
+    },
+  } as unknown as SorokitClient);
 }
 
 describe("AllowanceManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.mocked(useSorokit).mockReturnValue({
-      address: ADDRESS,
-      isConnected: true,
-    } as unknown as ReturnType<typeof useSorokit>);
+    vi.mocked(useSorokit).mockReturnValue({ address: ADDRESS, isConnected: true, get client() { return getClient(); },  } as unknown as ReturnType<typeof useSorokit>);
   });
 
   afterEach(() => {
@@ -73,11 +84,16 @@ describe("AllowanceManager", () => {
       isConnected: false,
     } as unknown as ReturnType<typeof useSorokit>);
     vi.mocked(getClient).mockReturnValue({
-      allowance: { getAllowances: vi.fn() },
+      allowance: {
+        getAllowances: vi.fn().mockResolvedValue({ data: [], error: null }),
+        approveAllowance: vi.fn(),
+        revokeAllowance: vi.fn(),
+        estimateAllowanceFee: vi.fn(),
+      },
     } as unknown as SorokitClient);
 
     render(<AllowanceManager />);
-    expect(screen.getByText(/connect your wallet/i)).toBeInTheDocument();
+    expect(screen.getByText("Connect your wallet")).toBeInTheDocument();
   });
 
   it("renders 'No allowances found' when the list is empty", async () => {
@@ -140,18 +156,22 @@ describe("AllowanceManager", () => {
       expect(screen.getByText(/Spender/)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText(/USDC/));
+    fireEvent.click(screen.getAllByText(/USDC/)[0]);
     await waitFor(() => {
       expect(screen.queryByText(/Token Code/)).not.toBeInTheDocument();
     });
   });
 
   it("increases allowance", async () => {
-    mockGetAllowances([MOCK_ALLOWANCE]);
     mockApproveAllowance(true);
     render(<AllowanceManager />);
     act(() => { vi.advanceTimersByTime(0); });
 
+    await waitFor(() => {
+      expect(screen.getByText(/USDC/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
       expect(screen.getByText(/Increase/)).toBeInTheDocument();
     });
@@ -169,16 +189,27 @@ describe("AllowanceManager", () => {
   });
 
   it("handles increase failure", async () => {
-    mockGetAllowances([MOCK_ALLOWANCE]);
     mockApproveAllowance(false);
-    vi.mocked(getClient).allowance.approveAllowance = vi.fn().mockResolvedValue({
-      data: null,
-      error: "Insufficient funds",
-    });
+    vi.mocked(getClient).mockReturnValue({
+      allowance: {
+        getAllowances: vi.fn().mockResolvedValue({ data: [MOCK_ALLOWANCE], error: null }),
+        approveAllowance: vi.fn().mockResolvedValue({
+          data: null,
+          error: "Insufficient funds",
+        }),
+        revokeAllowance: vi.fn(),
+        estimateAllowanceFee: vi.fn(),
+      },
+    } as unknown as SorokitClient);
 
     render(<AllowanceManager />);
     act(() => { vi.advanceTimersByTime(0); });
 
+    await waitFor(() => {
+      expect(screen.getByText(/USDC/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
       expect(screen.getByText(/Increase/)).toBeInTheDocument();
     });
@@ -190,10 +221,13 @@ describe("AllowanceManager", () => {
   });
 
   it("decreases allowance", async () => {
-    mockGetAllowances([MOCK_ALLOWANCE]);
     mockApproveAllowance(true);
     render(<AllowanceManager />);
     act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/USDC/)).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
@@ -204,20 +238,24 @@ describe("AllowanceManager", () => {
     fireEvent.change(screen.getByPlaceholderText(/0\.00/), { target: { value: "200.00" } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Decrease/)).toBeInTheDocument();
+      expect(screen.getByText(/Decrease Allowance/)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getAllByText(/Decrease/)[1]); // Second Decrease button in modal
+    const decreaseButtons = screen.getAllByRole("button", { name: /decrease/i });
+    fireEvent.click(decreaseButtons[decreaseButtons.length - 1]);
     await waitFor(() => {
       expect(vi.mocked(getClient().allowance.approveAllowance)).toHaveBeenCalled();
     });
   });
 
   it("revokes allowance", async () => {
-    mockGetAllowances([MOCK_ALLOWANCE]);
     mockRevokeAllowance(true);
     render(<AllowanceManager />);
     act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/USDC/)).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
@@ -229,13 +267,18 @@ describe("AllowanceManager", () => {
       expect(screen.getByText(/Confirm Revoke/)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getAllByText(/Revoke/)[1]); // Cancel button in modal
+    fireEvent.click(screen.getByText(/Cancel/));
     await waitFor(() => {
       expect(screen.queryByText(/Confirm Revoke/)).not.toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText(/Revoke/));
-    fireEvent.click(screen.getAllByText(/Revoke/)[1]); // Confirm button in modal
+    await waitFor(() => {
+      expect(screen.getByText(/Confirm Revoke/)).toBeInTheDocument();
+    });
+
+    const revokeButtons = screen.getAllByRole("button", { name: /revoke/i });
+    fireEvent.click(revokeButtons[revokeButtons.length - 1]);
     await waitFor(() => {
       expect(vi.mocked(getClient().allowance.revokeAllowance)).toHaveBeenCalled();
       expect(vi.mocked(getClient().allowance.revokeAllowance)).toHaveBeenCalledWith({

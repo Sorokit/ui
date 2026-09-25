@@ -74,6 +74,10 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   }, [active, onNavigate]);
 
   function handleNav(id: NavSection) {
+    if (active === id) {
+      onClose();
+      return;
+    }
     localStorage.setItem("sorokit-active-nav", id);
     onNavigate(id);
     onClose();
@@ -147,6 +151,9 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       {/* Sidebar panel */}
       <aside
         ref={sidebarRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
         className={cn(
           "fixed top-0 left-0 z-30 h-full flex flex-col",
           "bg-surface border-r border-line",
@@ -234,7 +241,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
                   icon={item.icon}
                   size={16}
                   color="currentColor"
-                  strokeWidth={active === item.id ? 2 : 1.5}
+                  strokeWidth={1.5}
                   className={cn(
                     "shrink-0",
                     active === item.id ? "text-brand" : "",

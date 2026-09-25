@@ -37,10 +37,14 @@ export function SorokitProvider({
       return [];
     }
   });
-  const [error, setError] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [networkError, setNetworkError] = useState<string | null>(null);
+  const [walletError, setWalletError] = useState<string | null>(null);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [errorSeverity, setErrorSeverity] = useState<"info" | "error">("error");
   const [errorHistory, setErrorHistory] = useState<string[]>([]);
+
+  const error = accountError ?? networkError ?? walletError ?? null;
 
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -76,7 +80,15 @@ export function SorokitProvider({
 
   const reportError = useCallback(
     (err: string, source: string, severity: "info" | "error" = "error") => {
-      setError(err);
+      if (source === "account") {
+        setAccountError(err);
+      } else if (source === "network") {
+        setNetworkError(err);
+      } else if (source === "wallet") {
+        setWalletError(err);
+      } else {
+        setAccountError(err);
+      }
       setErrorSeverity(severity);
       setErrorHistory((prev) => [...prev, err]);
       onErrorRef.current?.(err, source);
@@ -144,7 +156,12 @@ export function SorokitProvider({
 
   // Load account when address changes
   useEffect(() => {
-    if (!address) return;
+    if (!address) {
+      setAccount(null);
+      setBalances([]);
+      return;
+    }
+    setAccountError(null);
 
     let active = true;
     const timerId = window.setTimeout(() => {
@@ -157,8 +174,21 @@ export function SorokitProvider({
           if (!active) return;
           if (accountRes.data) setAccount(accountRes.data);
           if (balancesRes.data) setBalances(balancesRes.data);
-          if (accountRes.error) reportError(accountRes.error, "account", "error");
-          else if (balancesRes.error) reportError(balancesRes.error, "account", "error");
+          const combined = [accountRes.error, balancesRes.error]
+            .filter(Boolean)
+            .join("; ");
+          if (combined) setAccountError(combined);
+          if (accountRes.error && balancesRes.error) {
+            reportError(
+              `${accountRes.error}; ${balancesRes.error}`,
+              "account",
+              "error",
+            );
+          } else if (accountRes.error) {
+            reportError(accountRes.error, "account", "error");
+          } else if (balancesRes.error) {
+            reportError(balancesRes.error, "account", "error");
+          }
         })
         .finally(() => {
           if (active) setIsLoadingAccount(false);
@@ -183,7 +213,9 @@ export function SorokitProvider({
 
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
-    setError(null);
+    setWalletError(null);
+    setAccountError(null);
+    setNetworkError(null);
     try {
       const name = detectWalletName();
       setWalletName(name);
@@ -194,7 +226,7 @@ export function SorokitProvider({
       }
       if (data?.address) {
         setAddress(data.address);
-        setError(null);
+        setWalletError(null);
       } else {
         // #353 — data and error both empty (e.g. the user dismissed the
         // wallet dialog without picking one) previously left the UI stuck:
@@ -228,6 +260,9 @@ export function SorokitProvider({
       setWalletName(null);
       setAccount(null);
       setBalances([]);
+      setAccountError(null);
+      setNetworkError(null);
+      setWalletError(null);
       // #353 — a fresh session shouldn't carry over error history from
       // whatever the previous wallet connection ran into.
       setErrorHistory([]);
@@ -247,7 +282,7 @@ export function SorokitProvider({
         return;
       }
       if (data) {
-        setError(null);
+        setNetworkError(null);
         setNetwork(data);
 
         // Re-point the `getClient()` singleton at the new network. Without
@@ -298,7 +333,11 @@ export function SorokitProvider({
     [switchNetwork],
   );
 
-  const clearError = useCallback(() => setError(null), []);
+  const clearError = useCallback(() => {
+    setAccountError(null);
+    setNetworkError(null);
+    setWalletError(null);
+  }, []);
 
   const refreshAccount = useCallback(async () => {
     if (!address || isRefreshingRef.current) return;
@@ -311,8 +350,17 @@ export function SorokitProvider({
       ]);
       if (accountRes.data) setAccount(accountRes.data);
       if (balancesRes.data) setBalances(balancesRes.data);
-      if (accountRes.error) reportError(accountRes.error, "account", "error");
-      else if (balancesRes.error) reportError(balancesRes.error, "account", "error");
+      if (accountRes.error && balancesRes.error) {
+        reportError(
+          `${accountRes.error}; ${balancesRes.error}`,
+          "account",
+          "error",
+        );
+      } else if (accountRes.error) {
+        reportError(accountRes.error, "account", "error");
+      } else if (balancesRes.error) {
+        reportError(balancesRes.error, "account", "error");
+      }
     } finally {
       setIsLoadingAccount(false);
       isRefreshingRef.current = false;
@@ -321,6 +369,7 @@ export function SorokitProvider({
 
   const value = useMemo(
     () => ({
+      client,
       address,
       walletName,
       isConnected: !!address,
@@ -340,11 +389,15 @@ export function SorokitProvider({
       customNetworks,
       addCustomNetwork,
       error,
+      accountError,
+      networkError,
+      walletError,
       errorSeverity,
       errorHistory,
       clearError,
     }),
     [
+      client,
       address,
       walletName,
       isConnecting,
@@ -362,6 +415,9 @@ export function SorokitProvider({
       customNetworks,
       addCustomNetwork,
       error,
+      accountError,
+      networkError,
+      walletError,
       errorSeverity,
       errorHistory,
       clearError,

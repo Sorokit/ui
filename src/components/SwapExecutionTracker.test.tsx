@@ -26,10 +26,10 @@ describe("SwapExecutionTracker", () => {
 
     expect(screen.getByText(/source/i)).toBeInTheDocument();
     expect(screen.getByText(/1,000 XLM/i)).toBeInTheDocument();
-    expect(screen.getByText(/XLM/i)).toBeInTheDocument();
+    expect(screen.getByText(/^XLM$/i)).toBeInTheDocument();
     expect(screen.getByText(/destination/i)).toBeInTheDocument();
-    expect(screen.getByText(/90/i)).toBeInTheDocument();
-    expect(screen.getByText(/USDC/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/90 USDC/i).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/^USDC$/i)).toBeInTheDocument();
     expect(screen.getByText(/price impact/i)).toBeInTheDocument();
     expect(screen.getByText(/0.30%/i)).toBeInTheDocument();
     expect(screen.getByText(/warning: slippage exceeded threshold/i)).toBeInTheDocument();

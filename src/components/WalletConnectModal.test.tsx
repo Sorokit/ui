@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
+import { getClient } from "@/lib/client";
 
 import { WalletConnectModal } from "./WalletConnectModal";
 
@@ -11,6 +12,7 @@ vi.mock("@/context/useSorokit", () => ({
 
 function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
   return {
+    get client() { return getClient(); },
     address: null,
     isConnected: false,
     isConnecting: false,

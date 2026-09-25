@@ -3,7 +3,7 @@ import { BulbIcon, CalculatorIcon, CircleGaugeIcon, ClockIcon, Refresh01Icon, Za
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 
-import { getClient } from "@/lib/client";
+import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
 
 interface GasOptimizerProps {
@@ -62,24 +62,25 @@ function formatTime(seconds: number): string {
 
 export function GasOptimizer({
   className,
-  operations = ["payment", "manage_data", "change_trust"],
+  operations = ["payment"],
   refreshInterval = 0,
 }: GasOptimizerProps) {
+  const { client } = useSorokit();
   const [gasPriceData, setGasPriceData] = useState<GasPriceData | null>(null);
   const [estimate, setEstimate] = useState<GasEstimate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [customMultiplier, setCustomMultiplier] = useState(1);
-  const [scenarioLoading, setScenarioLoading] = useState(false);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
 
   const loadGasData = useCallback(async () => {
+    if (!client) return;
     setLoading(true);
     setError(null);
     try {
       const [gasRes, feeRes] = await Promise.all([
-        getClient().network.getGasPrice(),
-        getClient().transaction.estimateDetailedFee({
+        client.network.getGasPrice(),
+        client.transaction.estimateDetailedFee({
           operations,
           feeMultiplier: customMultiplier,
         }),
@@ -101,14 +102,13 @@ export function GasOptimizer({
     } finally {
       setLoading(false);
     }
-  }, [operations, customMultiplier]);
+  }, [client, operations, customMultiplier]);
 
   const loadScenarios = useCallback(async () => {
-    if (!estimate) return;
-    setScenarioLoading(true);
+    if (!estimate || !client) return;
     setScenarioError(null);
     try {
-      const { data, error: err } = await getClient().transaction.getFeeScenarios({
+      const { data, error: err } = await client.transaction.getFeeScenarios({
         operations,
         baseGasUnits: estimate.totalGasUnits,
       });
@@ -123,10 +123,8 @@ export function GasOptimizer({
       }
     } catch (e) {
       setScenarioError(e instanceof Error ? e.message : "Failed to load scenarios");
-    } finally {
-      setScenarioLoading(false);
     }
-  }, [estimate, operations]);
+  }, [client, estimate, operations]);
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -148,7 +146,14 @@ export function GasOptimizer({
 
   useEffect(() => {
     if (!estimate) return;
-    void loadScenarios();
+    let active = true;
+    const timerId = window.setTimeout(() => {
+      if (active) void loadScenarios();
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timerId);
+    };
   }, [estimate, loadScenarios]);
 
   const handleMultiplierChange = (value: number) => {
@@ -343,7 +348,7 @@ function OperationBreakdown({ breakdown }: { breakdown: OperationGasBreakdown[] 
   );
 }
 
-function FeeScenarios({ scenarios, multiplier }: { scenarios: FeeScenario[]; multiplier: number }) {
+function FeeScenarios({ scenarios, multiplier: _multiplier }: { scenarios: FeeScenario[]; multiplier: number }) {
   const [activeScenario, setActiveScenario] = useState<string>("average");
 
   return (

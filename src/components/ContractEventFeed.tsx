@@ -50,8 +50,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
+import { useSorokit } from "@/context/useSorokit";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import type { ContractEvent } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const EVENT_TYPE_VARIANT: Record<
@@ -226,6 +227,7 @@ export interface ContractEventFeedProps {
    * consumers can page through historical event windows.
    */
   fromLedger?: number;
+  className?: string;
 }
 
 export function ContractEventFeed({
@@ -235,7 +237,10 @@ export function ContractEventFeed({
   filterTypes,
   maxValueLength = DEFAULT_MAX_VALUE_LENGTH,
   fromLedger,
+  className,
 }: ContractEventFeedProps) {
+  const { client } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [events, setEvents] = useState<ContractEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -246,6 +251,11 @@ export function ContractEventFeed({
     filterTypes ? new Set(filterTypes) : null,
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Issue #442: generation counter for `load`. Bumped on every call and
+  // whenever `contractId` changes, so a response that arrives after a newer
+  // request started - or after the feed moved to another contract - is
+  // discarded instead of overwriting the current events.
+  const requestIdRef = useRef(0);
 
   // IDs highlighted as newly-arrived. `prevEventIdsRef` is the baseline from
   // the previous successful load — `null` means no baseline yet, so the very
@@ -265,18 +275,40 @@ export function ContractEventFeed({
     setError(null);
     setLastUpdatedAt(null);
     setNewEventIds(new Set());
-    prevEventIdsRef.current = null;
   }
 
+  // Issue #442: `live` is seeded from `pollInterval` at mount, so a runtime
+  // change of the prop has to re-seed it - otherwise a feed mounted with
+  // polling off (pollInterval 0) never starts polling when the prop turns on.
+  // Synced during render, mirroring the `prevContractId` pattern above.
+  const [prevPollInterval, setPrevPollInterval] = useState(pollInterval);
+  if (prevPollInterval !== pollInterval) {
+    setPrevPollInterval(pollInterval);
+    setLive(pollInterval > 0);
+  }
+
+  useEffect(() => {
+    prevEventIdsRef.current = null;
+    // Issue #442: invalidate whatever `load` has in flight for the previous
+    // contract. This effect is declared before the loading effect, so it runs
+    // first and the fresh load below gets the next generation number.
+    requestIdRef.current += 1;
+  }, [contractId]);
+
   const load = useCallback(async () => {
-    if (!contractId.trim()) return;
+    if (!contractId.trim() || !client) return;
+    // Issue #442: claim a generation up front; anything that resolves once a
+    // newer request exists is stale and must not touch state.
+    const requestId = ++requestIdRef.current;
+    const isStale = () => requestId !== requestIdRef.current;
     setLoading(true);
     try {
-      const { data, error: err } = await getClient().soroban.getEvents(
+      const { data, error: err } = await client.soroban.getEvents(
         contractId,
         limit,
         fromLedger,
       );
+      if (isStale()) return;
       if (err) {
         setError(err);
         setLoading(false);
@@ -303,15 +335,20 @@ export function ContractEventFeed({
       setEvents(newData);
       setError(null);
       setLastUpdatedAt(Date.now());
+    } catch (e) {
+      if (isStale()) return;
+      setError(e instanceof Error ? e.message : "Failed to load events");
     } finally {
-      setLoading(false);
+      // Issue #442: a stale call must not clear the spinner that belongs to the
+      // request that superseded it.
+      if (!isStale()) setLoading(false);
     }
-  }, [contractId, limit, fromLedger]);
+  }, [client, contractId, limit, fromLedger]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEvents([]);
-  }, [contractId]);
+  // Issue #442: the `setEvents([])` effect that used to sit here (behind a
+  // react-hooks/set-state-in-effect suppression) duplicated the render-phase
+  // reset above and ran again on mount. Removed - the render-phase reset
+  // already clears the previous contract's events without an extra pass.
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -323,25 +360,39 @@ export function ContractEventFeed({
     };
   }, [load]);
 
+  // Issue #442: polling owns only the timer - the initial fetch belongs to the
+  // effect above, so mount fires exactly one request. Keyed on `pollInterval`,
+  // so changing the prop at runtime tears the old timer down and re-arms a new
+  // one at the new period.
   useEffect(() => {
-    if (live && pollInterval > 0 && contractId.trim() !== "") {
-      intervalRef.current = setInterval(() => {
-        void load();
-      }, pollInterval);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    if (!live || !isVisible || pollInterval <= 0 || contractId.trim() === "") {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [live, pollInterval, load, contractId]);
 
-  // Tick the relative "Last updated" label once a second while polling is active.
+    intervalRef.current = setInterval(() => {
+      void load();
+    }, pollInterval);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [live, isVisible, pollInterval, load, contractId]);
+
+  // Tick the relative "Last updated" label once a second while polling is
+  // active and visible — ticking a hidden screen's clock wastes a timer for
+  // a label nobody can see.
   useEffect(() => {
-    if (!live || pollInterval <= 0) return;
+    if (!live || !isVisible || pollInterval <= 0) return;
     const tickId = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(tickId);
-  }, [live, pollInterval]);
+  }, [live, isVisible, pollInterval]);
 
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -379,7 +430,10 @@ export function ContractEventFeed({
     activeTypes ? activeTypes.has(type) : true;
 
   return (
-    <div className="rounded-xl border border-line bg-surface overflow-hidden">
+    <div
+      ref={containerRef}
+      className={cn("rounded-xl border border-line bg-surface overflow-hidden", className)}
+    >
       <div className="flex items-center justify-between px-5 py-4 border-b border-line">
         <div>
           <h3 className="text-[14px] font-semibold text-ink">

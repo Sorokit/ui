@@ -22,7 +22,6 @@ import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { Nft, NftCollection } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -217,15 +216,16 @@ interface SendNftDialogProps {
 }
 
 function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [recipient, setRecipient] = useState("");
   const [recipientError, setRecipientError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
 
-  // Reset state when dialog opens/closes
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setRecipient("");
       setRecipientError("");
@@ -233,7 +233,7 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
       setSuccess(false);
       setTxError(null);
     }
-  }, [open]);
+  }
 
   const validate = () => {
     if (!recipient.trim()) { setRecipientError("Recipient address is required"); return false; }
@@ -246,11 +246,11 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
   };
 
   const handleSend = async () => {
-    if (!nft || !address || !validate()) return;
+    if (!nft || !address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     try {
-      const { data, error } = await getClient().nft.sendNft({
+      const { data, error } = await client.nft.sendNft({
         tokenId: nft.tokenId,
         contractId: nft.contractId,
         recipient: recipient.trim(),
@@ -338,14 +338,16 @@ interface ListForSaleDialogProps {
 }
 
 function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [price, setPrice] = useState("");
   const [priceError, setPriceError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setPrice("");
       setPriceError("");
@@ -353,7 +355,7 @@ function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
       setSuccess(false);
       setTxError(null);
     }
-  }, [open]);
+  }
 
   const validate = () => {
     const n = parseFloat(price);
@@ -366,11 +368,11 @@ function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
   };
 
   const handleList = async () => {
-    if (!nft || !address || !validate()) return;
+    if (!nft || !address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     try {
-      const { data, error } = await getClient().nft.listNftForSale({
+      const { data, error } = await client.nft.listNftForSale({
         tokenId: nft.tokenId,
         contractId: nft.contractId,
         price: price.trim(),
@@ -462,7 +464,7 @@ interface BulkSendDialogProps {
 }
 
 function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [recipient, setRecipient] = useState("");
   const [recipientError, setRecipientError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -470,13 +472,20 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
   const [txError, setTxError] = useState<string | null>(null);
   const abortRef = useRef(false);
 
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setRecipient("");
       setRecipientError("");
       setLoading(false);
       setProgress(0);
       setTxError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
       abortRef.current = false;
     }
   }, [open]);
@@ -492,14 +501,14 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
   };
 
   const handleBulkSend = async () => {
-    if (!address || !validate()) return;
+    if (!address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     abortRef.current = false;
     for (let i = 0; i < nfts.length; i++) {
       if (abortRef.current) break;
       try {
-        const { error } = await getClient().nft.sendNft({
+        const { error } = await client.nft.sendNft({
           tokenId: nfts[i].tokenId,
           contractId: nfts[i].contractId,
           recipient: recipient.trim(),
@@ -701,7 +710,7 @@ type SortKey = "name" | "rarity" | "floor";
 type RarityFilter = "all" | "legendary" | "epic" | "rare" | "common";
 
 export function NFTGallery({ className }: NFTGalleryProps) {
-  const { address, isConnected } = useSorokit();
+  const { address, isConnected, client } = useSorokit();
 
   // ── Data state ────────────────────────────────────────────────────────────
   const [allNfts, setAllNfts] = useState<Nft[]>([]);
@@ -729,11 +738,11 @@ export function NFTGallery({ className }: NFTGalleryProps) {
 
   // ── Fetch NFTs ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!address) return;
+    if (!address || !client) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       setLoading(true);
-      getClient()
+      client
         .nft.getNfts(address)
         .then(({ data, error }) => {
           if (!active) return;
@@ -744,7 +753,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
         .finally(() => { if (active) setLoading(false); });
     }, 0);
     return () => { active = false; window.clearTimeout(timerId); };
-  }, [address]);
+  }, [address, client]);
 
   // ── Derived collections ───────────────────────────────────────────────────
   const collections = useMemo(() => groupByCollection(allNfts), [allNfts]);

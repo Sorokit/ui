@@ -2,7 +2,15 @@ import type { NavSection } from "@/components/Sidebar";
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
 
-const CONFIG = {
+export interface BannerConfig {
+  label: string | null;
+  dot: string;
+  bar: string;
+  text: string;
+  show: boolean;
+}
+
+export const BANNER_CONFIG: Record<string, BannerConfig> = {
   mainnet: {
     label: "Mainnet",
     dot: "bg-green",
@@ -42,6 +50,7 @@ const CONFIG = {
 
 interface NetworkBannerProps {
   active?: NavSection;
+  config?: Partial<Record<string, Partial<BannerConfig>>>;
   /** Always show even on mainnet */
   alwaysShow?: boolean;
   className?: string;
@@ -50,13 +59,18 @@ interface NetworkBannerProps {
 export function NetworkBanner({
   active,
   alwaysShow = false,
+  config,
   className,
 }: NetworkBannerProps) {
   const { network } = useSorokit();
   if (!network) return null;
   if (active === "network") return null;
 
-  const cfg = CONFIG[network.name] ?? CONFIG.custom;
+  const cfg = {
+    ...BANNER_CONFIG.custom,
+    ...BANNER_CONFIG[network.name],
+    ...config?.[network.name],
+  };
   if (!alwaysShow && !cfg.show) return null;
 
   const label = cfg.label ?? network.name;

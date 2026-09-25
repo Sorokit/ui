@@ -49,7 +49,7 @@ describe("RewardHistory — rendering", () => {
       />,
     );
     // Total should be a positive number with XLM suffix
-    expect(screen.getByText(/XLM/)).toBeInTheDocument();
+    expect(screen.getAllByText(/XLM/)[0]).toBeInTheDocument();
   });
 
   it("renders the event table header columns", () => {

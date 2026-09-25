@@ -19,7 +19,7 @@ describe("TransactionPanel integration", () => {
     const mockSubmit = vi
       .fn()
       .mockResolvedValue({ data: { hash: "txhash", ledger: 1 }, error: null });
-    vi.mocked(getClient).mockReturnValue({
+    const mockClient = {
       transaction: {
         submit: mockSubmit,
         estimateFee: vi
@@ -29,13 +29,18 @@ describe("TransactionPanel integration", () => {
             error: null,
           }),
       },
-    } as unknown as ReturnType<typeof getClient>);
+    };
+    vi.mocked(getClient).mockReturnValue(
+      mockClient as unknown as ReturnType<typeof getClient>,
+    );
 
     (
       useSorokit as unknown as { mockReturnValue: (value: unknown) => void }
     ).mockReturnValue({
       isConnected: true,
-      address: "GABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF123456",
+      address: "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA",
+      client: mockClient,
+      balances: [{ asset: "XLM", balance: "100" }],
       connectWallet: vi.fn(),
       disconnectWallet: vi.fn(),
       error: null,
@@ -46,11 +51,11 @@ describe("TransactionPanel integration", () => {
 
     const destInput = screen.getByLabelText("Destination Address");
     const amountInput = screen.getByLabelText("Amount (XLM)");
-    const submitBtn = screen.getByRole("button", { name: "Send Payment" });
+    const submitBtn = screen.getByRole("button", { name: /Send (Payment|XLM|USDC)/i });
 
     fireEvent.change(destInput, {
       target: {
-        value: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ",
       },
     });
     fireEvent.change(amountInput, { target: { value: "10" } });

@@ -1,5 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useRef } from "react";
 
 import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
@@ -14,6 +15,17 @@ const SUPPORTED_WALLETS = [
 
 export function ConnectScreen() {
   const { connectWallet, isConnecting, error, clearError } = useSorokit();
+  const connectButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isConnecting) {
+      connectButtonRef.current?.focus();
+    }
+  }, [isConnecting]);
+
+  useEffect(() => {
+    document.title = "Connect — Sorokit";
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-base px-4">
@@ -75,6 +87,7 @@ export function ConnectScreen() {
 
                 <button
                   onClick={clearError}
+                  aria-label="Dismiss error"
                   className="text-red opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition-opacity"
                 >
                   <HugeiconsIcon
@@ -88,6 +101,7 @@ export function ConnectScreen() {
             )}
 
             <Button
+              ref={connectButtonRef}
               size="lg"
               loading={isConnecting}
               onClick={connectWallet}

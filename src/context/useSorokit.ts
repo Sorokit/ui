@@ -1,5 +1,7 @@
 import { useContext } from "react";
 
+import { getClient } from "@/lib/client";
+
 import { SorokitContext, type SorokitState } from "./SorokitContext";
 
 const safeDefaults: SorokitState = {
@@ -29,7 +31,7 @@ export function useSorokit(): SorokitState {
     console.warn(
       "[sorokit-ui] useSorokit used outside <SorokitProvider>. Returning safe defaults.",
     );
-    return safeDefaults;
+    return buildSafeDefaults();
   }
   return ctx;
 }

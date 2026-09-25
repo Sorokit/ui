@@ -17,7 +17,7 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AllocationInput } from "@/components/AllocationInput";
 import { RebalancerHistory } from "@/components/RebalancerHistory";
@@ -28,13 +28,11 @@ import { Button } from "@/components/ui/Button";
 import { PieChart } from "@/components/ui/PieChart";
 import { SLICE_COLORS } from "@/components/ui/PieChart";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient } from "@/lib/client";
 import type {
   AllocationDiff,
   PortfolioAsset,
   RebalanceExecution,
   RebalanceRecord,
-  SwapSuggestion,
 } from "@/lib/rebalancer";
 import {
   buildRebalanceRecord,
@@ -122,19 +120,41 @@ function randomId(): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
-  const { balances, isConnected, isLoadingAccount, refreshAccount } = useSorokit();
+  const { isConnected, balances, isLoadingAccount, refreshAccount, client } = useSorokit();
 
   // ── Price state ───────────────────────────────────────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [isPricingLoading, setIsPricingLoading] = useState(false);
 
   // ── Portfolio state ───────────────────────────────────────────────────────
-  const [portfolioAssets, setPortfolioAssets] = useState<PortfolioAsset[]>([]);
-  const [targets, setTargets] = useState<Record<string, number>>({});
+  const [customTargets, setCustomTargets] = useState<Record<string, number>>({});
+
+  const portfolioAssets = useMemo(() => {
+    if (balances.length === 0 || Object.keys(prices).length === 0) return [];
+    return buildPortfolioAssets(balances, prices);
+  }, [balances, prices]);
+
+  const targets = useMemo(() => {
+    if (Object.keys(customTargets).length > 0) return customTargets;
+    return Object.fromEntries(portfolioAssets.map((a) => [a.assetCode, parseFloat(a.currentPct.toFixed(2))]));
+  }, [customTargets, portfolioAssets]);
+
+  const setTargets = setCustomTargets;
+
+  const diffs = useMemo(() => {
+    if (portfolioAssets.length === 0) return [];
+    const normTargets = normaliseTargets(targets);
+    const totalUsd = portfolioAssets.reduce((s, a) => s + (a.usdValue ?? 0), 0);
+    return computeAllocationDiffs(portfolioAssets, normTargets, totalUsd);
+  }, [portfolioAssets, targets]);
+
+  const swaps = useMemo(() => {
+    if (diffs.length === 0) return [];
+    const baseFeeUsd = (Number(100) / 1e7) * (prices["XLM"] ?? 0.11);
+    return generateSwapSuggestions(diffs, prices, baseFeeUsd);
+  }, [diffs, prices]);
 
   // ── Swap / execution state ────────────────────────────────────────────────
-  const [swaps, setSwaps] = useState<SwapSuggestion[]>([]);
-  const [diffs, setDiffs] = useState<AllocationDiff[]>([]);
   const [execution, setExecution] = useState<RebalanceExecution>(createInitialExecution(0));
   const [execError, setExecError] = useState<string | null>(null);
 
@@ -150,41 +170,14 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
   useEffect(() => {
     if (balances.length === 0) return;
     let active = true;
-    setIsPricingLoading(true);
     const codes = balances.map(getAssetCode);
-    fetchPrices(codes).then((p) => {
+    fetchPrices(codes).then((p: Record<string, number>) => {
       if (!active) return;
       setPrices(p);
       setIsPricingLoading(false);
     });
     return () => { active = false; };
   }, [balances]);
-
-  // ── Rebuild portfolio when prices or balances change ─────────────────────
-  useEffect(() => {
-    if (balances.length === 0 || Object.keys(prices).length === 0) return;
-    const assets = buildPortfolioAssets(balances, prices);
-    setPortfolioAssets(assets);
-    // Seed targets from current allocation on first load (or when assets change)
-    setTargets((prev) => {
-      const hasEntries = Object.keys(prev).length > 0;
-      if (hasEntries) return prev;
-      return Object.fromEntries(assets.map((a) => [a.assetCode, parseFloat(a.currentPct.toFixed(2))]));
-    });
-  }, [balances, prices]);
-
-  // ── Recompute diffs and swaps when targets change ─────────────────────────
-  useEffect(() => {
-    if (portfolioAssets.length === 0) return;
-    const normTargets = normaliseTargets(targets);
-    const totalUsd = portfolioAssets.reduce((s, a) => s + (a.usdValue ?? 0), 0);
-    const newDiffs = computeAllocationDiffs(portfolioAssets, normTargets, totalUsd);
-    setDiffs(newDiffs);
-    const baseFeeUsd = (Number(100) / 1e7) * (prices["XLM"] ?? 0.11);
-    const newSwaps = generateSwapSuggestions(newDiffs, prices, baseFeeUsd);
-    setSwaps(newSwaps);
-    setExecution(createInitialExecution(newSwaps.length));
-  }, [portfolioAssets, targets, prices]);
 
   // ── Execution ─────────────────────────────────────────────────────────────
   const executeRebalance = useCallback(async () => {
@@ -219,7 +212,7 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
       try {
         // Invoke the swap as a Soroban contract call. In production this would
         // call the AMM contract; here we use the generic invokeContract stub.
-        const { data, error } = await getClient().soroban.invokeContract({
+        const { data, error } = await client.soroban.invokeContract({
           contractId: "rebalancer",
           method: "swap",
           args: [swaps[i].from, swaps[i].to, swaps[i].fromAmount.toFixed(7)],
@@ -272,7 +265,7 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
       totalCostUsd,
     );
     setHistory((h) => [record, ...h]);
-  }, [swaps, execution.isRunning, portfolioAssets, prices, balances, refreshAccount]);
+  }, [swaps, execution.isRunning, portfolioAssets, prices, balances, refreshAccount, client.soroban]);
 
   const cancelExecution = useCallback(() => {
     abortRef.current?.abort();

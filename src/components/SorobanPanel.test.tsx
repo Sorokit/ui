@@ -1,6 +1,4 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { act,fireEvent, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -14,6 +12,12 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(() => ({
     isConnected: true,
     address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+    client: {
+      soroban: {
+        invokeContract: mockInvokeContract,
+        simulateContract: mockSimulateContract,
+      },
+    },
   })),
 }));
 
@@ -32,6 +36,12 @@ describe("SorobanPanel", () => {
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: true,
       address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+      client: {
+        soroban: {
+          invokeContract: mockInvokeContract,
+          simulateContract: mockSimulateContract,
+        },
+      },
     } as unknown as ReturnType<typeof useSorokit>);
   });
 
@@ -39,6 +49,32 @@ describe("SorobanPanel", () => {
     it("should have invoke button disabled when method is empty", () => {
       render(<SorobanPanel contractId="" onContractIdChange={() => {}} />);
       expect(screen.getByRole("button", { name: /invoke/i })).toBeDisabled();
+    });
+
+    // Issue #581 — the Invoke button must submit the parent form natively
+    // (type="submit") instead of re-dispatching the FormEvent handler through
+    // an unsafe `as unknown as React.MouseEventHandler` onClick cast.
+    it("submits the form natively via type=submit linked to the form's id", async () => {
+      mockInvokeContract.mockResolvedValueOnce({
+        data: { success: true },
+        error: null,
+      });
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      fireEvent.change(screen.getByLabelText("Method"), {
+        target: { value: "balance" },
+      });
+
+      const invokeButton = screen.getByRole("button", { name: /invoke/i });
+      const form = document.querySelector("form");
+      expect(invokeButton).toHaveAttribute("type", "submit");
+      expect(form).not.toBeNull();
+      expect(invokeButton).toHaveAttribute("form", form!.id);
+
+      // Clicking the button reaches the form's onSubmit handler and produces
+      // a real invocation — not "Not implemented".
+      fireEvent.click(invokeButton);
+      await screen.findByText("Result");
+      expect(mockInvokeContract).toHaveBeenCalledOnce();
     });
 
     it("should show error when invalid JSON args are provided", async () => {
@@ -139,8 +175,9 @@ describe("SorobanPanel", () => {
       "Arguments (JSON array)",
     ) as HTMLTextAreaElement;
 
-    expect(textarea.rows).toBe(3);
+    expect(textarea.rows).toBe(4);
     expect(textarea.className).toContain("resize-y");
+    expect(textarea.className).toContain("min-h-[80px]");
 
     fireEvent.input(textarea, {
       target: { value: "[\n1,\n2,\n3,\n4\n]" },
@@ -224,14 +261,7 @@ describe("SorobanPanel", () => {
       return screen.getByPlaceholderText(/paste contract abi/i);
     }
 
-    /** Helper: click the "Load" button inside the ABI section (not the toggle). */
-    async function clickAbiLoadButton() {
-      // The ABI section has a button with exact text "Load" (not "Load ABI")
-      const buttons = screen.getAllByRole("button");
-      const loadBtn = buttons.find((b) => b.textContent === "Load");
-      if (!loadBtn) throw new Error("Load button not found");
-      fireEvent.click(loadBtn);
-    }
+
 
     it("toggles the ABI paste section when clicking Load ABI", async () => {
       render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);

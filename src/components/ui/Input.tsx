@@ -4,7 +4,7 @@ import { forwardRef, useEffect, useId, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "prefix"> {
   label?: string;
   error?: string;
   hint?: string;
@@ -32,13 +32,13 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     const isPassword = props.type === "password";
 
     useEffect(() => {
-      if (props.value !== undefined && !props.onChange) {
+      if (props.value !== undefined && !props.onChange && !props.readOnly) {
         console.warn(
           "Input received a controlled `value` prop without an `onChange` handler. " +
             "The input will be read-only. Provide an `onChange` handler to make it editable.",
         );
       }
-    }, [props.onChange, props.value]);
+    }, [props.onChange, props.readOnly, props.value]);
 
     useEffect(() => {
       if (error) {
@@ -153,6 +153,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           </p>
           <p
             id={`${inputId}-hint`}
+            data-testid="input-hint"
             className={cn(
               "absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150",
               !error && hint ? "opacity-100" : "opacity-0 pointer-events-none",

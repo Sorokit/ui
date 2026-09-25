@@ -5,7 +5,7 @@ import {
   CheckmarkCircle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -16,7 +16,6 @@ import { cn, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 const MEMO_TRUNCATE_LENGTH = 20;
-const PAGE_STORAGE_PREFIX = "sorokit-transaction-history-page:";
 const STROOPS_PER_XLM = 10_000_000;
 const TREND_DAYS = 7;
 const MS_PER_DAY = 86_400_000;
@@ -95,28 +94,6 @@ function TrendSparkline({ counts }: { counts: number[] }) {
   );
 }
 
-function readStoredPage(address: string | null): number {
-  if (!address) return 1;
-  try {
-    const storedPage = Number.parseInt(
-      sessionStorage.getItem(`${PAGE_STORAGE_PREFIX}${address}`) ?? "",
-      10,
-    );
-    return Number.isInteger(storedPage) && storedPage > 0 ? storedPage : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function storePage(address: string | null, page: number): void {
-  if (!address) return;
-  try {
-    sessionStorage.setItem(`${PAGE_STORAGE_PREFIX}${address}`, String(page));
-  } catch {
-    // sessionStorage may be unavailable; pagination still works for this render.
-  }
-}
-
 function truncateMemo(memo: string): string {
   return memo.length > MEMO_TRUNCATE_LENGTH
     ? `${memo.slice(0, MEMO_TRUNCATE_LENGTH)}…`
@@ -137,7 +114,7 @@ function explorerTxUrl(
   return `https://stellar.expert/explorer/${segment}/tx/${hash}`;
 }
 
-export function TxRow({
+export const TxRow = memo(function TxRow({
   tx,
   networkName,
 }: {
@@ -161,11 +138,17 @@ export function TxRow({
     ? { href: explorerUrl, target: "_blank", rel: "noopener noreferrer" }
     : {};
 
+  const rowLabel = `Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`;
+
   return (
     <RowWrapper
       {...(wrapperProps as Record<string, string>)}
       role="article"
-      aria-label={`Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`}
+      aria-label={
+        explorerUrl
+          ? `${rowLabel} — view on Stellar Expert (opens in a new tab)`
+          : rowLabel
+      }
       className="flex items-center justify-between px-5 py-3.5 border-b border-line last:border-0 gap-4 hover:bg-surface-2 transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 min-w-0">
@@ -217,7 +200,7 @@ export function TxRow({
       </div>
     </RowWrapper>
   );
-}
+});
 
 type StatusFilter = "all" | "success" | "failed";
 
@@ -233,30 +216,31 @@ export function TransactionHistory({
   endDate,
   showTrend,
 }: TransactionHistoryProps = {}) {
-  const { address, isConnected, network } = useSorokit();
+  const { address, isConnected, network, client: contextClient } = useSorokit();
+  const client = contextClient ?? getClient();
+  const [prevAddress, setPrevAddress] = useState(address);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [multiOpOnly, setMultiOpOnly] = useState(false);
   const [txs, setTxs] = useState<Transaction[]>([]);
-  const [page, setPage] = useState(() => readStoredPage(address));
+  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-   
-  useEffect(() => {
-    setPage((prev) => {
-      const stored = readStoredPage(address);
-      return prev !== stored ? stored : prev;
-    });
-  }, [address]);
+  if (prevAddress !== address) {
+    setPrevAddress(address);
+    setPage(1);
+    setTotal(0);
+    setTxs([]);
+  }
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || !client) return;
 
     let active = true;
     const timerId = window.setTimeout(() => {
       setLoading(true);
-      getClient()
+      client
         .transaction.getHistory(address, page, PAGE_SIZE)
         .then(({ data, error: err, total: t }) => {
           if (!active) return;
@@ -277,24 +261,27 @@ export function TransactionHistory({
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [address, page]);
+  }, [address, client, page]);
 
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 0;
 
   function changePage(nextPage: number) {
     setPage(nextPage);
-    storePage(address, nextPage);
   }
 
-  const filteredTxs = txs.filter((tx) => {
-    if (statusFilter === "success" && !tx.successful) return false;
-    if (statusFilter === "failed" && tx.successful) return false;
-    if (multiOpOnly && tx.operationCount <= 1) return false;
-    if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
-    if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
-      return false;
-    return true;
-  });
+  const filteredTxs = useMemo(
+    () =>
+      txs.filter((tx) => {
+        if (statusFilter === "success" && !tx.successful) return false;
+        if (statusFilter === "failed" && tx.successful) return false;
+        if (multiOpOnly && tx.operationCount <= 1) return false;
+        if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
+        if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
+          return false;
+        return true;
+      }),
+    [endDate, multiOpOnly, startDate, statusFilter, txs],
+  );
 
   const feeTotal = totalFeeStroops(filteredTxs);
 

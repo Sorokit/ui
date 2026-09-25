@@ -5,7 +5,7 @@
  * (with copy), all asset balances, the 5 most recent transactions, and
  * account quick links (network switcher, block explorer, disconnect).
  * Designed to be triggered from anywhere in the app (e.g. via
- * `WalletConnectButton`'s `onOpenModal`).
+ * a button click or other trigger).
  *
  * Balance/account data refreshes on an interval while the sidebar is open,
  * via `useSorokit().refreshAccount()` — sorokit-ui has no blockchain logic
@@ -17,13 +17,13 @@
  * @component
  * @example
  * ```tsx
- * import { AccountSidebar, WalletConnectButton } from 'sorokit-ui';
+ * import { AccountSidebar } from 'sorokit-ui';
  *
- * function TopBar() {
+ * function App() {
  *   const [open, setOpen] = useState(false);
  *   return (
  *     <>
- *       <WalletConnectButton onOpenModal={() => setOpen(true)} />
+ *       <button onClick={() => setOpen(true)}>Open Account</button>
  *       <AccountSidebar open={open} onClose={() => setOpen(false)} />
  *     </>
  *   );
@@ -43,7 +43,7 @@ import { AssetBadge } from "@/components/AssetBadge";
 import { Button } from "@/components/ui/Button";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient, type Transaction } from "@/lib/client";
+import { type Transaction } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 import { TxRow } from "./TransactionHistory";
@@ -73,8 +73,8 @@ export function AccountSidebar({
     refreshAccount,
     disconnectWallet,
     network,
+    client,
   } = useSorokit();
-
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof localStorage === "undefined") return false;
     return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
@@ -91,11 +91,11 @@ export function AccountSidebar({
   // connected address. Deferred via setTimeout(0), same pattern
   // SorokitProvider uses for its own data-loading effects.
   useEffect(() => {
-    if (!open || !address) return;
+    if (!open || !address || !client) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       setTxLoading(true);
-      getClient()
+      client
         .transaction.getHistory(address, 1, RECENT_TX_LIMIT)
         .then(({ data }) => {
           if (!active) return;
@@ -109,7 +109,7 @@ export function AccountSidebar({
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [open, address]);
+  }, [open, address, client]);
 
   // Poll account/balance data while the sidebar is open.
   useEffect(() => {

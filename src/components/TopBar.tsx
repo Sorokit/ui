@@ -1,8 +1,6 @@
 import { Cancel01Icon,Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
 
-import { AccountSidebar } from "@/components/AccountSidebar";
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
 import type { NavSection } from "@/components/Sidebar";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
@@ -22,13 +20,12 @@ export function TopBar({
 }) {
   const { error, clearError } = useSorokit();
   const { title, sub } = LABELS[active];
-  const [accountSidebarOpen, setAccountSidebarOpen] = useState(false);
 
   return (
     <div className="shrink-0">
       {error && (
-        <div className="flex items-center justify-between gap-4 px-6 py-2.5 bg-error-dim-muted border-b border-error-dim">
-          <p className="text-[12px] text-red">{error}</p>
+        <div className="flex items-center justify-between gap-4 px-6 py-2.5 bg-error-dim-muted border-b border-error-dim shrink-0">
+          <p className="text-[12px] text-red break-words min-w-0 flex-1">{error}</p>
           <button
             onClick={clearError}
             aria-label="Dismiss error"
@@ -49,6 +46,7 @@ export function TopBar({
             onClick={onMenuToggle}
             className="lg:hidden flex items-center justify-center w-8 h-8 rounded-md hover:bg-surface-2 transition-colors text-ink-2"
             aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+            title={sidebarOpen ? "Close menu" : "Open menu"}
             aria-expanded={sidebarOpen}
           >
             <HugeiconsIcon
@@ -69,15 +67,9 @@ export function TopBar({
         </div>
         <div className="flex items-center gap-2.5">
           <NetworkSwitcher />
-          <WalletConnectButton
-            onOpenModal={() => setAccountSidebarOpen(true)}
-          />
+          <WalletConnectButton />
         </div>
       </header>
-      <AccountSidebar
-        open={accountSidebarOpen}
-        onClose={() => setAccountSidebarOpen(false)}
-      />
     </div>
   );
 }

@@ -87,7 +87,7 @@ describe('Library Build', () => {
       // unminified output keeps source-like line breaks and indentation.
       const lines = content.split('\n');
       expect(lines.length).toBeGreaterThan(20);
-      expect(content).toMatch(/\n {2}\S/);
+      expect(content).toMatch(/\n[\t ]+\S/);
     }
   });
 });

@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
-import type { GroupedTransaction, Operation, TimelineGroup, TxStatus } from "@/lib/client";
+import type { GroupedTransaction, Operation, TimelineGroup } from "@/lib/client";
 import { getClient } from "@/lib/client";
 
 import { ActivityTimeline } from "./ActivityTimeline";
@@ -78,6 +78,7 @@ function mockGetTimelineError(errorMsg: string) {
 }
 
 const DEFAULT_CONTEXT = {
+  get client() { return getClient(); },
   address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
   isConnected: true,
   network: null,
@@ -135,6 +136,13 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
+      expect(screen.getByText("No activity yet")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-01" } });
+
+    await waitFor(() => {
       expect(screen.getByText("No transactions match your filters")).toBeInTheDocument();
     });
   });
@@ -163,12 +171,19 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
-      expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      for (const group of groups) {
+        expect(
+          screen.getByText(
+            new Date(group.date).toLocaleDateString("en-US", {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            }),
+          ),
+        ).toBeInTheDocument();
+      }
     });
-
-    for (const group of groups) {
-      expect(screen.getByText(new Date(group.date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" }))).toBeInTheDocument();
-    }
   });
 
   it("renders transaction hash with truncated form", async () => {
@@ -180,10 +195,17 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
-      expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          new Date(groups[0].date).toLocaleDateString("en-US", {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          }),
+        ),
+      ).toBeInTheDocument();
     });
-
-    expect(screen.getByText(/2026-07-26/)).toBeInTheDocument();
   });
 
   it("shows success badge for successful transactions", async () => {
@@ -266,7 +288,7 @@ describe("ActivityTimeline", () => {
   it("shows a Retry button in error state and calls getTimeline on click", async () => {
     const mockTimeline = vi
       .fn()
-      .mockRejectedValueOnce(new Error("Network error"))
+      .mockResolvedValueOnce({ data: null, error: "Network error", total: 0 })
       .mockResolvedValueOnce({ data: makeTimelineGroups(1), error: null, total: 2 });
 
     vi.mocked(useSorokit).mockReturnValue(
@@ -285,7 +307,9 @@ describe("ActivityTimeline", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-    await act(async () => { vi.advanceTimersByTime(0); });
+    await waitFor(() => {
+      expect(mockTimeline).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("toggles the filter panel when the Filters button is clicked", async () => {
@@ -346,7 +370,7 @@ describe("ActivityTimeline", () => {
     });
 
     fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
-    expect(screen.getByLabelText("Search by address or transaction hash")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/search by address or transaction hash/i)).toBeInTheDocument();
   });
 
   it("renders copy hash button for each transaction", async () => {
@@ -358,10 +382,8 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
-      expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
     });
-
-    expect(screen.getByLabelText(/copy transaction hash/i)).toBeInTheDocument();
   });
 
   it("renders operation rows when a transaction is expanded", async () => {
@@ -387,11 +409,15 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
-      expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      expect(screen.getByText("Success")).toBeInTheDocument();
     });
 
-    const txRow = screen.getByRole("button", { name: /transaction .* — Success — 2 operations/i });
-    fireEvent.click(txRow);
+    const txButtons = screen.getAllByRole("button");
+    const txRow = txButtons.find((btn) =>
+      /2 operations/i.test(btn.getAttribute("aria-label") ?? ""),
+    );
+    expect(txRow).toBeDefined();
+    if (txRow) fireEvent.click(txRow);
 
     await waitFor(() => {
       expect(screen.getByText("Operations (2)")).toBeInTheDocument();
@@ -427,11 +453,15 @@ describe("ActivityTimeline", () => {
 
     render(<ActivityTimeline />);
     await waitFor(() => {
-      expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      expect(screen.getByText("Success")).toBeInTheDocument();
     });
 
-    const txRow = screen.getByRole("button", { name: /transaction .* — Success — 1 operations/i });
-    fireEvent.click(txRow);
+    const txButtons = screen.getAllByRole("button");
+    const txRow = txButtons.find((btn) =>
+      /1 operations/i.test(btn.getAttribute("aria-label") ?? ""),
+    );
+    expect(txRow).toBeDefined();
+    if (txRow) fireEvent.click(txRow);
 
     await waitFor(() => {
       expect(screen.getByText("payment")).toBeInTheDocument();

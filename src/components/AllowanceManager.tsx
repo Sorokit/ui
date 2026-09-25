@@ -1,8 +1,5 @@
 import {
   ArrowDown01Icon,
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  CheckmarkCircle01Icon,
   ChevronDownIcon,
   ClockIcon,
   Delete01Icon,
@@ -12,8 +9,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
+import { useSorokit } from "@/context/useSorokit";
 import type { AllowanceEntry } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 interface AllowanceManagerProps {
@@ -50,18 +47,18 @@ function truncateAddress(address: string, start = 8, end = 6): string {
 }
 
 export function AllowanceManager({ className }: AllowanceManagerProps) {
+  const { address, isConnected, client } = useSorokit();
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [processing, setProcessing] = useState<Record<string, 'increase' | 'decrease' | 'revoke' | null>>({});
 
+  const sourceAccount = address || "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN";
+
   const loadAllowances = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const sourceAccount = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN";
-      const { data, error: err } = await getClient().allowance.getAllowances(sourceAccount);
+      const { data, error: err } = await client.allowance.getAllowances(sourceAccount);
       if (err) {
         setError(err);
         return;
@@ -72,11 +69,33 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [client, sourceAccount]);
 
   useEffect(() => {
-    void loadAllowances();
-  }, [loadAllowances]);
+    let active = true;
+    if (!isConnected || !address || !client) {
+      return;
+    }
+    client
+      .allowance.getAllowances(sourceAccount)
+      .then(({ data, error: err }) => {
+        if (!active) return;
+        if (err) {
+          setError(err);
+        } else {
+          setAllowances(data ?? []);
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : "Failed to load allowances");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [address, client, isConnected, sourceAccount]);
 
   const handleIncrease = async (entry: AllowanceEntry) => {
     const key = `${entry.asset}-${entry.spender}`;
@@ -84,13 +103,13 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
         amount: "100.00",
       };
 
-      const { data, error: err } = await getClient().allowance.approveAllowance(params);
+      const { error: err } = await client.allowance.approveAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -110,13 +129,13 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
         amount: newAmount,
       };
 
-      const { data, error: err } = await getClient().allowance.approveAllowance(params);
+      const { error: err } = await client.allowance.approveAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -136,12 +155,12 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
       };
 
-      const { data, error: err } = await getClient().allowance.revokeAllowance(params);
+      const { error: err } = await client.allowance.revokeAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -158,7 +177,18 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
   const handleRetry = useCallback(() => {
     setError(null);
     void loadAllowances();
-  }, []);
+  }, [loadAllowances]);
+
+  if (!isConnected || !address) {
+    return (
+      <div className={cn("space-y-4", className)}>
+        <div className="rounded-xl border border-line bg-surface p-8 text-center">
+          <p className="text-[14px] font-medium text-ink">Connect your wallet</p>
+          <p className="text-[12px] text-ink-3 mt-1">Connect your wallet to manage allowances</p>
+        </div>
+      </div>
+    );
+  }
 
   const renderAllowanceCard = (entry: AllowanceEntry) => {
     const isExp = isExpired(entry.expirationDate);

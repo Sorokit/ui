@@ -174,8 +174,8 @@ describe("QRCode", () => {
     mockToCanvas.mockImplementation(((...args: unknown[]) => {
       const canvas = args[0] as HTMLCanvasElement;
       const ctx = canvas.getContext("2d");
-      if (ctx && typeof (ctx as { clearRect: Function }).clearRect === "function") {
-        (ctx as { clearRect: Function }).clearRect(0, 0, 0, 0);
+      if (ctx && typeof (ctx as { clearRect: (...args: unknown[]) => void }).clearRect === "function") {
+        (ctx as { clearRect: (...args: unknown[]) => void }).clearRect(0, 0, 0, 0);
       }
       const callback = args[3] as (err: Error | null) => void;
       if (typeof callback === "function") {

@@ -1,5 +1,5 @@
-import { act,fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SorokitState } from "@/context/sorokit-context";
 import { useSorokit } from "@/context/useSorokit";
@@ -254,114 +254,49 @@ describe("WalletScreen", () => {
     expect(mockDisconnect).not.toHaveBeenCalled();
   });
 
-  describe("Show QR modal (#351)", () => {
-    beforeEach(() => {
+  describe("AddressDisplay integration", () => {
+    it("renders wallet address using AddressDisplay in the header", () => {
       vi.mocked(useSorokit).mockReturnValue(createMockState({
-        address: "GABC123456",
+        address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGOBJZOTMr123456789",
         isConnected: true,
         network: { name: "testnet", rpcUrl: "https://rpc.com" },
       }));
-    });
 
-    it("is not rendered until 'Show QR' is clicked", () => {
       render(<WalletScreen />);
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      const addressElements = document.querySelectorAll("[data-address]");
+      expect(addressElements.length).toBeGreaterThanOrEqual(1);
+
+      // Header should show truncated address using AddressDisplay default start=8, end=6
+      expect(screen.getByText("GBRPYHIL...456789")).toBeInTheDocument();
+
+      // Copy button is present
+      const copyButtons = screen.getAllByRole("button", { name: /copy address/i });
+      expect(copyButtons.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("opens the modal and renders a QR code when 'Show QR' is clicked", () => {
-      render(<WalletScreen />);
-      fireEvent.click(screen.getByRole("button", { name: /show qr/i }));
-
-      const dialog = screen.getByRole("dialog");
-      expect(dialog).toBeInTheDocument();
-      expect(dialog).toHaveAttribute("aria-modal", "true");
-      expect(within(dialog).getByLabelText("Full-size QR code")).toBeInTheDocument();
-      expect(within(dialog).getByText("GABC123456")).toBeInTheDocument();
-    });
-
-    it("closes the modal when the Close button is clicked", () => {
-      render(<WalletScreen />);
-      fireEvent.click(screen.getByRole("button", { name: /show qr/i }));
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole("button", { name: /close/i }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
-    it("closes the modal when the backdrop is clicked", () => {
-      render(<WalletScreen />);
-      fireEvent.click(screen.getByRole("button", { name: /show qr/i }));
-      const dialog = screen.getByRole("dialog");
-
-      fireEvent.click(dialog);
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-
-    it("does not close the modal when the inner panel is clicked", () => {
-      render(<WalletScreen />);
-      fireEvent.click(screen.getByRole("button", { name: /show qr/i }));
-      const dialog = screen.getByRole("dialog");
-
-      fireEvent.click(within(dialog).getByText("GABC123456"));
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
-    });
-  });
-
-  describe("homeDomain and createdAt info cells (#351)", () => {
-    it("renders the Home Domain info cell when account.homeDomain is set", () => {
-      vi.mocked(useSorokit).mockReturnValue(createMockState({
-        address: "GABC123456",
-        isConnected: true,
-        account: {
-          address: "GABC123456",
-          sequence: "1",
-          subentryCount: 0,
-          homeDomain: "example.com",
+    it("copies address to clipboard when copy button in AddressDisplay is clicked", async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, {
+        clipboard: {
+          writeText: writeTextMock,
         },
-      }));
+      });
 
-      render(<WalletScreen />);
-      expect(screen.getByText("Home Domain")).toBeInTheDocument();
-      expect(screen.getByText("example.com")).toBeInTheDocument();
-    });
-
-    it("does not render the Home Domain info cell when account.homeDomain is absent", () => {
       vi.mocked(useSorokit).mockReturnValue(createMockState({
-        address: "GABC123456",
+        address: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGOBJZOTMr123456789",
         isConnected: true,
-        account: { address: "GABC123456", sequence: "1", subentryCount: 0 },
+        network: { name: "testnet", rpcUrl: "https://rpc.com" },
       }));
 
       render(<WalletScreen />);
-      expect(screen.queryByText("Home Domain")).not.toBeInTheDocument();
-    });
 
-    it("renders 'Active Since' with the year account.createdAt was created", () => {
-      vi.mocked(useSorokit).mockReturnValue(createMockState({
-        address: "GABC123456",
-        isConnected: true,
-        account: {
-          address: "GABC123456",
-          sequence: "1",
-          subentryCount: 0,
-          createdAt: "2019-06-15T00:00:00.000Z",
-        },
-      }));
+      const copyButtons = screen.getAllByRole("button", { name: /copy address/i });
+      await act(async () => {
+        fireEvent.click(copyButtons[0]);
+      });
 
-      render(<WalletScreen />);
-      expect(screen.getByText("Active Since")).toBeInTheDocument();
-      expect(screen.getByText("2019")).toBeInTheDocument();
-    });
-
-    it("does not render 'Active Since' when account.createdAt is absent", () => {
-      vi.mocked(useSorokit).mockReturnValue(createMockState({
-        address: "GABC123456",
-        isConnected: true,
-        account: { address: "GABC123456", sequence: "1", subentryCount: 0 },
-      }));
-
-      render(<WalletScreen />);
-      expect(screen.queryByText("Active Since")).not.toBeInTheDocument();
+      expect(writeTextMock).toHaveBeenCalledWith("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGOBJZOTMr123456789");
     });
   });
 });

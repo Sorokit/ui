@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ type AssetTab = "XLM" | string;
 
 interface AccountBalanceChartProps {
   className?: string;
+  title?: string;
   /** Balance history data per asset. Falls back to mock data if empty. */
   balanceHistory?: AssetBalance[];
 }
@@ -208,6 +209,7 @@ function LineChart({
 
 export function AccountBalanceChart({
   className,
+  title = "Account Balance History",
   balanceHistory,
 }: AccountBalanceChartProps) {
   const titleId = useId();
@@ -257,7 +259,12 @@ export function AccountBalanceChart({
   const timeframeDays =
     TIMEFRAMES.find((t) => t.value === timeframe)?.days ?? 7;
 
-  const activeAsset = assets.find((a) => a.asset === activeTab);
+  const effectiveActiveTab =
+    assets.length > 0 && !assets.some((a) => a.asset === activeTab)
+      ? assets[0].asset
+      : activeTab;
+
+  const activeAsset = assets.find((a) => a.asset === effectiveActiveTab);
   const chartData = useMemo(() => {
     if (!activeAsset) return [];
     return activeAsset.data.slice(-timeframeDays);
@@ -269,16 +276,6 @@ export function AccountBalanceChart({
   const change = currentValue - startValue;
   const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
 
-  useEffect(() => {
-    if (assets.length > 0 && !assets.find((a) => a.asset === activeTab)) {
-      setActiveTab((prev) =>
-        assets.find((a) => a.asset === prev)?.asset === prev
-          ? prev
-          : assets[0].asset,
-      );
-    }
-  }, [assets]);
-
   return (
     <div
       className={cn(
@@ -288,14 +285,31 @@ export function AccountBalanceChart({
       role="region"
       aria-labelledby={titleId}
     >
-      <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+      <div className="px-5 py-4 border-b border-line flex items-center justify-between">
         <div>
-          <h3 id={titleId} className="text-[13px] font-semibold text-ink">
-            Balance History
+          <h3 id={titleId} className="text-[14px] font-semibold text-ink">
+            {title}
           </h3>
-          <p className="text-[11px] text-ink-3 mt-0.5">
-            Account balance over time
+          <p className="text-[12px] text-ink-3 mt-0.5">
+            Historical balance trends
           </p>
+        </div>
+        <div className="flex items-center gap-1">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setTimeframe(t.value as Timeframe)}
+              className={cn(
+                "text-[11px] font-medium px-2 py-1 rounded-md transition-colors",
+                timeframe === t.value
+                  ? "bg-surface-2 text-ink"
+                  : "text-ink-3 hover:text-ink-2",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -318,7 +332,7 @@ export function AccountBalanceChart({
                   onClick={() => setActiveTab(a.asset)}
                   className={cn(
                     "text-[12px] font-medium px-2.5 py-1 rounded-md transition-colors",
-                    activeTab === a.asset
+                    effectiveActiveTab === a.asset
                       ? "bg-brand-dim text-brand"
                       : "text-ink-3 hover:text-ink-2",
                   )}

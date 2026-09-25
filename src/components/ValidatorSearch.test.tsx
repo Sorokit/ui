@@ -130,7 +130,8 @@ describe("ValidatorSearch — interactions", () => {
   });
 
   it("calls onChange with undefined minApy when input is cleared", () => {
-    const { onChange, filter } = renderSearch();
+    const filter = { ...createDefaultFilter(), minApy: 5 };
+    const { onChange } = renderSearch({ filter });
     fireEvent.change(
       screen.getByRole("spinbutton", { name: /minimum apy/i }),
       { target: { value: "" } },

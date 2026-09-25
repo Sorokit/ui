@@ -23,6 +23,7 @@
     },
 
     /* Linting */
+    "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,

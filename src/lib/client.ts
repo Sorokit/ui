@@ -11,9 +11,14 @@ export interface TransactionParams {
   destination: string;
   amount: string;
   asset: string;
+  /** Issuer account for a non-native asset. Omitted (or undefined) for XLM. */
+  assetIssuer?: string;
   memoType: "none" | "text" | "id";
   memo?: string;
 }
+
+/** Result status shared by async client methods that return a request state. */
+export type RequestStatus = "idle" | "loading" | "success" | "error";
 
 /** A Soroban XDR value produced by @stellar/stellar-sdk. */
 export type SorobanScVal = object;
@@ -60,7 +65,7 @@ export type SorokitClient = {
     connect: () => Promise<{
       data: { address: string } | null;
       error: string | null;
-      status: "idle" | "loading" | "success" | "error";
+      status: RequestStatus;
     }>;
     disconnect: () => Promise<void>;
     getAddress: () => Promise<{ data: string | null; error: string | null }>;
@@ -71,7 +76,7 @@ export type SorokitClient = {
     ) => Promise<{
       data: AccountData | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     getBalances: (
       address: string,
@@ -89,7 +94,7 @@ export type SorokitClient = {
     ) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     getStatus: (
       txHash: string,
@@ -125,10 +130,10 @@ export type SorokitClient = {
   soroban: {
     invokeContract: (
       params: InvokeParams,
-    ) => Promise<{ data: unknown; error: string | null; status: string }>;
+    ) => Promise<{ data: unknown; error: string | null; status: RequestStatus }>;
     simulateContract: (
       params: InvokeParams,
-    ) => Promise<{ data: unknown; error: string | null; status: string }>;
+    ) => Promise<{ data: unknown; error: string | null; status: RequestStatus }>;
     getEvents: (
       contractId: string,
       limit?: number,
@@ -195,7 +200,7 @@ export type SorokitClient = {
     }) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     revokeAllowance: (params: {
       sourceAccount: string;
@@ -204,7 +209,7 @@ export type SorokitClient = {
     }) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     estimateAllowanceFee: (params: {
       asset: string;
@@ -320,6 +325,7 @@ export type NetworkInfo = {
   passphrase: string;
   rpcUrl: string;
   horizonUrl: string;
+  ledger?: number;
   status?: "online" | "degraded" | "offline" | string;
 };
 
@@ -372,9 +378,11 @@ export type BatchProgress = {
   batchId: string;
   completed: number;
   total: number;
+  failed?: number;
   percentage: number;
-  etaSeconds: number;
-  currentStatus: BatchEntryResult["status"];
+  etaSeconds?: number;
+  currentStatus?: BatchEntryResult["status"];
+  status?: "idle" | "processing" | "paused" | "completed" | "error" | "cancelled" | string;
 };
 
 // ─── NFT Types ────────────────────────────────────────────────────────────────

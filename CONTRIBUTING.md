@@ -125,7 +125,7 @@ the following checks (all must pass before a PR can be merged):
 | Step           | Command                                  | Purpose                                                              |
 | -------------- | ---------------------------------------- | ------------------------------------------------------------------- |
 | Lint           | `npm run lint`                           | ESLint over `.ts`/`.tsx` sources.                                    |
-| Typecheck      | `npx tsc --noEmit -p tsconfig.app.json`  | Catches type errors across the **full** source tree, not just the build entrypoint. |
+| Typecheck      | `npm run typecheck`                      | Catches type errors across the **full** source tree, not just the build entrypoint. |
 | Build          | `npm run build`                          | Produces the library bundle in `dist/`.                             |
 | Bundle size    | `npm run size`                           | Fails if the published bundle exceeds the **50 KB gzipped** budget. |
 | Verify exports | `npm run test:exports`                   | Type-checks `src/verify-exports.ts` so the public API can't silently break. |

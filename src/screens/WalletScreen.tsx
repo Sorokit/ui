@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { InfoCell } from "@/components/ui/InfoCell";
 import { useSorokit } from "@/context/useSorokit";
-import { truncateAddress } from "@/lib/utils";
 
 /**
  * Full-screen QR code for scanning. Built on Radix Dialog so it traps focus,
@@ -119,7 +118,7 @@ export function WalletScreen() {
                 </Badge>
               </div>
               {address && (
-                <span data-address>{truncateAddress(address, 14, 6)}</span>
+                <AddressDisplay address={address} />
               )}
             </div>
           </div>

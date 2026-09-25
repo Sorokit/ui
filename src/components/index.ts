@@ -20,6 +20,11 @@
 import "../styles.css";
 
 // UI primitives
+//
+// Card, Separator, and SkeletonCard are adopted primitives (not raw div +
+// Tailwind) — see SwapSimulator/RecoveryScreen/ChartingScreen/YieldFarmingScreen
+// /BudgetScreen for Card, WalletConnectModal for Separator, and
+// ClaimableBalanceCard for SkeletonCard.
 export { Badge } from "./ui/Badge";
 export type { ButtonGroupProps } from "./ui/Button";
 export { Button, ButtonGroup } from "./ui/Button";
@@ -31,9 +36,11 @@ export {
   CardHeader,
   CardTitle,
 } from "./ui/Card";
+export type { InfoCellProps } from "./ui/InfoCell";
 export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";
+export { Separator } from "./ui/Separator";
 export { AssetRowSkeleton, Skeleton, SkeletonCard, SkeletonRow } from "./ui/Skeleton";
 
 // Error handling
@@ -52,7 +59,17 @@ export {
 } from "./WalletConnectModal";
 
 // Assets
-export { AssetBadge, AssetPill, isKnownAsset } from "./AssetBadge";
+export type {
+  AssetBadgeProps,
+  AssetPillProps,
+} from "./AssetBadge";
+export {
+  ASSET_COLORS,
+  AssetBadge,
+  AssetPill,
+  getAssetColor,
+  isKnownAsset,
+} from "./AssetBadge";
 export type { AssetItem, AssetMeta, SortKey, VerifiedFilter } from "./AssetFilter";
 export { AssetFilter, AssetFilterSkeleton } from "./AssetFilter";
 
@@ -60,7 +77,8 @@ export { AssetFilter, AssetFilterSkeleton } from "./AssetFilter";
 export { AddressDisplay } from "./AddressDisplay";
 
 // Network
-export { NetworkBanner } from "./NetworkBanner";
+export type { BannerConfig } from "./NetworkBanner";
+export { BANNER_CONFIG, NetworkBanner } from "./NetworkBanner";
 export { NetworkSwitcher } from "./NetworkSwitcher";
 
 // Allowances
@@ -165,7 +183,7 @@ export type {
   DelegationChangeResult,
   RewardEvent,
   RewardScheduleEntry,
-  SortDirection,
+  SortDirection as StakingSortDirection,
   Validator,
   ValidatorFilter,
   ValidatorSortField,
