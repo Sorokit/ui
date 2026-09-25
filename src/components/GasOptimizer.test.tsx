@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { GasOptimizer } from "./GasOptimizer";
+import {
+  GAS_PRESETS,
+  GasOptimizer,
+  MAX_CPU_INSTRUCTIONS,
+  MAX_MEMORY_BYTES,
+  MIN_CPU_INSTRUCTIONS,
+  MIN_MEMORY_BYTES,
+} from "./GasOptimizer";
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
@@ -414,6 +421,296 @@ describe("GasOptimizer", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Scenarios unavailable")).toBeInTheDocument();
+    });
+  });
+
+  describe("Soroban Protocol Execution Boundaries & Sliders", () => {
+    it("renders CPU instructions and memory limit sliders with protocol limits", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("slider", { name: "CPU instructions" }),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("slider", { name: "Memory limit" }),
+        ).toBeInTheDocument();
+      });
+
+      const cpuSlider = screen.getByRole("slider", { name: "CPU instructions" });
+      expect(cpuSlider).toHaveAttribute("min", String(MIN_CPU_INSTRUCTIONS));
+      expect(cpuSlider).toHaveAttribute("max", String(MAX_CPU_INSTRUCTIONS));
+
+      const memorySlider = screen.getByRole("slider", { name: "Memory limit" });
+      expect(memorySlider).toHaveAttribute("min", String(MIN_MEMORY_BYTES));
+      expect(memorySlider).toHaveAttribute("max", String(MAX_MEMORY_BYTES));
+    });
+
+    it("clamps CPU instruction slider to protocol minimum (40,000) when dragged below", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("slider", { name: "CPU instructions" })).toBeInTheDocument(),
+      );
+
+      const cpuSlider = screen.getByRole("slider", { name: "CPU instructions" });
+      fireEvent.change(cpuSlider, { target: { value: "10000" } });
+
+      expect(cpuSlider).toHaveValue(String(MIN_CPU_INSTRUCTIONS));
+      expect(screen.getByText("40,000")).toBeInTheDocument();
+    });
+
+    it("clamps CPU instruction slider to protocol maximum (100,000,000) when dragged above", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("slider", { name: "CPU instructions" })).toBeInTheDocument(),
+      );
+
+      const cpuSlider = screen.getByRole("slider", { name: "CPU instructions" });
+      fireEvent.change(cpuSlider, { target: { value: "150000000" } });
+
+      expect(cpuSlider).toHaveValue(String(MAX_CPU_INSTRUCTIONS));
+      expect(screen.getByText("100,000,000")).toBeInTheDocument();
+    });
+
+    it("clamps memory slider to Soroban minimum requirement (1,048,576 B) when dragged below", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("slider", { name: "Memory limit" })).toBeInTheDocument(),
+      );
+
+      const memorySlider = screen.getByRole("slider", { name: "Memory limit" });
+      fireEvent.change(memorySlider, { target: { value: "50000" } });
+
+      expect(memorySlider).toHaveValue(String(MIN_MEMORY_BYTES));
+      expect(screen.getByText("1.0 MB")).toBeInTheDocument();
+    });
+
+    it("clamps memory slider to Soroban protocol maximum (41,943,040 B) when dragged above", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("slider", { name: "Memory limit" })).toBeInTheDocument(),
+      );
+
+      const memorySlider = screen.getByRole("slider", { name: "Memory limit" });
+      fireEvent.change(memorySlider, { target: { value: "50000000" } });
+
+      expect(memorySlider).toHaveValue(String(MAX_MEMORY_BYTES));
+      expect(screen.getByText("40.0 MB")).toBeInTheDocument();
+    });
+
+    it("automatically switches active preset to Custom when adjusting sliders", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("slider", { name: "CPU instructions" })).toBeInTheDocument(),
+      );
+
+      const cpuSlider = screen.getByRole("slider", { name: "CPU instructions" });
+      fireEvent.change(cpuSlider, { target: { value: "30000000" } });
+
+      const customBtn = screen.getByRole("button", { name: "Custom" });
+      expect(customBtn).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
+  describe("Optimization Presets & Screen-Reader Announcements", () => {
+    it("renders Conservative, Aggressive, and Custom preset buttons", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Conservative" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Aggressive" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Custom" })).toBeInTheDocument();
+      });
+    });
+
+    it("announces updated values to screen readers when selecting Conservative preset", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Aggressive" })).toBeInTheDocument(),
+      );
+
+      // Switch to Aggressive first, then Conservative to trigger change
+      fireEvent.click(screen.getByRole("button", { name: "Aggressive" }));
+      fireEvent.click(screen.getByRole("button", { name: "Conservative" }));
+
+      const status = screen.getByRole("status");
+      expect(status).toHaveAttribute("aria-live", "polite");
+      expect(status).toHaveTextContent(/Preset changed to Conservative/i);
+      expect(status).toHaveTextContent(
+        GAS_PRESETS.Conservative.cpuInstructions.toLocaleString(),
+      );
+      expect(status).toHaveTextContent(
+        GAS_PRESETS.Conservative.memoryBytes.toLocaleString(),
+      );
+    });
+
+    it("announces updated values to screen readers when selecting Aggressive preset", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Aggressive" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Aggressive" }));
+
+      const status = screen.getByRole("status");
+      expect(status).toHaveAttribute("aria-live", "polite");
+      expect(status).toHaveTextContent(/Preset changed to Aggressive/i);
+      expect(status).toHaveTextContent(
+        GAS_PRESETS.Aggressive.cpuInstructions.toLocaleString(),
+      );
+      expect(status).toHaveTextContent(
+        GAS_PRESETS.Aggressive.memoryBytes.toLocaleString(),
+      );
+
+      const cpuSlider = screen.getByRole("slider", { name: "CPU instructions" });
+      expect(cpuSlider).toHaveValue(String(GAS_PRESETS.Aggressive.cpuInstructions));
+    });
+
+    it("announces updated values to screen readers when selecting Custom preset", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Custom" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Custom" }));
+
+      const status = screen.getByRole("status");
+      expect(status).toHaveAttribute("aria-live", "polite");
+      expect(status).toHaveTextContent(/Preset changed to Custom/i);
+    });
+  });
+
+  describe("JSON Configuration Export", () => {
+    it("renders the Export Config button in the header", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("button", { name: "Export Config" }),
+        ).toBeInTheDocument();
+      });
+    });
+
+    it("exports valid JSON matching Sorokit CLI configuration and copies to clipboard", async () => {
+      mockClient();
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: writeTextMock },
+        configurable: true,
+        writable: true,
+      });
+
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Export Config" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Export Config" }));
+
+      await waitFor(() => {
+        expect(writeTextMock).toHaveBeenCalled();
+      });
+
+      const exportedString = writeTextMock.mock.calls[0][0];
+      const parsed = JSON.parse(exportedString);
+
+      expect(parsed).toHaveProperty("version", "1.0.0");
+      expect(parsed).toHaveProperty("network");
+      expect(parsed).toHaveProperty("preset");
+      expect(parsed).toHaveProperty("instructions");
+      expect(parsed.instructions).toBeGreaterThanOrEqual(MIN_CPU_INSTRUCTIONS);
+      expect(parsed.instructions).toBeLessThanOrEqual(MAX_CPU_INSTRUCTIONS);
+      expect(parsed).toHaveProperty("memory");
+      expect(parsed.memory).toBeGreaterThanOrEqual(MIN_MEMORY_BYTES);
+      expect(parsed.memory).toBeLessThanOrEqual(MAX_MEMORY_BYTES);
+      expect(parsed).toHaveProperty("feeMultiplier");
+      expect(parsed).toHaveProperty("resources");
+      expect(parsed.resources).toEqual({
+        instructions: parsed.instructions,
+        memory: parsed.memory,
+      });
+      expect(parsed.operations).toEqual(["payment"]);
+    });
+
+    it("triggers onExport callback prop when provided", async () => {
+      mockClient();
+      const onExport = vi.fn();
+      render(<GasOptimizer onExport={onExport} />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Export Config" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Export Config" }));
+
+      expect(onExport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          version: "1.0.0",
+          instructions: expect.any(Number),
+          memory: expect.any(Number),
+          feeMultiplier: expect.any(Number),
+        }),
+      );
+    });
+
+    it("announces export completion to screen readers and shows visual feedback", async () => {
+      mockClient();
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Export Config" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Export Config" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Exported!")).toBeInTheDocument();
+        expect(screen.getByRole("status")).toHaveTextContent(
+          /Gas configuration exported to clipboard/i,
+        );
+      });
+    });
+
+    it("falls back to document.execCommand when navigator.clipboard is unavailable", async () => {
+      mockClient();
+      Object.defineProperty(navigator, "clipboard", {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
+
+      const execCommandSpy = vi.fn().mockReturnValue(true);
+      document.execCommand = execCommandSpy;
+
+      render(<GasOptimizer />);
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Export Config" })).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Export Config" }));
+
+      expect(execCommandSpy).toHaveBeenCalledWith("copy");
     });
   });
 });

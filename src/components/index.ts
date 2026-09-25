@@ -88,7 +88,25 @@ export { AllowanceManager } from "./AllowanceManager";
 export { ActivityTimeline } from "./ActivityTimeline";
 export { ClaimableBalanceCard } from "./ClaimableBalanceCard";
 export { FeeCell,FeeEstimator } from "./FeeEstimator";
-export { GasOptimizer } from "./GasOptimizer";
+export type {
+  GasOptimizerConfig,
+  GasOptimizerProps,
+  GasPresetConfig,
+  GasPresetName,
+} from "./GasOptimizer";
+export {
+  GAS_PRESETS,
+  GasOptimizer,
+  MAX_CPU_INSTRUCTIONS,
+  MAX_MEMORY_BYTES,
+  MIN_CPU_INSTRUCTIONS,
+  MIN_MEMORY_BYTES,
+  SOROBAN_MAX_INSTRUCTIONS,
+  SOROBAN_MAX_MEMORY,
+  SOROBAN_MIN_INSTRUCTIONS,
+  SOROBAN_MIN_MEMORY,
+  SOROBAN_PROTOCOL_LIMITS,
+} from "./GasOptimizer";
 export { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
 export type {
   TransactionConfirmModalProps,
