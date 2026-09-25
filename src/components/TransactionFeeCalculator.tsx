@@ -22,15 +22,21 @@ interface TransactionFeeCalculatorProps {
   refreshInterval?: number;
 }
 
+// Stroops are integer units on Stellar — always ceil to avoid submitting
+// fractional-stroop fees that the network would reject.
+function parseStroops(stroops: string): number {
+  const num = parseFloat(stroops);
+  if (isNaN(num)) return 0;
+  return Math.ceil(num);
+}
+
 function formatStroops(stroops: string): string {
-  const num = parseInt(stroops, 10);
-  if (isNaN(num)) return stroops;
+  const num = parseStroops(stroops);
   return num.toLocaleString();
 }
 
 function stroopsToXlm(stroops: string): string {
-  const num = parseInt(stroops, 10);
-  if (isNaN(num)) return "0";
+  const num = parseStroops(stroops);
   return (num / STROOPS_PER_XLM).toFixed(7);
 }
 
@@ -39,7 +45,8 @@ function FeeRow({
   stroops,
   tooltip,
   highlight,
-}: FeeBreakdown & { highlight?: boolean }) {
+  showXlm,
+}: FeeBreakdown & { highlight?: boolean; showXlm: boolean }) {
   const xlm = stroopsToXlm(stroops);
   return (
     <div
@@ -65,18 +72,17 @@ function FeeRow({
           ⓘ
         </span>
       </div>
-      <div className="flex items-baseline gap-2.5">
+      <div className="flex items-baseline gap-1.5">
         <span
           className={cn(
             "text-[13px] font-mono tabular-nums",
             highlight ? "text-brand font-semibold" : "text-ink",
           )}
         >
-          {formatStroops(stroops)}
+          {showXlm ? xlm : formatStroops(stroops)}
         </span>
-        <span className="text-[10px] text-ink-3">stroops</span>
-        <span className="text-[12px] text-ink-3 font-mono tabular-nums">
-          {xlm} XLM
+        <span className="text-[10px] text-ink-3">
+          {showXlm ? "XLM" : "stroops"}
         </span>
       </div>
     </div>
@@ -93,6 +99,7 @@ export function TransactionFeeCalculator({
   const [feeData, setFeeData] = useState<FeeBreakdown[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showXlm, setShowXlm] = useState(false);
 
   const load = useCallback(async () => {
     if (!client) return;
@@ -205,21 +212,31 @@ export function TransactionFeeCalculator({
             Estimated fee breakdown for {operations.length > 0 ? operations.join(", ") : "selected"} operation(s)
           </p>
         </div>
-        <button
-          onClick={() => void load()}
-          disabled={loading}
-          className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
-          title="Refresh fee estimate"
-          aria-label="Refresh fee estimate"
-        >
-          <HugeiconsIcon
-            icon={Refresh01Icon}
-            size={14}
-            color="currentColor"
-            strokeWidth={1.5}
-            className={loading ? "animate-spin" : ""}
-          />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowXlm((v) => !v)}
+            className="px-2 py-1 rounded-lg text-[10px] font-medium border border-line hover:bg-surface-2 text-ink-3 hover:text-ink transition-colors"
+            aria-pressed={showXlm}
+            aria-label={showXlm ? "Switch to Stroops" : "Switch to XLM"}
+          >
+            {showXlm ? "XLM" : "Stroops"}
+          </button>
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
+            title="Refresh fee estimate"
+            aria-label="Refresh fee estimate"
+          >
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+              className={loading ? "animate-spin" : ""}
+            />
+          </button>
+        </div>
       </div>
 
       <div aria-live="polite" aria-atomic="true">
@@ -241,6 +258,7 @@ export function TransactionFeeCalculator({
                 xlm={row.xlm}
                 tooltip={row.tooltip}
                 highlight={row.label === "Total Estimated Fee"}
+                showXlm={showXlm}
               />
             ))}
             <div className="px-5 py-3 bg-surface-2 border-t border-line">
