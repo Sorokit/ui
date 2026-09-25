@@ -51,6 +51,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { useSorokit } from "@/context/useSorokit";
+import { useDocumentVisible } from "@/hooks/useDocumentVisible";
 import { useIsVisible } from "@/hooks/useIsVisible";
 import type { ContractEvent } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
@@ -110,13 +111,34 @@ function EventValue({
   );
 }
 
-function TopicTag({ topic }: { topic: string }) {
+function safeTopicText(topic: unknown): { text: string; malformed: boolean } {
+  if (typeof topic === "string") {
+    return topic.length > 0
+      ? { text: topic, malformed: false }
+      : { text: "(empty topic)", malformed: true };
+  }
+  if (typeof topic === "number" || typeof topic === "bigint") {
+    return { text: String(topic), malformed: false };
+  }
+  // A malformed or unrecognized SCVal decode upstream surfaces here as
+  // null/undefined/objects. Never throw — render a fallback badge with the
+  // raw representation instead.
+  try {
+    const raw = topic === null || topic === undefined ? String(topic) : JSON.stringify(topic);
+    return { text: raw ?? "(undecodable topic)", malformed: true };
+  } catch {
+    return { text: "(undecodable topic)", malformed: true };
+  }
+}
+
+function TopicTag({ topic }: { topic: unknown }) {
   const [copied, setCopied] = useState(false);
+  const { text, malformed } = safeTopicText(topic);
 
   async function handleCopy(e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(topic);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -126,7 +148,12 @@ function TopicTag({ topic }: { topic: string }) {
 
   return (
     <span className="group inline-flex items-center gap-1 text-[10px] font-mono text-ink-3 bg-surface-2 rounded px-1.5 py-0.5 border border-line">
-      <span>{topic.length > 20 ? truncateAddress(topic, 8, 4) : topic}</span>
+      {malformed && (
+        <span className="px-1 rounded bg-warning-dim text-warning font-semibold">
+          malformed
+        </span>
+      )}
+      <span>{text.length > 20 ? truncateAddress(text, 8, 4) : text}</span>
       <button
         type="button"
         onClick={handleCopy}
@@ -241,6 +268,10 @@ export function ContractEventFeed({
 }: ContractEventFeedProps) {
   const { client } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
+  // Tab-level visibility: layout visibility (useIsVisible) doesn't cover a
+  // backgrounded browser tab, which would keep polling and burning RPC quota.
+  const documentVisible = useDocumentVisible();
+  const pollingActive = isVisible && documentVisible;
   const [events, setEvents] = useState<ContractEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -250,6 +281,7 @@ export function ContractEventFeed({
   const [activeTypes, setActiveTypes] = useState<Set<string> | null>(
     filterTypes ? new Set(filterTypes) : null,
   );
+  const [topicQuery, setTopicQuery] = useState("");
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // Issue #442: generation counter for `load`. Bumped on every call and
   // whenever `contractId` changes, so a response that arrives after a newer
@@ -365,7 +397,7 @@ export function ContractEventFeed({
   // so changing the prop at runtime tears the old timer down and re-arms a new
   // one at the new period.
   useEffect(() => {
-    if (!live || !isVisible || pollInterval <= 0 || contractId.trim() === "") {
+    if (!live || !pollingActive || pollInterval <= 0 || contractId.trim() === "") {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -383,16 +415,16 @@ export function ContractEventFeed({
         intervalRef.current = null;
       }
     };
-  }, [live, isVisible, pollInterval, load, contractId]);
+  }, [live, pollingActive, pollInterval, load, contractId]);
 
   // Tick the relative "Last updated" label once a second while polling is
   // active and visible — ticking a hidden screen's clock wastes a timer for
   // a label nobody can see.
   useEffect(() => {
-    if (!live || !isVisible || pollInterval <= 0) return;
+    if (!live || !pollingActive || pollInterval <= 0) return;
     const tickId = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(tickId);
-  }, [live, isVisible, pollInterval]);
+  }, [live, pollingActive, pollInterval]);
 
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -408,9 +440,14 @@ export function ContractEventFeed({
   );
 
   const filteredEvents = useMemo(() => {
-    if (!activeTypes) return events;
-    return events.filter((e) => activeTypes.has(e.type));
-  }, [events, activeTypes]);
+    const q = topicQuery.trim().toLowerCase();
+    return events.filter((e) => {
+      if (activeTypes && !activeTypes.has(e.type)) return false;
+      if (q && !e.topics.some((t) => String(t ?? "").toLowerCase().includes(q)))
+        return false;
+      return true;
+    });
+  }, [events, activeTypes, topicQuery]);
 
   function toggleType(type: string) {
     setActiveTypes((prev) => {
@@ -527,6 +564,19 @@ export function ContractEventFeed({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <div className="px-5 py-3 border-b border-line">
+          <input
+            type="search"
+            value={topicQuery}
+            onChange={(e) => setTopicQuery(e.target.value)}
+            placeholder="Filter by topic…"
+            aria-label="Filter events by topic"
+            className="w-full px-2.5 py-1.5 rounded-lg text-[12px] font-mono bg-surface-2 text-ink-2 border border-line placeholder:text-ink-4 focus:outline-none focus:border-brand"
+          />
         </div>
       )}
 

@@ -899,3 +899,94 @@ describe("ContractEventFeed — issue #442", () => {
     expect(screen.getByText("NEW-EVT")).toBeInTheDocument();
   });
 });
+
+// ── Issue #667: tab visibility, malformed topics, topic filter ─────────────
+describe("ContractEventFeed — issue #667", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "prerender",
+    });
+  });
+
+  function setTabVisibility(hidden: boolean) {
+    act(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: hidden ? "hidden" : "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+  }
+
+  it("pauses polling while the tab is hidden and resumes on focus", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() =>
+      expect(getEvents.mock.calls.length).toBeGreaterThanOrEqual(1),
+    );
+
+    setTabVisibility(true);
+    const hiddenCount = getEvents.mock.calls.length;
+    act(() => { vi.advanceTimersByTime(2000); });
+    expect(getEvents).toHaveBeenCalledTimes(hiddenCount);
+
+    setTabVisibility(false);
+    act(() => { vi.advanceTimersByTime(1000); });
+    await waitFor(() =>
+      expect(getEvents.mock.calls.length).toBeGreaterThan(hiddenCount),
+    );
+  });
+
+  it("renders a fallback badge for malformed topics instead of crashing", async () => {
+    mockGetEvents({
+      data: [
+        {
+          ...MOCK_EVENT,
+          topics: ["topic-alpha", null, { raw: "0xdead" }] as unknown as string[],
+        },
+      ],
+      error: null,
+    });
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() =>
+      expect(screen.getAllByText("malformed").length).toBeGreaterThan(0),
+    );
+    expect(screen.getByText("topic-alpha")).toBeInTheDocument();
+  });
+
+  it("filters the event list by topic string", async () => {
+    mockGetEvents({
+      data: [
+        { ...MOCK_EVENT, id: "evt-1", topics: ["mint-token"] },
+        { ...MOCK_EVENT, id: "evt-2", topics: ["burn-token"] },
+      ],
+      error: null,
+    });
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => expect(screen.getByText("mint-token")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/filter events by topic/i), {
+      target: { value: "mint" },
+    });
+
+    expect(screen.getByText("mint-token")).toBeInTheDocument();
+    expect(screen.queryByText("burn-token")).not.toBeInTheDocument();
+  });
+});
