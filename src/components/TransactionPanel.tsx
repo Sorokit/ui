@@ -335,10 +335,8 @@ export function TransactionPanel({
               onChange={(e) => setAsset(e.target.value)}
               disabled={state === "loading" || isLoadingAccount || assetOptions.length === 0}
             >
-              {isLoadingAccount ? (
+              {isLoadingAccount || assetOptions.length === 0 ? (
                 <option value="">Loading assets…</option>
-              ) : assetOptions.length === 0 ? (
-                <option value="XLM">XLM</option>
               ) : (
                 assetOptions.map((b) => (
                   <option key={b.asset} value={b.asset}>
