@@ -301,10 +301,11 @@ describe("ValidatorCard — inactive warning", () => {
     expect(screen.getByRole("note")).toHaveTextContent(
       /new delegations are disabled/i,
     );
-    // Warning variant, not the muted default grey it used to be.
-    expect(screen.getByText("Inactive").closest("span")).not.toHaveClass(
-      "text-ink-2",
+    // Warning variant (AA-contrast tokens), not the muted default grey.
+    expect(screen.getByText("Inactive").closest("span")).toHaveClass(
+      "text-warning",
     );
+    expect(screen.getByRole("note")).toHaveClass("text-warning");
 
     const button = screen.getByRole("button", { name: /delegate to/i });
     expect(button).toBeDisabled();

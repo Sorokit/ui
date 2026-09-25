@@ -232,7 +232,7 @@ export function ValidatorCard({
               "flex items-start gap-2 rounded-lg border px-3 py-2 text-[12px] leading-snug",
               status === "jailed"
                 ? "bg-error-dim border-error-dim-strong text-red"
-                : "bg-[rgba(249,115,22,0.1)] border-[rgba(249,115,22,0.2)] text-orange",
+                : "bg-warning-dim border-warning-dim text-warning",
             )}
           >
             <HugeiconsIcon
