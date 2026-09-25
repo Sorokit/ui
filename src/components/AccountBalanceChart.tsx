@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { type TouchEvent, useId, useMemo, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
@@ -89,6 +89,22 @@ function LineChart({
 
   if (data.length === 0) return null;
 
+  const handleTouch = (event: TouchEvent<SVGSVGElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return;
+
+    const chartX = ((touch.clientX - rect.left) / rect.width) * width;
+    const progress = (chartX - padding.left) / (width - padding.left - padding.right);
+    const index = Math.min(
+      data.length - 1,
+      Math.max(0, Math.round(progress * (data.length - 1))),
+    );
+    onHover?.(data[index] ?? null);
+  };
+
   const values = data.map((d) => d.value);
   const minY = Math.min(...values);
   const maxY = Math.max(...values);
@@ -117,9 +133,12 @@ function LineChart({
     <svg
       width="100%"
       viewBox={`0 0 ${width} ${height}`}
-      className="overflow-visible"
+      className="overflow-visible touch-pan-y"
       role="img"
       aria-label={`Line chart with ${data.length} data points`}
+      onTouchStart={handleTouch}
+      onTouchMove={handleTouch}
+      onTouchEnd={() => onHover?.(null)}
     >
       <defs>
         <linearGradient
@@ -385,11 +404,20 @@ export function AccountBalanceChart({
           )}
 
           <div className="px-2 py-2">
-            <LineChart
-              data={chartData}
-              color={activeAsset?.color ?? "#55852b"}
-              onHover={setHoveredPoint}
-            />
+            {chartData.length === 0 ? (
+              <div
+                className="flex h-[200px] items-center justify-center text-center text-[13px] text-ink-3"
+                role="status"
+              >
+                No historical balance points are available for this timeframe.
+              </div>
+            ) : (
+              <LineChart
+                data={chartData}
+                color={activeAsset?.color ?? "#55852b"}
+                onHover={setHoveredPoint}
+              />
+            )}
           </div>
 
           {!balanceHistory && (
