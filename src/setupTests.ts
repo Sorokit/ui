@@ -74,7 +74,7 @@ if (!Element.prototype.hasPointerCapture) {
   Element.prototype.releasePointerCapture = () => {};
 }
 
-vi.mock('@hugeicons/react', async (importOriginal) => {
-  const actual = await importOriginal();
-  return { ...actual, Loading01Icon: actual.Loading01Icon || (() => null) };
-});
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+

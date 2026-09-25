@@ -154,6 +154,13 @@ dependencies in `devDependencies` where possible and lazy-loading heavy assets.
 - New components must include JSDoc comments
 - Breaking changes need documentation updates
 
+## Release Process
+
+For maintainers and contributors cutting a new release:
+1. Ensure all CI checks pass on `main`.
+2. Follow semantic versioning (`patch`, `minor`, `major`) and Keep a Changelog guidelines.
+3. Detailed step-by-step release instructions are documented in [RELEASING.md](./RELEASING.md).
+
 ## Questions?
 
 Open an issue or ask in discussions. We're here to help!

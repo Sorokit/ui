@@ -11,6 +11,7 @@ describe("useSorokit", () => {
 
     const { result } = renderHook(() => useSorokit());
     expect(result.current.isConnected).toBe(false);
+    expect(result.current.isInitializing).toBe(false);
     expect(result.current.address).toBeNull();
     expect(result.current.balances).toEqual([]);
     expect(result.current.error).toBeNull();

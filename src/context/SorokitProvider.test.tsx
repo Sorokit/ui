@@ -1010,4 +1010,53 @@ describe("SorokitProvider", () => {
       );
     });
   });
+
+  describe("isInitializing initialization state (#500)", () => {
+    const InitProbe = () => {
+      const { isInitializing, network } = useSorokit();
+      return (
+        <div>
+          <div data-testid="isInitializing">{isInitializing ? "true" : "false"}</div>
+          <div data-testid="network">{network?.name ?? "none"}</div>
+        </div>
+      );
+    };
+
+    it("starts with isInitializing: true and transitions to false once network resolves", async () => {
+      let resolveNetwork: (v: { data: { name: string }; error: null }) => void = () => {};
+      const slowClient = {
+        ...mockClient,
+        network: {
+          getNetwork: vi.fn().mockImplementation(
+            () =>
+              new Promise((resolve) => {
+                resolveNetwork = resolve;
+              }),
+          ),
+          switchNetwork: vi.fn().mockResolvedValue({ data: null, error: null }),
+        },
+      } as unknown as ReturnType<typeof getClient>;
+
+      render(
+        <SorokitProvider client={slowClient}>
+          <InitProbe />
+        </SorokitProvider>,
+      );
+
+      expect(screen.getByTestId("isInitializing")).toHaveTextContent("true");
+
+      await waitFor(() => {
+        expect(slowClient.network.getNetwork).toHaveBeenCalled();
+      });
+
+      await act(async () => {
+        resolveNetwork({ data: { name: "testnet" }, error: null });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("isInitializing")).toHaveTextContent("false");
+        expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+      });
+    });
+  });
 });
