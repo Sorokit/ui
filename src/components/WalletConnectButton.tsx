@@ -19,6 +19,8 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     isConnected,
     isConnecting,
     address,
+    walletName,
+    isHardware,
     error,
     clearError,
     disconnectWallet,
@@ -34,6 +36,47 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
       return () => window.clearTimeout(timerId);
     }
   }, [isConnected]);
+
+  const isHardwareWallet =
+    Boolean(isHardware) ||
+    Boolean(
+      walletName &&
+        (walletName.toLowerCase().includes("ledger") ||
+          walletName.toLowerCase().includes("hardware") ||
+          walletName.toLowerCase().includes("webusb")),
+    );
+
+  const handleDisconnect = async () => {
+    try {
+      await disconnectWallet();
+    } finally {
+      if (typeof window !== "undefined") {
+        const keysToRemove = [
+          "sorokit_wallet_session",
+          "sorokit_connected_wallet",
+          "sorokit_wallet_name",
+          "walletconnect",
+          "wc@2:client:0.3//session",
+          "wc@2:core:0.3//pairing",
+        ];
+        keysToRemove.forEach((key) => {
+          localStorage.removeItem(key);
+          sessionStorage.removeItem(key);
+        });
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (
+            key &&
+            (key.startsWith("walletconnect") ||
+              key.startsWith("wc@") ||
+              key.startsWith("sorokit_"))
+          ) {
+            localStorage.removeItem(key);
+          }
+        }
+      }
+    }
+  };
 
   if (isConnected && address) {
     const handleClick = () => {
@@ -59,6 +102,16 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
             <span data-address className="hidden sm:inline">
               {truncateAddress(address)}
             </span>
+            {isHardwareWallet && (
+              <span
+                data-testid="hardware-badge"
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30"
+              >
+                {walletName && walletName.toLowerCase().includes("ledger")
+                  ? "Ledger"
+                  : "Hardware"}
+              </span>
+            )}
           </button>
         </DropdownMenu.Trigger>
 
@@ -71,9 +124,21 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
             >
               {/* Wallet info header */}
               <div className="px-3 py-2 border-b border-line mb-1">
-                <p className="text-[12px] font-medium text-ink truncate font-mono">
-                  {truncateAddress(address)}
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[12px] font-medium text-ink truncate font-mono">
+                    {truncateAddress(address)}
+                  </p>
+                  {isHardwareWallet && (
+                    <span
+                      data-testid="hardware-badge-dropdown"
+                      className="text-[9px] font-medium px-1 py-0.2 rounded bg-purple-500/15 text-purple-400"
+                    >
+                      {walletName && walletName.toLowerCase().includes("ledger")
+                        ? "Ledger"
+                        : "Hardware"}
+                    </span>
+                  )}
+                </div>
                 {network && (
                   <p className="text-[10px] text-ink-4 mt-0.5 capitalize">
                     {network.name}
@@ -84,7 +149,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
               {/* Disconnect action */}
               <DropdownMenu.Item
                 onSelect={() => {
-                  void disconnectWallet();
+                  void handleDisconnect();
                 }}
                 disabled={isDisconnecting}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-red hover:bg-error-dim-muted transition-colors cursor-pointer outline-none focus:bg-error-dim-muted disabled:opacity-50"
@@ -119,7 +184,11 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         <span className="sm:hidden">{isConnecting ? "…" : "Connect"}</span>
       </Button>
       {!isConnected && error && !connectModalOpen && (
-        <div className="absolute top-[calc(100%+8row2)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border border-error-dim rounded-lg shadow-lg text-red text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200">
+        <div
+          role="alert"
+          data-testid="connection-error-alert"
+          className="absolute top-[calc(100%+8px)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border border-error-dim rounded-lg shadow-lg text-red text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200"
+        >
           <span>{error}</span>
           <button
             onClick={clearError}

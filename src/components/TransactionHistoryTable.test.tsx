@@ -182,4 +182,44 @@ describe("TransactionHistoryTable", () => {
       expect(tables.length).toBe(1);
     });
   });
+
+  it("maintains column sort order across pagination page changes", async () => {
+    render(<TransactionHistoryTable pageSize={5} />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const ledgerHeader = screen.getByText("Ledger").closest("th");
+    expect(ledgerHeader).toBeInTheDocument();
+
+    // Click Ledger to sort by ledger (default desc)
+    fireEvent.click(screen.getByText("Ledger"));
+    expect(ledgerHeader).toHaveAttribute("aria-sort", "descending");
+
+    // Navigate to page 2
+    const nextBtn = screen.getByText("Next");
+    fireEvent.click(nextBtn);
+    expect(screen.getByText(/Page 2 of/)).toBeInTheDocument();
+
+    // Verify sort order is maintained
+    expect(ledgerHeader).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("renders overflow scroll wrapper and gradient scroll indicators", async () => {
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    expect(screen.getByTestId("table-overflow-wrapper")).toBeInTheDocument();
+    expect(screen.getByTestId("scroll-indicator-right")).toBeInTheDocument();
+    expect(screen.getByTestId("scroll-indicator-left")).toBeInTheDocument();
+  });
+
+  it("applies error background tinting on failed transaction rows", async () => {
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const failedRows = document.querySelectorAll('[data-failed-row="true"]');
+    expect(failedRows.length).toBeGreaterThan(0);
+    failedRows.forEach((row) => {
+      expect(row.className).toContain("bg-error/5");
+    });
+  });
 });

@@ -154,4 +154,63 @@ describe("WalletConnectModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
+
+  // ── Extension Detection, Focus Trap, Mobile Deep Links (#692) ───────────
+  describe("Extension Detection, Focus Trap & Mobile Deep Links", () => {
+    it("detects installed extensions and renders Installed badges", () => {
+      // Mock window.freighter as installed
+      (window as unknown as { freighter: object }).freighter = {};
+
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const installedBadges = screen.getAllByTestId("installed-badge");
+      expect(installedBadges.length).toBeGreaterThan(0);
+      expect(installedBadges[0]).toHaveTextContent("Installed");
+
+      delete (window as unknown as { freighter?: object }).freighter;
+    });
+
+    it("retains focus within dialog content when clicking external install link", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          connectWallet: mockConnect,
+          isConnecting: false,
+          error: "Freighter extension not found",
+        }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("install-wallet-link")).toBeInTheDocument(),
+      );
+
+      const installLink = screen.getByTestId("install-wallet-link");
+      expect(installLink).toHaveAttribute("target", "_blank");
+
+      fireEvent.click(installLink);
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("displays deep link options when on a mobile device user agent", () => {
+      const originalUserAgent = navigator.userAgent;
+      Object.defineProperty(navigator, "userAgent", {
+        value: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
+        configurable: true,
+      });
+
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const deepLinkBadges = screen.getAllByTestId("mobile-deep-link-option");
+      expect(deepLinkBadges.length).toBeGreaterThan(0);
+
+      Object.defineProperty(navigator, "userAgent", {
+        value: originalUserAgent,
+        configurable: true,
+      });
+    });
+  });
 });

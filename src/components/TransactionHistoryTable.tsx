@@ -491,129 +491,148 @@ export function TransactionHistoryTable({
         </div>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-line">
-                  <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-10" />
-                  <SortHeader
-                    label="Hash"
-                    field="createdAt"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                  />
-                  <SortHeader
-                    label="Ledger"
-                    field="ledger"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-20 text-right"
-                  />
-                  <SortHeader
-                    label="Date"
-                    field="createdAt"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-36"
-                  />
-                  <SortHeader
-                    label="Fee"
-                    field="feePaid"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-28 text-right"
-                  />
-                  <SortHeader
-                    label="Ops"
-                    field="operationCount"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-16 text-center"
-                  />
-                  <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-24">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.map((tx) => {
-                  const { date, time } = formatDate(tx.createdAt);
-                  return (
-                    <tr
-                      key={tx.hash}
-                      className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <StatusIcon successful={tx.successful} />
-                      </td>
-                      <td className="px-4 py-3">
-                        {(() => {
-                          const url = explorerTxUrl(network, tx.hash);
-                          return url ? (
-                            <a
-                              data-txhash
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
-                            >
-                              {truncateAddress(tx.hash, 8, 6)}
-                              <span aria-hidden="true" className="opacity-60">
-                                ↗
-                              </span>
-                            </a>
-                          ) : (
-                            <span
-                              data-txhash
-                              className="text-[13px] text-ink font-mono"
-                            >
-                              {truncateAddress(tx.hash, 8, 6)}
-                            </span>
-                          );
-                        })()}
-                        {tx.memo && (
-                          <span
-                            className="block text-[10px] text-ink-3 mt-0.5"
-                            title={tx.memo}
-                          >
-                            {truncateMemo(tx.memo)}
-                          </span>
+          {/* Desktop table with overflow container and scroll shadow indicators */}
+          <div className="relative">
+            <div
+              className="overflow-x-auto scrollbar-thin"
+              data-testid="table-overflow-wrapper"
+            >
+              <table className="w-full min-w-[600px]">
+                <thead>
+                  <tr className="border-b border-line">
+                    <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-10" />
+                    <SortHeader
+                      label="Hash"
+                      field="createdAt"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                    />
+                    <SortHeader
+                      label="Ledger"
+                      field="ledger"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-20 text-right"
+                    />
+                    <SortHeader
+                      label="Date"
+                      field="createdAt"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-36"
+                    />
+                    <SortHeader
+                      label="Fee"
+                      field="feePaid"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-28 text-right"
+                    />
+                    <SortHeader
+                      label="Ops"
+                      field="operationCount"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-16 text-center"
+                    />
+                    <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-24">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.map((tx) => {
+                    const { date, time } = formatDate(tx.createdAt);
+                    return (
+                      <tr
+                        key={tx.hash}
+                        data-failed-row={!tx.successful ? "true" : undefined}
+                        className={cn(
+                          "border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors",
+                          !tx.successful && "bg-error/5 dark:bg-error/10",
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
-                        {tx.ledger}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[13px] text-ink">{date}</span>
-                        <span className="block text-[10px] text-ink-3">
-                          {time}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
-                        {tx.feePaid}
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-center">
-                        {tx.operationCount}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant={tx.successful ? "success" : "error"}
-                          live
-                        >
-                          {tx.successful ? "Success" : "Failed"}
-                        </Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      >
+                        <td className="px-4 py-3">
+                          <StatusIcon successful={tx.successful} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {(() => {
+                            const url = explorerTxUrl(network, tx.hash);
+                            return url ? (
+                              <a
+                                data-txhash
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
+                              >
+                                {truncateAddress(tx.hash, 8, 6)}
+                                <span aria-hidden="true" className="opacity-60">
+                                  ↗
+                                </span>
+                              </a>
+                            ) : (
+                              <span
+                                data-txhash
+                                className="text-[13px] text-ink font-mono"
+                              >
+                                {truncateAddress(tx.hash, 8, 6)}
+                              </span>
+                            );
+                          })()}
+                          {tx.memo && (
+                            <span
+                              className="block text-[10px] text-ink-3 mt-0.5"
+                              title={tx.memo}
+                            >
+                              {truncateMemo(tx.memo)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
+                          {tx.ledger}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-[13px] text-ink">{date}</span>
+                          <span className="block text-[10px] text-ink-3">
+                            {time}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
+                          {tx.feePaid}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-center">
+                          {tx.operationCount}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={tx.successful ? "success" : "error"}
+                            live
+                          >
+                            {tx.successful ? "Success" : "Failed"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile scroll indicator gradients */}
+            <div
+              data-testid="scroll-indicator-right"
+              className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-surface to-transparent opacity-75 md:hidden"
+            />
+            <div
+              data-testid="scroll-indicator-left"
+              className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-surface to-transparent opacity-75 md:hidden"
+            />
           </div>
 
           {/* Mobile card list */}
@@ -623,7 +642,11 @@ export function TransactionHistoryTable({
               return (
                 <div
                   key={tx.hash}
-                  className="flex items-center gap-3 px-4 py-3"
+                  data-failed-row={!tx.successful ? "true" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3",
+                    !tx.successful && "bg-error/5 dark:bg-error/10",
+                  )}
                 >
                   <StatusIcon successful={tx.successful} />
                   <div className="flex-1 min-w-0">
