@@ -128,6 +128,15 @@ export function TransactionStatusTracker({
     });
   }, [initialHashes]);
 
+  // When network switches, cancel and purge pending transaction polls from previous network
+  const prevNetworkRef = useRef(network?.name);
+  useEffect(() => {
+    if (prevNetworkRef.current && prevNetworkRef.current !== network?.name) {
+      setTracked((prev) => prev.filter((item) => isTerminalStatus(item.status)));
+    }
+    prevNetworkRef.current = network?.name;
+  }, [network?.name]);
+
   useEffect(() => {
     if (tracked.length === 0 || !client) return;
 
@@ -180,7 +189,7 @@ export function TransactionStatusTracker({
     }, pollIntervalMs);
 
     return () => window.clearInterval(timerId);
-  }, [client, pollIntervalMs, tracked.length]);
+  }, [client, network?.name, network?.rpcUrl, pollIntervalMs, tracked.length]);
 
   const addTrackedHash = () => {
     const nextHash = inputValue.trim();
