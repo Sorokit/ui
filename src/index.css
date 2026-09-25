@@ -66,6 +66,10 @@
   --color-purple: #a855f7;
 
   /* ── State backgrounds & borders ── */
+  /* Warning badge/pill — foreground tuned per theme for WCAG AA (≥4.5:1). */
+  --color-warning-fg: #fdba74;
+  --color-warning-bg: rgba(249, 115, 22, 0.12);
+  --color-warning-border: rgba(249, 115, 22, 0.3);
   --color-success-bg: rgba(34, 197, 94, 0.1);
   --color-success-bg-subtle: rgba(34, 197, 94, 0.05);
   --color-success-bg-muted: rgba(34, 197, 94, 0.06);
@@ -116,6 +120,11 @@ html[data-theme="light"] {
 
   --color-qr-canvas-bg: #ffffff;
   --color-qr-canvas-fg: #16181b;
+
+  /* Orange text on a pale tint fails contrast, so warning text darkens. */
+  --color-warning-fg: #9a3412;
+  --color-warning-bg: rgba(249, 115, 22, 0.12);
+  --color-warning-border: rgba(154, 52, 18, 0.3);
 }
 
 html[data-theme="light"] {
@@ -208,6 +217,15 @@ html[data-theme="light"] {
   }
   .text-orange {
     color: var(--color-orange);
+  }
+  .text-warning {
+    color: var(--color-warning-fg);
+  }
+  .bg-warning-dim {
+    background-color: var(--color-warning-bg);
+  }
+  .border-warning-dim {
+    border-color: var(--color-warning-border);
   }
   .text-red {
     color: var(--color-red);

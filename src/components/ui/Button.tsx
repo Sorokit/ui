@@ -77,6 +77,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       children,
       onClick,
+      onClickCapture,
       onBlur,
       ...props
     },
@@ -87,6 +88,29 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     const [armed, setArmed] = useState(false);
     const isInert = !!disabled || !!loading;
+    const ariaDisabled = props["aria-disabled"];
+    const isAriaDisabled = ariaDisabled === true || ariaDisabled === "true";
+
+    // Runs in the capture phase, before any onClick — including one that a
+    // slotted `asChild` child carries itself, which Slot would otherwise invoke
+    // ahead of ours. Stopping the event here means a disabled or
+    // aria-disabled button never reaches a click handler, whatever element is
+    // rendered. The DOM check also catches aria-disabled/disabled set directly
+    // on a slotted child rather than on <Button>.
+    const handleClickCapture = (e: React.MouseEvent<HTMLButtonElement>) => {
+      const el = e.currentTarget;
+      if (
+        isInert ||
+        isAriaDisabled ||
+        el.getAttribute("aria-disabled") === "true" ||
+        el.hasAttribute("disabled")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onClickCapture?.(e);
+    };
 
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
       if (isInert) {
@@ -140,8 +164,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       "disabled:opacity-40 disabled:cursor-not-allowed",
       variants[variant],
       iconOnly ? iconOnlySizes[size] : sizes[size],
-      // Anchors ignore :disabled, so mirror the styling off aria-disabled.
-      isLink && "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed",
+      // Anchors, slotted elements and aria-disabled buttons ignore :disabled,
+      // so mirror the styling off aria-disabled.
+      "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed",
       className,
     );
 
@@ -175,6 +200,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           aria-disabled={isInert || undefined}
           aria-busy={loading || undefined}
           className={classes}
+          onClickCapture={handleClickCapture as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onClick={handleClick as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onBlur={handleBlur as unknown as React.FocusEventHandler<HTMLAnchorElement>}
           {...(props as unknown as React.AnchorHTMLAttributes<HTMLAnchorElement>)}
@@ -188,8 +214,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <Comp
         ref={ref}
         disabled={disabled || loading}
+        // A slotted <a>/<div> has no native disabled state, so announce it.
+        aria-disabled={asChild && isInert ? true : undefined}
         aria-busy={loading || undefined}
         className={classes}
+        onClickCapture={handleClickCapture}
         onClick={handleClick}
         onBlur={handleBlur}
         {...props}

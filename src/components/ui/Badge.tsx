@@ -20,8 +20,9 @@ const variants: Record<BadgeVariant, string> = {
   default: "bg-surface-2 text-ink-2 border border-line-2",
   success:
     "bg-success-dim text-green border border-success-dim-strong",
-  warning:
-    "bg-[rgba(249,115,22,0.1)] text-orange border border-[rgba(249,115,22,0.2)]",
+  // Theme-aware tokens (see styles.css) keep warning text at WCAG AA contrast
+  // in both dark and light themes; raw text-orange fails on light surfaces.
+  warning: "bg-warning-dim text-warning border border-warning-dim",
   error:
     "bg-error-dim text-red border border-error-dim-strong",
   primary: "bg-brand-dim text-brand border border-[rgba(86,69,212,0.25)]",
