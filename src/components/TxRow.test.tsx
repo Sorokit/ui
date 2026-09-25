@@ -113,4 +113,76 @@ describe("TxRow component", () => {
     render(<TxRow tx={tx} />);
     expect(screen.queryByText(/^\d+ ops$/)).not.toBeInTheDocument();
   });
+
+  // ── Soroban Contract Invocations & Badges (#688) ────────────────────────
+  it("displays Soroban contract icon and badge for contract invocations", () => {
+    const tx: Transaction = {
+      hash: "hash-contract-invoke",
+      ledger: 2001,
+      createdAt: new Date("2026-08-15T12:00:00Z").toISOString(),
+      successful: true,
+      operationCount: 1,
+      feePaid: "500",
+      operationType: "invoke_contract",
+    } as Transaction;
+    render(<TxRow tx={tx} />);
+    expect(screen.getByTestId("op-badge")).toHaveTextContent("Soroban");
+  });
+
+  it("displays full UTC timestamp in title attribute on hover", () => {
+    const createdAtDate = new Date("2026-08-15T14:30:00Z");
+    const tx: Transaction = {
+      hash: "hash-utc-time",
+      ledger: 2002,
+      createdAt: createdAtDate.toISOString(),
+      successful: true,
+      operationCount: 1,
+      feePaid: "100",
+    } as Transaction;
+    render(<TxRow tx={tx} />);
+    const timestampEl = screen.getByTestId("tx-timestamp");
+    expect(timestampEl).toHaveAttribute("title", createdAtDate.toUTCString());
+  });
+
+  it("displays LP Deposit badge and icon for liquidity pool deposit operations", () => {
+    const tx: Transaction = {
+      hash: "hash-lp-deposit",
+      ledger: 2003,
+      createdAt: new Date().toISOString(),
+      successful: true,
+      operationCount: 1,
+      feePaid: "200",
+      operationType: "liquidity_pool_deposit",
+    } as Transaction;
+    render(<TxRow tx={tx} />);
+    expect(screen.getByTestId("op-badge")).toHaveTextContent("LP Deposit");
+  });
+
+  it("displays LP Withdraw badge for liquidity pool withdraw operations", () => {
+    const tx: Transaction = {
+      hash: "hash-lp-withdraw",
+      ledger: 2004,
+      createdAt: new Date().toISOString(),
+      successful: true,
+      operationCount: 1,
+      feePaid: "200",
+      operationType: "liquidity_pool_withdraw",
+    } as Transaction;
+    render(<TxRow tx={tx} />);
+    expect(screen.getByTestId("op-badge")).toHaveTextContent("LP Withdraw");
+  });
+
+  it("displays Claimable badge for claimable balance claim operations", () => {
+    const tx: Transaction = {
+      hash: "hash-claimable",
+      ledger: 2005,
+      createdAt: new Date().toISOString(),
+      successful: true,
+      operationCount: 1,
+      feePaid: "150",
+      operationType: "claim_claimable_balance",
+    } as Transaction;
+    render(<TxRow tx={tx} />);
+    expect(screen.getByTestId("op-badge")).toHaveTextContent("Claimable");
+  });
 });

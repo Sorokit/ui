@@ -47,13 +47,43 @@ export interface WalletOption {
   name: string;
   initial: string;
   color: string;
+  installUrl?: string;
+  deepLink?: string;
 }
 
 export const DEFAULT_WALLET_OPTIONS: WalletOption[] = [
-  { id: "freighter", name: "Freighter", initial: "F", color: "#7B61FF" },
-  { id: "xbull", name: "xBull", initial: "X", color: "#F3A93B" },
-  { id: "lobstr", name: "Lobstr", initial: "L", color: "#2F80ED" },
-  { id: "albedo", name: "Albedo", initial: "A", color: "#00B894" },
+  {
+    id: "freighter",
+    name: "Freighter",
+    initial: "F",
+    color: "#7B61FF",
+    installUrl: "https://www.freighter.app/",
+    deepLink: "https://www.freighter.app/",
+  },
+  {
+    id: "xbull",
+    name: "xBull",
+    initial: "X",
+    color: "#F3A93B",
+    installUrl: "https://xbull.app/",
+    deepLink: "https://xbull.app/",
+  },
+  {
+    id: "lobstr",
+    name: "Lobstr",
+    initial: "L",
+    color: "#2F80ED",
+    installUrl: "https://lobstr.co/",
+    deepLink: "https://lobstr.co/dl/",
+  },
+  {
+    id: "albedo",
+    name: "Albedo",
+    initial: "A",
+    color: "#00B894",
+    installUrl: "https://albedo.link/",
+    deepLink: "https://albedo.link/",
+  },
 ];
 
 type Step = "select" | "connecting" | "success" | "error";
@@ -65,6 +95,26 @@ export interface WalletConnectModalProps {
   onClose: () => void;
   /** Wallet options shown in the selection grid. Defaults to Freighter/xBull/Lobstr/Albedo. */
   walletOptions?: WalletOption[];
+}
+
+/** Check whether a wallet browser extension is installed. */
+export function isWalletExtensionInstalled(walletId: string): boolean {
+  if (typeof window === "undefined") return false;
+  const win = window as unknown as Record<string, unknown>;
+  const id = walletId.toLowerCase();
+  if (id === "freighter") return Boolean(win.freighter || win.isFreighter);
+  if (id === "xbull") return Boolean(win.xbull || win.xBull);
+  if (id === "albedo") return Boolean(win.albedo);
+  if (id === "lobstr") return Boolean(win.lobstr);
+  return Boolean(win[id] || win[walletId]);
+}
+
+/** Check whether user is browsing on a mobile device. */
+export function isMobileEnvironment(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent,
+  );
 }
 
 /** Best-effort classification of a connection error for recovery messaging. */
@@ -89,6 +139,8 @@ export function WalletConnectModal({
     null,
   );
 
+  const isMobile = isMobileEnvironment();
+
   // Advance out of "connecting" once useSorokit settles. Deferred via
   // setTimeout(0), same pattern SorokitProvider uses for its own effects —
   // avoids setting state synchronously within the effect body itself.
@@ -104,11 +156,7 @@ export function WalletConnectModal({
     return () => window.clearTimeout(timerId);
   }, [open, step, isConnecting, error, address]);
 
-  // Reset local flow state and notify the caller. Used for every close path
-  // (backdrop, Escape, close button, Done) instead of an effect reacting to
-  // `open`, so re-opening always starts from adapter selection. Deliberately
-  // does not call clearError() — clearing here could wipe an error another
-  // consumer (e.g. the button's own inline banner) is still showing.
+  // Reset local flow state and notify the caller.
   function handleClose() {
     setStep("select");
     setSelectedWallet(null);
@@ -117,6 +165,11 @@ export function WalletConnectModal({
 
   function handleSelectWallet(wallet: WalletOption) {
     setSelectedWallet(wallet);
+    if (isMobile && wallet.deepLink) {
+      if (typeof window !== "undefined") {
+        window.location.href = wallet.deepLink;
+      }
+    }
     setStep("connecting");
     void connectWallet();
   }
@@ -125,6 +178,17 @@ export function WalletConnectModal({
     clearError();
     setStep("select");
   }
+
+  const handleExternalLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    e.stopPropagation();
+    // Maintain focus within modal dialog when launching external install links
+    const dialogElement = e.currentTarget.closest('[role="dialog"]') as HTMLElement | null;
+    if (dialogElement) {
+      setTimeout(() => {
+        dialogElement.focus();
+      }, 0);
+    }
+  };
 
   const notInstalled = error ? isNotInstalledError(error) : false;
 
@@ -180,25 +244,44 @@ export function WalletConnectModal({
               role="group"
               aria-label="Available wallets"
             >
-              {walletOptions.map((wallet) => (
-                <button
-                  key={wallet.id}
-                  type="button"
-                  onClick={() => handleSelectWallet(wallet)}
-                  className="flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors"
-                >
-                  <span
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold text-white shrink-0"
-                    style={{ backgroundColor: wallet.color }}
-                    aria-hidden="true"
+              {walletOptions.map((wallet) => {
+                const installed = isWalletExtensionInstalled(wallet.id);
+                return (
+                  <button
+                    key={wallet.id}
+                    type="button"
+                    onClick={() => handleSelectWallet(wallet)}
+                    className="relative flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors"
                   >
-                    {wallet.initial}
-                  </span>
-                  <span className="text-[12px] text-ink-2 font-medium">
-                    {wallet.name}
-                  </span>
-                </button>
-              ))}
+                    {installed && (
+                      <span
+                        data-testid="installed-badge"
+                        className="absolute top-2 right-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-success-dim text-green"
+                      >
+                        Installed
+                      </span>
+                    )}
+                    {isMobile && wallet.deepLink && (
+                      <span
+                        data-testid="mobile-deep-link-option"
+                        className="absolute top-2 left-2 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-brand-dim text-brand"
+                      >
+                        Deep Link
+                      </span>
+                    )}
+                    <span
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-[13px] font-bold text-white shrink-0"
+                      style={{ backgroundColor: wallet.color }}
+                      aria-hidden="true"
+                    >
+                      {wallet.initial}
+                    </span>
+                    <span className="text-[12px] text-ink-2 font-medium">
+                      {wallet.name}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           )}
 
@@ -259,9 +342,26 @@ export function WalletConnectModal({
                     {error}
                   </p>
                   <p className="text-[12px] text-ink-3 mt-2 leading-relaxed">
-                    {notInstalled
-                      ? `Install the ${selectedWallet?.name ?? "wallet"} browser extension, then try again.`
-                      : "Check that your wallet is unlocked and try again."}
+                    {notInstalled ? (
+                      <>
+                        Install the {selectedWallet?.name ?? "wallet"} browser extension{" "}
+                        {selectedWallet?.installUrl && (
+                          <a
+                            href={selectedWallet.installUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={handleExternalLinkClick}
+                            className="text-brand underline font-medium hover:text-brand-hover"
+                            data-testid="install-wallet-link"
+                          >
+                            Install {selectedWallet.name}
+                          </a>
+                        )}
+                        , then try again.
+                      </>
+                    ) : (
+                      "Check that your wallet is unlocked and try again."
+                    )}
                   </p>
                 </div>
               </div>

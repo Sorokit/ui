@@ -317,4 +317,64 @@ describe("WalletConnectButton", () => {
     fireEvent.click(addressPill);
     expect(mockOnOpenModal).toHaveBeenCalledTimes(1);
   });
+
+  // ── Hardware Wallet & Disconnect Cleanup (#691) ──────────────────────────
+  describe("Hardware Wallet & Disconnect Storage Purge", () => {
+    it("renders Ledger/Hardware badge when connected to a hardware wallet", () => {
+      const fullAddress = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: fullAddress,
+          walletName: "Ledger",
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    it("purges cached wallet session keys from localStorage on disconnect", async () => {
+      localStorage.setItem("sorokit_wallet_session", "test-session-token");
+      localStorage.setItem("walletconnect", "wc-data");
+
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          disconnectWallet: mockDisconnect,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      fireEvent.click(
+        screen.getByRole("button", { name: /wallet connected/i }),
+      );
+
+      const disconnectBtn = screen.getByRole("menuitem", { name: /disconnect/i });
+      fireEvent.click(disconnectBtn);
+
+      await waitFor(() => {
+        expect(mockDisconnect).toHaveBeenCalledTimes(1);
+        expect(localStorage.getItem("sorokit_wallet_session")).toBeNull();
+        expect(localStorage.getItem("walletconnect")).toBeNull();
+      });
+    });
+
+    it("displays error alert when wallet connection is rejected by user", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+          isConnecting: false,
+          error: "Connection rejected by user",
+          clearError: mockClearError,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.getByTestId("connection-error-alert")).toHaveTextContent(
+        "Connection rejected by user",
+      );
+    });
+  });
 });

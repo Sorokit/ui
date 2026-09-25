@@ -3,6 +3,9 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle01Icon,
+  CoinsSwapIcon,
+  ContractsIcon,
+  GiftIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -130,6 +133,7 @@ export const TxRow = memo(function TxRow({
     month: "short",
     day: "numeric",
   });
+  const utcStr = date.toUTCString();
 
   const explorerUrl = explorerTxUrl(networkName, tx.hash);
 
@@ -139,6 +143,46 @@ export const TxRow = memo(function TxRow({
     : {};
 
   const rowLabel = `Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`;
+
+  const opType = (tx.operationType || tx.type || "").toLowerCase();
+  const isContract =
+    opType.includes("invoke") ||
+    opType.includes("contract") ||
+    opType.includes("soroban") ||
+    Boolean(tx.contractId);
+
+  const isLpDeposit =
+    opType.includes("liquidity_pool_deposit") || opType === "lp_deposit";
+  const isLpWithdraw =
+    opType.includes("liquidity_pool_withdraw") || opType === "lp_withdraw";
+  const isLp =
+    isLpDeposit ||
+    isLpWithdraw ||
+    opType.includes("liquidity_pool") ||
+    opType.includes("lp");
+
+  const isClaimable =
+    opType.includes("claimable") || opType.includes("claim_claimable");
+
+  let OpIcon = tx.successful ? CheckmarkCircle01Icon : Cancel01Icon;
+  let opBadgeText: string | null = null;
+
+  if (isContract) {
+    OpIcon = ContractsIcon;
+    opBadgeText = "Soroban";
+  } else if (isLpDeposit) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "LP Deposit";
+  } else if (isLpWithdraw) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "LP Withdraw";
+  } else if (isLp) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "Liquidity Pool";
+  } else if (isClaimable) {
+    OpIcon = GiftIcon;
+    opBadgeText = "Claimable";
+  }
 
   return (
     <RowWrapper
@@ -154,10 +198,11 @@ export const TxRow = memo(function TxRow({
       <div className="flex items-center gap-3 min-w-0">
         {/* Status icon */}
         <div
+          data-testid="status-icon-container"
           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${tx.successful ? "bg-success-dim" : "bg-error-dim"}`}
         >
           <HugeiconsIcon
-            icon={tx.successful ? CheckmarkCircle01Icon : Cancel01Icon}
+            icon={OpIcon}
             size={14}
             color="currentColor"
             strokeWidth={1.5}
@@ -185,6 +230,15 @@ export const TxRow = memo(function TxRow({
           <Badge variant={tx.successful ? "success" : "error"} live>
             {tx.successful ? "Success" : "Failed"}
           </Badge>
+          {opBadgeText && (
+            <Badge
+              variant="brand"
+              className="text-[10px] px-1.5 py-0.5"
+              data-testid="op-badge"
+            >
+              {opBadgeText}
+            </Badge>
+          )}
           {tx.operationCount > 1 && (
             <Badge variant="default" className="text-[10px] px-1.5 py-0.5">
               {tx.operationCount} ops
@@ -192,7 +246,11 @@ export const TxRow = memo(function TxRow({
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-ink-3">
+          <span
+            className="text-[10px] text-ink-3 cursor-help"
+            title={utcStr}
+            data-testid="tx-timestamp"
+          >
             {dateStr} {timeStr}
           </span>
           <span className="text-[10px] text-ink-3">· {tx.feePaid} stroops</span>

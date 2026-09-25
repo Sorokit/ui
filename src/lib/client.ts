@@ -287,6 +287,9 @@ export type Transaction = {
   operationCount: number;
   feePaid: string;
   memo?: string;
+  operationType?: string;
+  type?: string;
+  contractId?: string;
 };
 
 export type ClaimableBalance = {
