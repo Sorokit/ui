@@ -44,4 +44,41 @@ describe("MultiSigTransactionBuilder", () => {
     fireEvent.click(screen.getByRole("button", { name: /load saved/i }));
     expect(screen.getByText(/loaded saved transaction/i)).toBeInTheDocument();
   });
+
+  it("blocks Next while the threshold exceeds total signer weight", () => {
+    render(<MultiSigTransactionBuilder />);
+
+    // Default: one signer of weight 1; threshold 2 is invalid.
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "2" } });
+
+    expect(
+      screen.getByText(/Threshold exceeds available weight/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+  });
+
+  it("keeps signer keys unique when adding after removing a middle signer", () => {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<MultiSigTransactionBuilder />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /remove/i })[1]);
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+
+    const duplicateWarnings = consoleSpy.mock.calls.filter(
+      ([msg]) => typeof msg === "string" && msg.includes("same key"),
+    );
+    expect(duplicateWarnings).toHaveLength(0);
+    consoleSpy.mockRestore();
+  });
+
+  it("does not redefine window.localStorage when saving", () => {
+    const original = window.localStorage;
+    render(<MultiSigTransactionBuilder />);
+
+    fireEvent.click(screen.getByRole("button", { name: /save json/i }));
+
+    expect(window.localStorage).toBe(original);
+  });
 });
