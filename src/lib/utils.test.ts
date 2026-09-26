@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { cn, truncateAddress, validateStellarAddress } from "./utils";
+import {
+  cn,
+  truncateAddress,
+  truncateToUtf8ByteLength,
+  utf8ByteLength,
+  validateStellarAddress,
+} from "./utils";
 
 describe("truncateAddress", () => {
   const STELLAR_ADDRESS_56 =
@@ -168,5 +174,64 @@ describe("cn utility", () => {
     expect(cn(["px-2", "py-1"], { "font-bold": true, italic: false })).toBe(
       "px-2 py-1 font-bold",
     );
+  });
+});
+
+describe("utf8ByteLength (#686)", () => {
+  it("counts plain ASCII characters as 1 byte each", () => {
+    expect(utf8ByteLength("hello")).toBe(5);
+  });
+
+  it("returns 0 for an empty string", () => {
+    expect(utf8ByteLength("")).toBe(0);
+  });
+
+  it("counts a multi-byte character as more than 1 byte", () => {
+    // "é" (U+00E9) is 2 bytes in UTF-8.
+    expect(utf8ByteLength("é")).toBe(2);
+  });
+
+  it("counts an emoji (surrogate pair) as 4 bytes", () => {
+    // "😀" (U+1F600) is 4 bytes in UTF-8.
+    expect(utf8ByteLength("😀")).toBe(4);
+  });
+
+  it("matches character length only for pure ASCII text", () => {
+    const text = "payment for invoice #42";
+    expect(utf8ByteLength(text)).toBe(text.length);
+  });
+});
+
+describe("truncateToUtf8ByteLength (#686)", () => {
+  it("returns the text unchanged when already within the byte limit", () => {
+    expect(truncateToUtf8ByteLength("hello", 28)).toBe("hello");
+  });
+
+  it("truncates ASCII text to exactly maxBytes characters", () => {
+    const text = "a".repeat(40);
+    const result = truncateToUtf8ByteLength(text, 28);
+    expect(result).toHaveLength(28);
+    expect(utf8ByteLength(result)).toBe(28);
+  });
+
+  it("never splits a multi-byte character in half", () => {
+    // 14 "é" characters = 28 bytes exactly; a 15th would overflow to 30.
+    const text = "é".repeat(15);
+    const result = truncateToUtf8ByteLength(text, 28);
+    expect(utf8ByteLength(result)).toBeLessThanOrEqual(28);
+    // Every remaining character must be a complete, valid "é" — not a
+    // mangled half-character — so re-encoding round-trips losslessly.
+    expect(result).toBe("é".repeat(14));
+  });
+
+  it("never splits a 4-byte emoji in half", () => {
+    const text = "😀".repeat(10); // 40 bytes
+    const result = truncateToUtf8ByteLength(text, 28);
+    expect(utf8ByteLength(result)).toBeLessThanOrEqual(28);
+    expect(result).toBe("😀".repeat(7)); // 28 bytes exactly
+  });
+
+  it("returns an empty string when maxBytes is 0", () => {
+    expect(truncateToUtf8ByteLength("hello", 0)).toBe("");
   });
 });
