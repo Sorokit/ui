@@ -23,7 +23,7 @@ vi.mock("@/lib/client", async (importOriginal) => {
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
-const VALID_ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+const VALID_ADDRESS = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
 
 function makeNft(overrides: Partial<Nft> = {}): Nft {
   return {
@@ -200,6 +200,39 @@ describe("NFTCard", () => {
       <NFTCard nft={makeNft()} selected={false} bulkMode={false} onSelect={onSelect} onSend={onSend} onList={onList} />
     );
     const img = screen.getByAltText("Cool Cat #1");
+    fireEvent.error(img);
+    expect(screen.getByText("No image")).toBeInTheDocument();
+  });
+
+  it("tries alternate IPFS gateways before showing the placeholder", () => {
+    render(
+      <NFTCard
+        nft={makeNft({
+          metadata: {
+            name: "Cool Cat #1",
+            attributes: [],
+            image: "ipfs://bafytestcid/cat.png",
+          },
+        })}
+        selected={false}
+        bulkMode={false}
+        onSelect={onSelect}
+        onSend={onSend}
+        onList={onList}
+      />
+    );
+
+    let img = screen.getByAltText("Cool Cat #1");
+    expect(img).toHaveAttribute("src", "https://ipfs.io/ipfs/bafytestcid/cat.png");
+
+    fireEvent.error(img);
+    img = screen.getByAltText("Cool Cat #1");
+    expect(img).toHaveAttribute("src", "https://cloudflare-ipfs.com/ipfs/bafytestcid/cat.png");
+
+    fireEvent.error(img);
+    img = screen.getByAltText("Cool Cat #1");
+    expect(img).toHaveAttribute("src", "https://dweb.link/ipfs/bafytestcid/cat.png");
+
     fireEvent.error(img);
     expect(screen.getByText("No image")).toBeInTheDocument();
   });
@@ -692,12 +725,9 @@ describe("NFTGallery — Send NFT dialog", () => {
     expect(screen.getAllByText("Cool Cat #1").length).toBeGreaterThan(0);
   });
 
-  it("shows validation error when recipient is empty", async () => {
+  it("keeps send disabled until the recipient is a valid Stellar address", async () => {
     await openSendDialog();
-    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/recipient address is required/i)).toBeInTheDocument();
-    });
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
   });
 
   it("shows validation error for invalid address format", async () => {
@@ -705,10 +735,8 @@ describe("NFTGallery — Send NFT dialog", () => {
     fireEvent.change(screen.getByLabelText(/recipient address/i), {
       target: { value: "BADINVALID" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/valid stellar address/i)).toBeInTheDocument();
-    });
+    expect(screen.getByText(/valid stellar address/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^send$/i })).toBeDisabled();
   });
 
   it("calls sendNft with correct params on valid submit", async () => {
@@ -957,12 +985,15 @@ describe("NFTGallery — Bulk Send dialog", () => {
     expect(screen.getByText(/bulk send \(2 nfts\)/i)).toBeInTheDocument();
   });
 
-  it("shows validation error for empty recipient", async () => {
+  it("keeps bulk send disabled until the recipient is a valid Stellar address", async () => {
     await openBulkSendDialog();
-    fireEvent.click(screen.getByRole("button", { name: /send all/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/recipient address is required/i)).toBeInTheDocument();
+    const sendAll = screen.getByRole("button", { name: /send all/i });
+    expect(sendAll).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/recipient address/i), {
+      target: { value: "NOT-A-STELLAR-KEY" },
     });
+    expect(screen.getByText(/valid stellar address/i)).toBeInTheDocument();
+    expect(sendAll).toBeDisabled();
   });
 
   it("calls sendNft for each selected NFT", async () => {
