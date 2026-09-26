@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 
-import { SwapSimulator } from "./SwapSimulator";
+import { MINIMUM_LIQUIDITY_THRESHOLD, SwapSimulator } from "./SwapSimulator";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -413,5 +413,87 @@ describe("SwapSimulator", () => {
   it("accepts a custom className prop", () => {
     const { container } = render(<SwapSimulator className="my-custom-class" />);
     expect(container.firstChild).toHaveClass("my-custom-class");
+  });
+
+  // ---- Zero Liquidity & Minimum Liquidity Threshold (#733) ----
+
+  describe("zero liquidity and minimum liquidity threshold (#733)", () => {
+    it("does not render NaN or Infinity when pool reserves are zero", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 0, toReserves: 0 },
+          }}
+        />,
+      );
+
+      // Verify no NaN or Infinity is displayed in the DOM
+      expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Infinity/i)).not.toBeInTheDocument();
+
+      // Asserts that Insufficient liquidity is shown instead of price impact
+      expect(screen.getAllByText(/insufficient liquidity/i).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("shows 'Insufficient liquidity' alert, price impact, and disabled button for below-threshold reserves", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": {
+              fromReserves: MINIMUM_LIQUIDITY_THRESHOLD * 0.2,
+              toReserves: MINIMUM_LIQUIDITY_THRESHOLD * 0.2,
+            },
+          }}
+        />,
+      );
+
+      // Shows warning banner
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(/insufficient liquidity/i);
+
+      // Swap button displays Insufficient liquidity and is disabled
+      const btn = screen.getByRole("button", { name: /insufficient liquidity/i });
+      expect(btn).toBeInTheDocument();
+      expect(btn).toBeDisabled();
+
+      // No NaN or Infinity
+      expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Infinity/i)).not.toBeInTheDocument();
+    });
+
+    it("handles zero reserveIn when reserveOut has liquidity without NaN or Infinity", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 0, toReserves: 5000 },
+          }}
+        />,
+      );
+
+      expect(screen.queryByText(/NaN/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Infinity/i)).not.toBeInTheDocument();
+      expect(screen.getAllByText(/insufficient liquidity/i).length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("disables swap button and prevents onSwap callback when liquidity is insufficient", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      const onSwap = vi.fn();
+
+      render(
+        <SwapSimulator
+          onSwap={onSwap}
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 0, toReserves: 0 },
+          }}
+        />,
+      );
+
+      const btn = screen.getByRole("button", { name: /insufficient liquidity/i });
+      expect(btn).toBeDisabled();
+      fireEvent.click(btn);
+      expect(onSwap).not.toHaveBeenCalled();
+    });
   });
 });
