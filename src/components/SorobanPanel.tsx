@@ -331,7 +331,7 @@ export function SorobanPanel({
               value={args}
               onChange={(e) => setArgs(e.target.value)}
               onInput={(e) => {
-                const textarea = e.currentTarget as HTMLTextAreaElement;
+                const textarea = e.currentTarget as unknown as HTMLTextAreaElement;
                 textarea.rows = Math.max(
                   3,
                   textarea.value.split("\n").length,
