@@ -322,49 +322,38 @@ export function SorobanPanel({
                 </datalist>
               )}
             </div>
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="soroban-args"
-                className="text-[12px] font-medium text-ink-2"
-              >
-                Arguments (JSON array)
-              </label>
-              <textarea
-                id="soroban-args"
-                placeholder='["arg1", 42]'
-                value={args}
-                onChange={(e) => setArgs(e.target.value)}
-                onInput={(e) => {
-                  const textarea = e.currentTarget;
-                  textarea.rows = Math.max(
-                    3,
-                    textarea.value.split("\n").length,
-                  );
-                  textarea.style.height = "auto";
-                  textarea.style.height = `${textarea.scrollHeight}px`;
-                }}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    void doInvoke();
-                  }
-                }}
-                disabled={state === "loading"}
-                rows={4}
-                aria-invalid={args.trim() !== "" && !isArgsJsonValid}
-                aria-describedby={
-                  args.trim() !== "" && !isArgsJsonValid
-                    ? "soroban-args-error"
-                    : undefined
+            {/* Issue #542: reuse the Input component's label-association logic
+                (htmlFor + aria-describedby) instead of a hand-wired textarea. */}
+            <Input
+              label="Arguments (JSON array)"
+              multiline
+              placeholder='["arg1", 42]'
+              value={args}
+              onChange={(e) => setArgs(e.target.value)}
+              onInput={(e) => {
+                const textarea = e.currentTarget as HTMLTextAreaElement;
+                textarea.rows = Math.max(
+                  3,
+                  textarea.value.split("\n").length,
+                );
+                textarea.style.height = "auto";
+                textarea.style.height = `${textarea.scrollHeight}px`;
+              }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void doInvoke();
                 }
-                className="w-full resize-y min-h-[80px] rounded-lg border border-line bg-surface-2 px-4 py-3 text-[13px] font-mono text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
-              />
-              {args.trim() !== "" && !isArgsJsonValid && (
-                <p id="soroban-args-error" className="text-[11px] text-red">
-                  Invalid JSON in arguments
-                </p>
-              )}
-            </div>
+              }}
+              disabled={state === "loading"}
+              rows={4}
+              error={
+                args.trim() !== "" && !isArgsJsonValid
+                  ? "Invalid JSON in arguments"
+                  : undefined
+              }
+              className="font-mono min-h-[80px]"
+            />
 
             {state !== "idle" && (
               <div className="relative min-h-32" aria-live="polite">

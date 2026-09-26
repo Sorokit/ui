@@ -131,6 +131,7 @@ function TopicTag({ topic }: { topic: string }) {
         type="button"
         onClick={handleCopy}
         title="Copy topic"
+        aria-label={copied ? "Topic copied" : "Copy topic"}
         className="opacity-0 group-hover:opacity-100 hover:text-ink-1 transition-opacity cursor-pointer p-0.5"
       >
         <HugeiconsIcon
@@ -453,6 +454,7 @@ export function ContractEventFeed({
             <button
               onClick={() => setLive((l) => !l)}
               aria-pressed={live}
+              aria-label={live ? "Live, pause updates" : "Paused, resume updates"}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${live ? "bg-success-dim text-green border-success-dim-strong" : "bg-surface-2 text-ink-3 border-line-2"}`}
             >
               <span
@@ -491,8 +493,11 @@ export function ContractEventFeed({
             Export JSON
           </button>
           <button
+            type="button"
             onClick={() => void load()}
             disabled={loading}
+            aria-label="Refresh"
+            title="Refresh"
             className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
           >
             <HugeiconsIcon

@@ -10,6 +10,8 @@ interface InputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "
   hint?: string;
   /** Render a multi-line `<textarea>` instead of a single-line `<input>`. */
   multiline?: boolean;
+  /** Number of visible rows when `multiline` is true. */
+  rows?: number;
   /** Element rendered before the input value inside the container. */
   prefix?: React.ReactNode;
   /** Element rendered after the input value inside the container. */
@@ -50,8 +52,9 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     ref,
   ) => {
     const generatedId = useId();
-    const inputId =
-      id ?? label?.toLowerCase().replace(/\s+/g, "-") ?? generatedId;
+    // Issue #544: derive the id from React.useId() rather than the label text,
+    // which collided when two inputs shared the same label on one page.
+    const inputId = id ?? generatedId;
 
     const [lastError, setLastError] = useState<string | undefined>(error);
     const [lastHint, setLastHint] = useState<string | undefined>(hint);
