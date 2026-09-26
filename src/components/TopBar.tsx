@@ -25,6 +25,12 @@ export function TopBar({
     <div className="shrink-0">
       {error && (
         <div className="flex items-center justify-between gap-4 px-6 py-2.5 bg-error-dim-muted border-b border-error-dim shrink-0">
+          <p
+            role="alert"
+            className="text-[12px] text-red break-words min-w-0 flex-1"
+          >
+            {error}
+          </p>
           <p role="alert" className="text-[12px] text-red break-words min-w-0 flex-1">{error}</p>
           <button
             onClick={clearError}

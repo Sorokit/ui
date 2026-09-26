@@ -83,6 +83,9 @@ export function ConnectScreen() {
           <div className="px-5 py-5 flex flex-col gap-4">
             {error && (
               <div className="flex items-start justify-between gap-3 rounded-lg bg-error-dim-muted border border-error-dim px-4 py-3">
+                <p role="alert" className="text-[13px] text-red">
+                  {error}
+                </p>
                 <p role="alert" className="text-[13px] text-red">{error}</p>
 
                 <button
