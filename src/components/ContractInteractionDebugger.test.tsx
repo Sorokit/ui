@@ -79,6 +79,42 @@ describe("ContractInteractionDebugger", () => {
     expect(screen.getByText(/config\.key2/i)).toBeInTheDocument();
   });
 
+  it("strips ANSI escape codes from snapshot diagnostics (#668)", () => {
+    render(
+      <ContractInteractionDebugger
+        contractId="C123"
+        method="log"
+        args={[]}
+        stateBefore={{ log: "\u001b[31mERROR\u001b[0m" }}
+        stateAfter={{ log: "done" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+
+    expect(screen.queryByText(/\u001b/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/ERROR/).length).toBeGreaterThan(0);
+  });
+
+  it("renders failed simulation details and the gas breakdown (#668)", () => {
+    render(
+      <ContractInteractionDebugger
+        contractId="C123"
+        method="transfer"
+        args={[]}
+        state="error"
+        result={{ error: "resource limit exceeded" }}
+        error="boom"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    expect(screen.getByText(/gas estimate/i)).toBeInTheDocument();
+    expect(screen.getByText(/cost breakdown/i)).toBeInTheDocument();
+  });
+
   it("copies values and stores recent invocations in session storage", async () => {
     render(
       <ContractInteractionDebugger
