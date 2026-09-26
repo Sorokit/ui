@@ -153,6 +153,7 @@ export function StakingDashboard({
   // Issue #651: keep localDelegations in sync with the wallet connection and
   // any prop changes, so disconnecting clears stale mock delegations.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLocalDelegations(isConnected ? (delegationsProp ?? MOCK_DELEGATIONS) : []);
   }, [isConnected, delegationsProp]);
 

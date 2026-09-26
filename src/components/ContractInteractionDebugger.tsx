@@ -59,6 +59,7 @@ const DEBUG_HISTORY_LIMIT = 10;
 
 // Issue #668: Soroban VM diagnostics can include ANSI colour escapes which
 // render as garbled characters (e.g. `\u001b[31m`). Strip them before display.
+// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
 
 function stripAnsi(value: string): string {

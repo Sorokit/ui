@@ -253,7 +253,7 @@ export const TxRow = memo(function TxRow({
           </Badge>
           {opBadgeText && (
             <Badge
-              variant="brand"
+              variant="primary"
               className="text-[10px] px-1.5 py-0.5"
               data-testid="op-badge"
             >
