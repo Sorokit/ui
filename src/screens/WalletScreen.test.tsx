@@ -277,10 +277,13 @@ describe("WalletScreen", () => {
 
     it("copies address to clipboard when copy button in AddressDisplay is clicked", async () => {
       const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.assign(navigator, {
-        clipboard: {
-          writeText: writeTextMock,
-        },
+      // navigator.clipboard is a getter-only accessor in jsdom, so assigning
+      // through Object.assign throws unless a previously run test file happens
+      // to have replaced it. Define an own property instead, as the other
+      // clipboard tests in this suite do.
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: writeTextMock },
       });
 
       vi.mocked(useSorokit).mockReturnValue(createMockState({

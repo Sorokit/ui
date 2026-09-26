@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
+import { DISCONNECTED_TITLE } from "@/lib/nav-labels";
 
 const SUPPORTED_WALLETS = [
   { name: "Freighter", initial: "F", color: "#7B61FF" },
@@ -23,8 +24,11 @@ export function ConnectScreen() {
     }
   }, [isConnecting]);
 
+  // Disconnecting unmounts Dashboard (whose effect owns the per-screen titles)
+  // and mounts this screen, so reset the tab back to the disconnected title
+  // instead of leaving the last visited screen's title behind (#551).
   useEffect(() => {
-    document.title = "Connect — Sorokit";
+    document.title = DISCONNECTED_TITLE;
   }, []);
 
   return (

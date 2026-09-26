@@ -228,10 +228,14 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
             </p>
           )}
           <div className="flex flex-col gap-0.5">
+            {/* Collapsed nav renders icons only, so every button keeps an
+                accessible name through aria-label (#550). */}
             {NAV.map((item) => (
               <button
                 key={item.id}
+                type="button"
                 onClick={() => handleNav(item.id)}
+                aria-label={collapsed ? item.label : undefined}
                 aria-current={active === item.id ? "page" : undefined}
                 className={cn(
                   "relative w-full flex items-center rounded-lg transition-all cursor-pointer overflow-hidden",

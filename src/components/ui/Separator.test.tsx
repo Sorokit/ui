@@ -47,4 +47,28 @@ describe("Separator", () => {
     const { container } = render(<Separator className="extra-class" />);
     expect(container.firstElementChild).toHaveClass("extra-class");
   });
+
+  it("exposes aria-orientation=horizontal on the unlabeled divider (#549)", () => {
+    const { container } = render(<Separator />);
+    expect(container.firstElementChild).toHaveAttribute(
+      "aria-orientation",
+      "horizontal",
+    );
+  });
+
+  it("exposes aria-orientation=horizontal on the labelled divider (#549)", () => {
+    const { container } = render(<Separator label="OR" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "separator");
+    expect(root).toHaveAttribute("aria-orientation", "horizontal");
+  });
+
+  it("draws its lines with the semantic line token, never a hex value (#549)", () => {
+    const { container } = render(<Separator label="OR" />);
+    const markup = container.innerHTML;
+
+    expect(markup).toContain("bg-line");
+    expect(markup).not.toMatch(/bg-\[#/);
+    expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+  });
 });
