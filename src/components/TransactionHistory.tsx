@@ -6,12 +6,14 @@ import {
   CoinsSwapIcon,
   ContractsIcon,
   GiftIcon,
+  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
@@ -101,6 +103,25 @@ function truncateMemo(memo: string): string {
   return memo.length > MEMO_TRUNCATE_LENGTH
     ? `${memo.slice(0, MEMO_TRUNCATE_LENGTH)}…`
     : memo;
+}
+
+/**
+ * Detects a 404 "account not found" response from the client's plain-string
+ * error message - what Horizon returns for an account that hasn't been
+ * funded (created) on the network yet, as opposed to a real network or
+ * server failure. The SorokitClient contract surfaces errors as strings
+ * rather than structured HTTP responses, so this follows the same
+ * substring-matching convention as `friendlyError()` in lib/utils.ts.
+ */
+function isUnfundedAccountError(error: string | null): boolean {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes("404") ||
+    normalized.includes("not found") ||
+    normalized.includes("not funded") ||
+    normalized.includes("unfunded")
+  );
 }
 
 function explorerTxUrl(
@@ -279,6 +300,7 @@ export function TransactionHistory({
   const [prevAddress, setPrevAddress] = useState(address);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [multiOpOnly, setMultiOpOnly] = useState(false);
+  const [memoQuery, setMemoQuery] = useState("");
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -327,19 +349,19 @@ export function TransactionHistory({
     setPage(nextPage);
   }
 
-  const filteredTxs = useMemo(
-    () =>
-      txs.filter((tx) => {
-        if (statusFilter === "success" && !tx.successful) return false;
-        if (statusFilter === "failed" && tx.successful) return false;
-        if (multiOpOnly && tx.operationCount <= 1) return false;
-        if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
-        if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
-          return false;
-        return true;
-      }),
-    [endDate, multiOpOnly, startDate, statusFilter, txs],
-  );
+  const filteredTxs = useMemo(() => {
+    const q = memoQuery.trim().toLowerCase();
+    return txs.filter((tx) => {
+      if (statusFilter === "success" && !tx.successful) return false;
+      if (statusFilter === "failed" && tx.successful) return false;
+      if (multiOpOnly && tx.operationCount <= 1) return false;
+      if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
+      if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
+        return false;
+      if (q && !(tx.memo ?? "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [endDate, memoQuery, multiOpOnly, startDate, statusFilter, txs]);
 
   const feeTotal = totalFeeStroops(filteredTxs);
 
@@ -394,11 +416,62 @@ export function TransactionHistory({
           Multi-op
         </button>
       </div>
+      <div className="px-5 py-2.5 border-b border-line">
+        <Input
+          value={memoQuery}
+          onChange={(e) => setMemoQuery(e.target.value)}
+          placeholder="Search by memo…"
+          aria-label="Search transactions by memo"
+          prefix={
+            <HugeiconsIcon
+              icon={Search01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          }
+          clearable
+          onClear={() => setMemoQuery("")}
+          clearLabel="Clear memo search"
+          className="h-8 text-[12px]"
+        />
+      </div>
 
       {!isConnected ? (
         <p className="text-[13px] text-ink-3 text-center py-10">
           Connect your wallet to view history
         </p>
+      ) : error && isUnfundedAccountError(error) ? (
+        <div className="flex flex-col items-center px-5 py-10 text-center">
+          <div
+            aria-hidden="true"
+            className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-3"
+          >
+            <HugeiconsIcon
+              icon={GiftIcon}
+              size={18}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </div>
+          <p className="text-[13px] font-medium text-ink">
+            Unfunded account - no transactions yet
+          </p>
+          <p className="text-[12px] text-ink-3 mt-1 max-w-[280px]">
+            This account hasn't been created on the network yet. Fund it with
+            at least the minimum reserve to start transacting.
+          </p>
+          {network?.name === "testnet" && (
+            <a
+              href="https://friendbot.stellar.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 text-[12px] font-medium text-brand hover:underline"
+            >
+              Fund with Friendbot →
+            </a>
+          )}
+        </div>
       ) : error ? (
         <p className="text-[13px] text-red text-center py-10">{error}</p>
       ) : loading && txs.length === 0 ? (
