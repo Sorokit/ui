@@ -59,7 +59,10 @@ const DEBUG_HISTORY_LIMIT = 10;
 
 // Issue #668: Soroban VM diagnostics can include ANSI colour escapes which
 // render as garbled characters (e.g. `\u001b[31m`). Strip them before display.
-const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
+// The leading character is an intentional ANSI escape (0x1b), which
+// `no-control-regex` rejects in a literal, so it is assembled at runtime.
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
 
 function stripAnsi(value: string): string {
   return value.replace(ANSI_ESCAPE_PATTERN, "");

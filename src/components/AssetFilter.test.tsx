@@ -82,7 +82,7 @@ describe("AssetFilter", () => {
     const input = screen.getByPlaceholderText(/search/i);
     fireEvent.change(input, { target: { value: "usdc" } });
     expect(screen.queryByText("XLM")).not.toBeInTheDocument();
-    const clearBtn = screen.getByRole("button", { name: /clear/i });
+    const clearBtn = screen.getByRole("button", { name: "Clear search" });
     fireEvent.click(clearBtn);
     expect(screen.getByText("XLM")).toBeInTheDocument();
   });

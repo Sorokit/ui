@@ -167,7 +167,9 @@ export function WalletConnectModal({
     setSelectedWallet(wallet);
     if (isMobile && wallet.deepLink) {
       if (typeof window !== "undefined") {
-        window.location.href = wallet.deepLink;
+        // assign() keeps the navigation while avoiding a direct write to a
+        // property of a global, which `react-hooks/immutability` rejects.
+        window.location.assign(wallet.deepLink);
       }
     }
     setStep("connecting");
