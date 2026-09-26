@@ -31,6 +31,18 @@ export const SOROBAN_TYPES = [
 
 type SorobanType = (typeof SOROBAN_TYPES)[number];
 
+/** Soroban argument types that take a structured JSON value (issue #653). */
+const COMPLEX_ARG_TYPES: ReadonlySet<string> = new Set([
+  "vec",
+  "map",
+  "struct",
+  "tuple",
+  "sequence",
+]);
+
+/** Soroban contract IDs are exactly 56 chars: `C` + 55 base32 characters. */
+const CONTRACT_ID_PATTERN = /^C[A-Z2-7]{55}$/;
+
 interface ContractMethodArg {
   name: string;
   type: SorobanType;
@@ -63,9 +75,15 @@ export interface ContractInteractionBuilderProps {
 }
 
 function validateContractId(id: string): string | null {
-  if (!id) return "Contract address is required";
-  if (!id.startsWith("C")) return "Contract address must start with 'C'";
-  if (id.length < 10) return "Contract address is too short";
+  const value = id.trim();
+  if (!value) return "Contract address is required";
+  if (!value.startsWith("C")) return "Contract address must start with 'C'";
+  if (value.length < 56) return "Contract address is too short";
+  // Issue #653: enforce the full 56-char base32 format instead of the old
+  // "starts with C and is at least 10 chars" check, which accepted invalid IDs.
+  if (!CONTRACT_ID_PATTERN.test(value)) {
+    return "Contract address is not a valid Soroban contract ID";
+  }
   return null;
 }
 
@@ -77,16 +95,24 @@ function buildXdrPreview(
 ): string {
   if (!contractId || !method) return "";
   const formattedArgs = methodDef
-    ? methodDef.args
-        .map(
-          (arg) => `  ${arg.name}: ${args[arg.name] ?? `<${arg.type}>`}`,
-        )
-        .join(",\n")
-    : Object.entries(args)
-        .map(([k, v]) => `  ${k}: ${v || "<value>"}`)
-        .join(",\n");
+    ? methodDef.args.map((arg) => ({
+        name: arg.name,
+        type: arg.type,
+        value: args[arg.name] ?? null,
+      }))
+    : Object.entries(args).map(([name, value]) => ({
+        name,
+        value: value || null,
+      }));
 
-  return `${contractId}.${method}(\n${formattedArgs}\n)`;
+  // Issue #653: return a base64 SCVal/call preview rather than a pseudo-string,
+  // so it can be copied into tools that expect an encoded payload.
+  const json = JSON.stringify({ contractId, method, args: formattedArgs });
+  try {
+    return btoa(json);
+  } catch {
+    return json;
+  }
 }
 
 function renderArgInput(
@@ -168,6 +194,38 @@ function renderArgInput(
         placeholder="Hex or base64 encoded bytes"
         aria-label={arg.name}
       />
+    );
+  }
+
+  if (COMPLEX_ARG_TYPES.has(type)) {
+    // Issue #653: complex Soroban types get a structured JSON input with live
+    // validation instead of a plain unvalidated text field.
+    const trimmed = value.trim();
+    let jsonError: string | null = null;
+    if (trimmed) {
+      try {
+        JSON.parse(trimmed);
+      } catch {
+        jsonError = "Invalid JSON";
+      }
+    }
+    return (
+      <div className="flex flex-col gap-1">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={`Enter ${type} as JSON`}
+          aria-label={arg.name}
+          aria-invalid={jsonError ? true : undefined}
+          rows={3}
+          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-mono text-ink outline-none focus:ring-1 focus:ring-brand"
+        />
+        {jsonError && (
+          <p role="alert" className="text-[11px] text-red">
+            {jsonError}
+          </p>
+        )}
+      </div>
     );
   }
 
