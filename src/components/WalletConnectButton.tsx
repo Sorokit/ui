@@ -21,7 +21,6 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     isConnecting,
     address,
     walletName,
-    isHardware,
     error,
     clearError,
     disconnectWallet,
@@ -43,7 +42,6 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
   }, [isConnected]);
 
   const isHardwareWallet =
-    Boolean(isHardware) ||
     Boolean(
       walletName &&
         (walletName.toLowerCase().includes("ledger") ||

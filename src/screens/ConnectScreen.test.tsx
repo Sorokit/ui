@@ -39,4 +39,20 @@ describe("ConnectScreen", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Wallet connection failed");
   });
+
+  it("resets the document title to the disconnected default (#551)", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: false,
+      error: null,
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    // Simulate the tab still showing the last dashboard screen.
+    document.title = "Transactions - Sorokit";
+
+    render(<ConnectScreen />);
+
+    expect(document.title).toBe("Connect - Sorokit");
+  });
 });

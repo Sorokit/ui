@@ -17,7 +17,7 @@ import {
   Task01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { DelegationRow } from "@/components/DelegationRow";
 import { RewardHistory } from "@/components/RewardHistory";
@@ -123,6 +123,9 @@ function StatChip({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+// Stable empty list so the disconnected case below compares by identity.
+const NO_DELEGATIONS: Delegation[] = [];
+
 export function StakingDashboard({
   validators: validatorsProp,
   delegations: delegationsProp,
@@ -136,7 +139,7 @@ export function StakingDashboard({
   const validators = validatorsProp ?? MOCK_VALIDATORS;
   const delegations: Delegation[] = isConnected
     ? (delegationsProp ?? MOCK_DELEGATIONS)
-    : [];
+    : NO_DELEGATIONS;
   const allRewardEvents: RewardEvent[] =
     rewardEventsProp ?? generateMockRewardHistory();
   const schedule: RewardScheduleEntry[] =
@@ -150,11 +153,15 @@ export function StakingDashboard({
   const [isClaimingAll, setIsClaimingAll] = useState(false);
   const [localDelegations, setLocalDelegations] = useState<Delegation[]>(delegations);
 
-  // Issue #651: keep localDelegations in sync with the wallet connection and
-  // any prop changes, so disconnecting clears stale mock delegations.
-  useEffect(() => {
-    setLocalDelegations(isConnected ? (delegationsProp ?? MOCK_DELEGATIONS) : []);
-  }, [isConnected, delegationsProp]);
+  // Issue #651: keep localDelegations in sync with the wallet connection and any
+  // prop changes, so disconnecting clears stale mock delegations. Adjusting the
+  // state during render — React's documented "adjust state when a prop changes"
+  // pattern — avoids the extra cascading render an effect would cause.
+  const [delegationsSource, setDelegationsSource] = useState<Delegation[]>(delegations);
+  if (delegationsSource !== delegations) {
+    setDelegationsSource(delegations);
+    setLocalDelegations(delegations);
+  }
 
   // Issue #651: screen-reader announcement for reward claims.
   const [announcement, setAnnouncement] = useState("");

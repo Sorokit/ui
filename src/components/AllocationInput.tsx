@@ -79,6 +79,8 @@ export function AllocationInput({
 
   function handleEqualise() {
     if (assets.length === 0) return;
+    // Any in-progress text is obsolete once every target is replaced.
+    setDraft({});
     const count = assets.length;
     // Issue #655: work in whole cents so the remainder can be distributed
     // without the float drift that produced 99.99% / 100.01% totals.
@@ -101,6 +103,8 @@ export function AllocationInput({
   }
 
   function handleReset() {
+    // Any in-progress text is obsolete once every target is replaced.
+    setDraft({});
     const updated: Record<string, number> = {};
     assets.forEach((a) => {
       updated[a.assetCode] = parseFloat(a.currentPct.toFixed(2));
