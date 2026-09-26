@@ -78,6 +78,7 @@ export function AllocationInput({
   }
 
   function handleEqualise() {
+    setDraft({});
     if (assets.length === 0) return;
     const count = assets.length;
     // Issue #655: work in whole cents so the remainder can be distributed
@@ -101,6 +102,7 @@ export function AllocationInput({
   }
 
   function handleReset() {
+    setDraft({});
     const updated: Record<string, number> = {};
     assets.forEach((a) => {
       updated[a.assetCode] = parseFloat(a.currentPct.toFixed(2));

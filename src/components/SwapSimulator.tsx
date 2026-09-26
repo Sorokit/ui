@@ -9,12 +9,14 @@ import { Button } from "./ui/Button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "./ui/Card";
 import { Input } from "./ui/Input";
 
-interface PoolReserves {
+export interface PoolReserves {
   fromReserves: number;
   toReserves: number;
 }
 
-const POOL_RESERVES: Record<string, PoolReserves> = {
+export const MINIMUM_LIQUIDITY_THRESHOLD = 1;
+
+export const POOL_RESERVES: Record<string, PoolReserves> = {
   "XLM-USDC": { fromReserves: 100000, toReserves: 12000 },
   "USDC-XLM": { fromReserves: 12000, toReserves: 100000 },
   "XLM-USDT": { fromReserves: 100000, toReserves: 12000 },
@@ -37,8 +39,9 @@ const ASSETS = ["XLM", "USDC", "USDT", "EURC"];
 /** Wait for typing to pause before rebuilding the price-impact SVG. */
 const AMOUNT_CHART_DEBOUNCE_MS = 300;
 
-interface SwapSimulatorProps {
+export interface SwapSimulatorProps {
   className?: string;
+  poolReserves?: Record<string, PoolReserves>;
   onSwap?: (params: {
     fromAsset: string;
     toAsset: string;
@@ -50,7 +53,11 @@ interface SwapSimulatorProps {
   }) => void;
 }
 
-export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
+export function SwapSimulator({
+  className,
+  onSwap,
+  poolReserves = POOL_RESERVES,
+}: SwapSimulatorProps) {
   const { isConnected, connectWallet } = useSorokit();
 
   // Swap State
@@ -118,11 +125,11 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
   const { reservesFrom, reservesTo } = useMemo(() => {
     const pairKey = `${fromAsset}-${toAsset}`;
     const reverseKey = `${toAsset}-${fromAsset}`;
-    let base = POOL_RESERVES[pairKey];
+    let base = poolReserves[pairKey];
     let isReversed = false;
 
-    if (!base && POOL_RESERVES[reverseKey]) {
-      base = POOL_RESERVES[reverseKey];
+    if (!base && poolReserves[reverseKey]) {
+      base = poolReserves[reverseKey];
       isReversed = true;
     }
 
@@ -131,7 +138,15 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
     const toReserves = base ? (isReversed ? base.fromReserves : base.toReserves) * multiplier : 10000 * multiplier;
 
     return { reservesFrom: fromReserves, reservesTo: toReserves };
-  }, [fromAsset, toAsset, liquiditySize]);
+  }, [fromAsset, toAsset, liquiditySize, poolReserves]);
+
+  const hasInsufficientLiquidity = useMemo(() => {
+    return (
+      reservesFrom + reservesTo < MINIMUM_LIQUIDITY_THRESHOLD ||
+      reservesFrom <= 0 ||
+      reservesTo <= 0
+    );
+  }, [reservesFrom, reservesTo]);
 
   // Perform Constant Product calculations (0.3% fee)
   const feeRate = 0.003;
@@ -143,25 +158,28 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
   }, [debouncedAmountInStr]);
 
   const amountOut = useMemo(() => {
-    if (amountIn <= 0) return 0;
+    if (hasInsufficientLiquidity || amountIn <= 0 || reservesFrom + netAmountIn <= 0) return 0;
     const out = (reservesTo * netAmountIn) / (reservesFrom + netAmountIn);
-    return out;
-  }, [amountIn, reservesFrom, reservesTo, netAmountIn]);
+    return Number.isFinite(out) ? Math.max(0, out) : 0;
+  }, [hasInsufficientLiquidity, amountIn, reservesFrom, reservesTo, netAmountIn]);
 
   const spotPrice = useMemo(() => {
-    return reservesTo / reservesFrom;
-  }, [reservesFrom, reservesTo]);
+    if (hasInsufficientLiquidity || reservesFrom <= 0) return 0;
+    const price = reservesTo / reservesFrom;
+    return Number.isFinite(price) ? price : 0;
+  }, [hasInsufficientLiquidity, reservesFrom, reservesTo]);
 
   const executionPrice = useMemo(() => {
-    if (amountIn <= 0) return spotPrice;
-    return amountOut / amountIn;
-  }, [amountIn, amountOut, spotPrice]);
+    if (hasInsufficientLiquidity || amountIn <= 0) return spotPrice;
+    const price = amountOut / amountIn;
+    return Number.isFinite(price) ? price : 0;
+  }, [hasInsufficientLiquidity, amountIn, amountOut, spotPrice]);
 
   const priceImpact = useMemo(() => {
-    if (amountIn <= 0) return 0;
+    if (hasInsufficientLiquidity || amountIn <= 0 || spotPrice <= 0) return 0;
     const impact = 1 - executionPrice / spotPrice;
-    return Math.max(0, impact * 100);
-  }, [amountIn, executionPrice, spotPrice]);
+    return Number.isFinite(impact) ? Math.max(0, impact * 100) : 0;
+  }, [hasInsufficientLiquidity, amountIn, executionPrice, spotPrice]);
 
   // USD Values
   const fromPriceUsd = USD_PRICES[fromAsset] || 1.0;
@@ -171,6 +189,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
 
   // Slippage scenarios: output values and minimum received for 0.1%, 0.5%, 1%, 5%
   const slippageScenarios = useMemo(() => {
+    if (hasInsufficientLiquidity) return [];
     return [0.1, 0.5, 1.0, 5.0].map((rate) => {
       const minReceived = amountOut * (1 - rate / 100);
       return {
@@ -179,7 +198,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
         minReceivedUsd: minReceived * toPriceUsd,
       };
     });
-  }, [amountOut, toPriceUsd]);
+  }, [hasInsufficientLiquidity, amountOut, toPriceUsd]);
 
   // Check if actual price impact exceeds max slippage tolerance.
   // Invalid input must not fall back to 0.5% and look like a real tolerance.
@@ -189,6 +208,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
 
   // Generate Price Impact Curve points
   const priceImpactCurvePoints = useMemo(() => {
+    if (hasInsufficientLiquidity || spotPrice <= 0) return [];
     const points = [];
     const maxVal = Math.max(debouncedAmountIn * 2, 500);
     const minVal = 1;
@@ -196,17 +216,22 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
     for (let i = 0; i <= steps; i++) {
       const x = minVal + (i * (maxVal - minVal)) / steps;
       const xNet = x * (1 - feeRate);
-      const yOut = (reservesTo * xNet) / (reservesFrom + xNet);
+      const denom = reservesFrom + xNet;
+      if (denom <= 0 || x <= 0) continue;
+      const yOut = (reservesTo * xNet) / denom;
       const yPrice = yOut / x;
       // Normalise to Price Impact percentage
       const impact = 1 - yPrice / spotPrice;
-      points.push({ x, y: Math.max(0, impact * 100) });
+      if (Number.isFinite(impact)) {
+        points.push({ x, y: Math.max(0, impact * 100) });
+      }
     }
     return points;
-  }, [debouncedAmountIn, reservesFrom, reservesTo, spotPrice]);
+  }, [hasInsufficientLiquidity, debouncedAmountIn, reservesFrom, reservesTo, spotPrice]);
 
   // Generate Historical Prices (Deterministic based on sinus wave to keep code lean)
   const historicalPrices = useMemo(() => {
+    if (hasInsufficientLiquidity || spotPrice <= 0) return [];
     const days = historyRange === "7d" ? 7 : 30;
     const basePrice = spotPrice;
     const data = [];
@@ -222,7 +247,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
       });
     }
     return data;
-  }, [historyRange, spotPrice]);
+  }, [historyRange, spotPrice, hasInsufficientLiquidity]);
 
   // Handle Swap submission
   const handleExecuteSwap = async () => {
@@ -338,7 +363,9 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
               </div>
               <div className="flex gap-3">
                 <div className="text-[20px] font-semibold text-ink w-full select-all">
-                  {amountOut.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 })}
+                  {hasInsufficientLiquidity
+                    ? "0.0000"
+                    : amountOut.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 })}
                 </div>
                 <select
                   value={toAsset}
@@ -360,33 +387,55 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                 <div className="flex justify-between items-center text-[12px]">
                   <span className="text-ink-3">Exchange Rate:</span>
                   <span className="font-semibold text-ink">
-                    1 {fromAsset} = {executionPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 5 })} {toAsset}
+                    {hasInsufficientLiquidity
+                      ? "—"
+                      : `1 ${fromAsset} = ${executionPrice.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 5 })} ${toAsset}`}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-[12px]">
                   <span className="text-ink-3">Price Impact:</span>
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={cn(
-                        "font-semibold",
-                        priceImpact < 1.0 ? "text-green" : priceImpact < 5.0 ? "text-orange" : "text-red"
-                      )}
-                    >
-                      {priceImpact.toFixed(2)}%
-                    </span>
-                    <Badge
-                      variant={priceImpact < 1.0 ? "success" : priceImpact < 5.0 ? "warning" : "error"}
-                      className="px-1.5 py-0.5 text-[9px]"
-                    >
-                      {priceImpact < 1.0 ? "Low" : priceImpact < 5.0 ? "Medium" : "High"}
-                    </Badge>
-                  </div>
+                  {hasInsufficientLiquidity ? (
+                    <span className="font-semibold text-orange">Insufficient liquidity</span>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className={cn(
+                          "font-semibold",
+                          priceImpact < 1.0 ? "text-green" : priceImpact < 5.0 ? "text-orange" : "text-red"
+                        )}
+                      >
+                        {priceImpact.toFixed(2)}%
+                      </span>
+                      <Badge
+                        variant={priceImpact < 1.0 ? "success" : priceImpact < 5.0 ? "warning" : "error"}
+                        className="px-1.5 py-0.5 text-[9px]"
+                      >
+                        {priceImpact < 1.0 ? "Low" : priceImpact < 5.0 ? "Medium" : "High"}
+                      </Badge>
+                    </div>
+                  )}
                 </div>
                 <div className="flex justify-between items-center text-[12px]">
                   <span className="text-ink-3">Fee (0.3%):</span>
                   <span className="text-ink-2 font-medium">
                     {(amountIn * feeRate).toFixed(4)} {fromAsset}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* Insufficient liquidity warning */}
+            {hasInsufficientLiquidity && (
+              <div
+                role="alert"
+                className="bg-warning-dim border border-warning-dim rounded-xl p-3 flex gap-2 items-start"
+              >
+                <AlertTriangle className="text-orange shrink-0 mt-0.5" size={16} />
+                <div>
+                  <h4 className="text-[12px] font-bold text-orange">Insufficient liquidity</h4>
+                  <p className="text-[11px] text-ink-2 mt-0.5">
+                    This pool has insufficient liquidity to simulate a swap accurately.
+                  </p>
                 </div>
               </div>
             )}
@@ -439,7 +488,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
             )}
 
             {/* Warn user if price impact exceeds configured slippage tolerance */}
-            {amountIn > 0 && isSlippageExceeded && parsedSlippage !== null && (
+            {amountIn > 0 && !hasInsufficientLiquidity && isSlippageExceeded && parsedSlippage !== null && (
               <div className="bg-error-dim border border-error-dim-strong rounded-xl p-3 flex gap-2 items-start">
                 <AlertTriangle className="text-red shrink-0 mt-0.5" size={16} />
                 <div>
@@ -462,11 +511,17 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
           <CardFooter className="pt-2 border-t border-line">
             <Button
               className="w-full text-[13px] font-semibold py-2.5 h-auto transition-all active:scale-99"
-              disabled={isSwapping || isSlippageInvalid || (isConnected && amountIn <= 0)}
+              disabled={isSwapping || isSlippageInvalid || (isConnected && (amountIn <= 0 || hasInsufficientLiquidity))}
               loading={isSwapping}
               onClick={handleExecuteSwap}
             >
-              {isConnected ? (isSwapping ? "Executing Swap..." : "Swap Assets") : "Connect Wallet to Swap"}
+              {isConnected
+                ? hasInsufficientLiquidity
+                  ? "Insufficient liquidity"
+                  : isSwapping
+                    ? "Executing Swap..."
+                    : "Swap Assets"
+                : "Connect Wallet to Swap"}
             </Button>
           </CardFooter>
         </Card>
@@ -484,27 +539,33 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
             <CardDescription>Estimated output under various slippage tolerances</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="flex flex-col">
-              {slippageScenarios.map((scenario) => (
-                <div
-                  key={scenario.rate}
-                  className="flex items-center justify-between px-5 py-3 border-b border-line last:border-0 hover:bg-surface-2 transition-colors"
-                >
-                  <div className="flex flex-col">
-                    <span className="text-[12px] font-bold text-ink">{scenario.rate}% Slippage</span>
-                    <span className="text-[10px] text-ink-3">Minimum Received</span>
+            {hasInsufficientLiquidity ? (
+              <div className="text-center py-6 text-ink-3 text-[12px]">
+                Insufficient liquidity
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {slippageScenarios.map((scenario) => (
+                  <div
+                    key={scenario.rate}
+                    className="flex items-center justify-between px-5 py-3 border-b border-line last:border-0 hover:bg-surface-2 transition-colors"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-[12px] font-bold text-ink">{scenario.rate}% Slippage</span>
+                      <span className="text-[10px] text-ink-3">Minimum Received</span>
+                    </div>
+                    <div className="flex flex-col items-end">
+                      <span className="text-[12px] font-bold text-ink-2">
+                        {scenario.minReceived.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 5 })} {toAsset}
+                      </span>
+                      <span className="text-[10px] text-ink-3">
+                        ${scenario.minReceivedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                      </span>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-end">
-                    <span className="text-[12px] font-bold text-ink-2">
-                      {scenario.minReceived.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 5 })} {toAsset}
-                    </span>
-                    <span className="text-[10px] text-ink-3">
-                      ${scenario.minReceivedUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -545,7 +606,12 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                   <span>Max Size: {Math.max(debouncedAmountIn * 2, 500)} {fromAsset}</span>
                 </div>
                 {/* SVG Render for Price Impact Curve */}
-                <div className="relative flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px]">
+                {hasInsufficientLiquidity ? (
+                  <div className="flex flex-col items-center justify-center flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px] text-ink-3 text-[12px]">
+                    Insufficient liquidity
+                  </div>
+                ) : (
+                  <div className="relative flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px]">
                   <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
                     {/* Grid Lines */}
                     <line x1="0" y1="25" x2="100" y2="25" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" />
@@ -648,6 +714,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                     Impact &uarr;
                   </div>
                 </div>
+                )}
               </div>
             ) : (
               <div className="flex-1 flex flex-col justify-between h-[180px]">

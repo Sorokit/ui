@@ -31,7 +31,6 @@ export function TopBar({
           >
             {error}
           </p>
-          <p role="alert" className="text-[12px] text-red break-words min-w-0 flex-1">{error}</p>
           <button
             onClick={clearError}
             aria-label="Dismiss error"

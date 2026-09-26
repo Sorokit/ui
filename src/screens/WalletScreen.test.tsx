@@ -277,10 +277,12 @@ describe("WalletScreen", () => {
 
     it("copies address to clipboard when copy button in AddressDisplay is clicked", async () => {
       const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.assign(navigator, {
-        clipboard: {
+      Object.defineProperty(navigator, "clipboard", {
+        value: {
           writeText: writeTextMock,
         },
+        writable: true,
+        configurable: true,
       });
 
       vi.mocked(useSorokit).mockReturnValue(createMockState({
