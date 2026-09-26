@@ -9,7 +9,12 @@ import { useSorokit } from "@/context/useSorokit";
 import { type NetworkInfo, type TxStatus } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
-type TrackerStatus = "pending" | "confirmed" | "failed" | "network_error";
+type TrackerStatus =
+  | "pending"
+  | "confirmed"
+  | "failed"
+  | "network_error"
+  | "timeout_expired";
 
 interface TrackedTransaction {
   hash: string;
@@ -19,6 +24,8 @@ interface TrackedTransaction {
   error: string | null;
   lastCheckedAt: string | null;
   networkError: string | null;
+  /** Consecutive 429/503 responses seen for this entry, driving backoff. */
+  rateLimitStrikes: number;
 }
 
 interface TransactionStatusTrackerProps {
@@ -26,6 +33,58 @@ interface TransactionStatusTrackerProps {
   hashes?: string[];
   pollIntervalMs?: number;
   className?: string;
+}
+
+/** Base delay multiplier for exponential backoff, in milliseconds. */
+const BACKOFF_BASE_MS = 1000;
+/** Ceiling on the backoff delay so a long-running rate limit doesn't stall polling for minutes. */
+const BACKOFF_MAX_MS = 30_000;
+
+/**
+ * Detects a rate-limit (429) or transient server unavailability (503)
+ * response from the client's plain-string error message. The client
+ * contract (SorokitClient) surfaces errors as strings rather than
+ * structured HTTP responses, so this follows the same substring-matching
+ * convention as `friendlyError()` in lib/utils.ts.
+ */
+export function isRateLimitError(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("503") ||
+    normalized.includes("service unavailable")
+  );
+}
+
+/**
+ * Detects a "timeout ledger expired" response - a transaction whose
+ * envelope's max ledger sequence passed before it was included in a
+ * ledger, distinct from an outright rejection.
+ */
+export function isTimeoutExpiredError(error: string | null | undefined): boolean {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes("timeout") ||
+    normalized.includes("tx_too_late") ||
+    normalized.includes("timebounds") ||
+    (normalized.includes("ledger") && normalized.includes("expir"))
+  );
+}
+
+/**
+ * Exponential backoff with full jitter: delay doubles with each consecutive
+ * rate-limit strike, capped at BACKOFF_MAX_MS, then a random amount up to
+ * that ceiling is chosen so many concurrently polling clients don't retry
+ * in lockstep and re-trigger the same rate limit together.
+ */
+export function computeBackoffDelayMs(strikes: number, baseMs = BACKOFF_BASE_MS): number {
+  if (strikes <= 0) return 0;
+  const ceiling = Math.min(BACKOFF_MAX_MS, baseMs * 2 ** (strikes - 1));
+  return Math.floor(Math.random() * ceiling);
 }
 
 function explorerTxUrl(network: NetworkInfo | null, hash: string): string | null {
@@ -54,6 +113,8 @@ function getStatusLabel(status: TrackerStatus): string {
       return "Confirmed";
     case "failed":
       return "Failed";
+    case "timeout_expired":
+      return "Expired";
     case "network_error":
       return "Pending";
     default:
@@ -67,6 +128,8 @@ function getStatusTone(status: TrackerStatus): "success" | "error" | "warning" {
       return "success";
     case "failed":
       return "error";
+    case "timeout_expired":
+      return "error";
     case "network_error":
       return "warning";
     default:
@@ -75,7 +138,7 @@ function getStatusTone(status: TrackerStatus): "success" | "error" | "warning" {
 }
 
 function isTerminalStatus(status: TrackerStatus): boolean {
-  return status === "confirmed" || status === "failed";
+  return status === "confirmed" || status === "failed" || status === "timeout_expired";
 }
 
 function createTrackedTransaction(hash: string): TrackedTransaction {
@@ -84,6 +147,7 @@ function createTrackedTransaction(hash: string): TrackedTransaction {
     status: "pending",
     submittedAt: new Date().toISOString(),
     confirmedAt: null,
+    rateLimitStrikes: 0,
     error: null,
     lastCheckedAt: null,
     networkError: null,
@@ -137,17 +201,51 @@ export function TransactionStatusTracker({
     prevNetworkRef.current = network?.name;
   }, [network?.name]);
 
+  // Per-entry timestamp (ms epoch) before which a rate-limited entry must not
+  // be re-polled. Kept outside React state since it's an internal scheduling
+  // detail, not something the UI renders directly.
+  const backoffUntilRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
     if (tracked.length === 0 || !client) return;
 
     const pollTransactions = async () => {
-      const unresolved = trackedRef.current.filter((entry) => !isTerminalStatus(entry.status));
+      const now = Date.now();
+      const unresolved = trackedRef.current.filter(
+        (entry) =>
+          !isTerminalStatus(entry.status) &&
+          (backoffUntilRef.current.get(entry.hash) ?? 0) <= now,
+      );
       if (unresolved.length === 0) return;
 
       await Promise.all(
         unresolved.map(async (entry) => {
           try {
             const { data, error } = await client.transaction.getStatus(entry.hash);
+
+            if (isRateLimitError(error)) {
+              // Back off this entry specifically rather than slowing down
+              // polling for every tracked transaction, and rather than
+              // hammering Horizon again immediately at the next interval tick.
+              const strikes = entry.rateLimitStrikes + 1;
+              const delay = computeBackoffDelayMs(strikes, pollIntervalMs);
+              backoffUntilRef.current.set(entry.hash, Date.now() + delay);
+              setTracked((prev) =>
+                prev.map((item) =>
+                  item.hash === entry.hash
+                    ? {
+                        ...item,
+                        rateLimitStrikes: strikes,
+                        lastCheckedAt: new Date().toISOString(),
+                        networkError: `Rate limited by the network - retrying in ${Math.ceil(delay / 1000)}s`,
+                      }
+                    : item,
+                ),
+              );
+              return;
+            }
+
+            backoffUntilRef.current.delete(entry.hash);
             const nextStatus = mapStatus(data, error);
             setTracked((prev) =>
               prev.map((item) => {
@@ -158,9 +256,15 @@ export function TransactionStatusTracker({
                   ...item,
                   status: nextStatus,
                   confirmedAt,
-                  error: nextStatus === "failed" ? (error ?? "Transaction failed") : null,
+                  error:
+                    nextStatus === "failed"
+                      ? (error ?? "Transaction failed")
+                      : nextStatus === "timeout_expired"
+                        ? (error ?? "The transaction's timeout ledger expired before it was included.")
+                        : null,
                   lastCheckedAt: new Date().toISOString(),
                   networkError,
+                  rateLimitStrikes: 0,
                 };
               }),
             );
@@ -301,7 +405,18 @@ export function TransactionStatusTracker({
                     </div>
                   ) : null}
 
-                  {entry.status === "network_error" && entry.networkError ? (
+                  {entry.status === "timeout_expired" ? (
+                    <div className="mt-3 flex items-start gap-2 rounded-lg border border-error-dim-strong bg-error-dim px-3 py-2 text-[12px] text-red">
+                      <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} />
+                      <p>
+                        This transaction expired before it was included in a ledger (its
+                        timeout was reached). It was not applied to the network - submit a
+                        new transaction if you still intend to send it.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {!isTerminalStatus(entry.status) && entry.networkError ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-[12px] text-ink-3">
                       <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} />
                       <p>{entry.networkError}</p>
@@ -319,7 +434,7 @@ export function TransactionStatusTracker({
 
 function mapStatus(status: TxStatus | null | undefined, error: string | null): TrackerStatus {
   if (error) {
-    return "failed";
+    return isTimeoutExpiredError(error) ? "timeout_expired" : "failed";
   }
 
   switch (status) {
