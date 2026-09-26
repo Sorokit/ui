@@ -53,6 +53,9 @@ describe("ContractEventFeed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Issue #732: fromLedger persistence uses sessionStorage, which otherwise
+    // leaks the last-seen ledger from one test's CONTRACT_ID into the next.
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -609,6 +612,115 @@ describe("ContractEventFeed", () => {
     });
   });
 
+  // ── fromLedger persists across unmount/remount (#732) ─────────────────────
+  describe("fromLedger persistence across remount (#732)", () => {
+    it("resumes from the last-seen ledger instead of the prop default after an unmount/remount", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(
+          CONTRACT_ID,
+          10,
+          MOCK_EVENT.ledger + 1,
+        );
+      });
+    });
+
+    it("keeps resuming across further remounts as later events raise the persisted ledger", async () => {
+      const laterEvent = { ...MOCK_EVENT, id: "evt-2", ledger: MOCK_EVENT.ledger + 50 };
+      const getEvents = vi.fn().mockResolvedValue({ data: [laterEvent], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+      unmount();
+
+      const { unmount: unmount2 } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(
+          CONTRACT_ID,
+          10,
+          laterEvent.ledger + 1,
+        ),
+      );
+      unmount2();
+    });
+
+    it("clears the persisted ledger when contractId changes, so a later remount for the original contract starts fresh", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { rerender, unmount } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+
+      const OTHER_ID = "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+      rerender(<ContractEventFeed contractId={OTHER_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(OTHER_ID, 10, undefined),
+      );
+
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, undefined);
+      });
+    });
+
+    it("an explicit fromLedger prop still overrides a persisted ledger after remount", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} fromLedger={5} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, 5);
+      });
+    });
+  });
+
   describe("stale events and loading recovery", () => {
     const OTHER_CONTRACT_ID =
       "CBBZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNB";
@@ -778,6 +890,9 @@ describe("ContractEventFeed — issue #442", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Issue #732: fromLedger persistence uses sessionStorage, which otherwise
+    // leaks the last-seen ledger from one test's CONTRACT_ID into the next.
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
