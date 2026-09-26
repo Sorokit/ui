@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -404,6 +404,66 @@ describe("ClaimableBalanceCard", () => {
       fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
       await waitFor(() => expect(screen.queryByText("5,000.00")).not.toBeInTheDocument());
       expect(await screen.findByText(/no claimable balances/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("live predicate countdown (#666)", () => {
+    it("switches to Expired when a predicate deadline passes without a reload", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const deadline = Date.now() + 3000;
+      mockConnected({
+        getClaimableBalances: vi.fn().mockResolvedValue({
+          data: [
+            balance({
+              id: "cb-timer",
+              amount: "10.0",
+              claimants: [
+                { destination: "GDEF", predicate: { timeBound: { start: 0, end: deadline } } },
+              ],
+            } as Partial<ClaimableBalance>),
+          ],
+          error: null,
+        }),
+        claimBalance: vi.fn(),
+      });
+
+      render(<ClaimableBalanceCard />);
+      expect(await screen.findByText("10.00")).toBeInTheDocument();
+      expect(screen.queryByText("Expired")).not.toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
+
+      expect(screen.getByText("Expired")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("keeps other cards claimable while one claim is in flight", async () => {
+      let resolveClaim: ((value: unknown) => void) | undefined;
+      const pending = new Promise((resolve) => {
+        resolveClaim = resolve;
+      });
+      mockConnected({
+        getClaimableBalances: vi.fn().mockResolvedValue({
+          data: [
+            balance({ id: "cb1", amount: "10.0" }),
+            balance({ id: "cb2", amount: "20.0" }),
+          ],
+          error: null,
+        }),
+        claimBalance: vi.fn().mockReturnValue(pending),
+      });
+
+      render(<ClaimableBalanceCard />);
+      expect(await screen.findByText("10.00")).toBeInTheDocument();
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
+
+      const buttons = screen.getAllByRole("button", { name: "Claim" });
+      expect(buttons[1]).not.toBeDisabled();
+
+      resolveClaim?.({ data: { hash: "x" }, error: null });
     });
   });
 

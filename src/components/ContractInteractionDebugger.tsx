@@ -57,6 +57,16 @@ interface DiffEntry {
 const DEBUG_HISTORY_KEY = "sorokit-soroban-debug-history";
 const DEBUG_HISTORY_LIMIT = 10;
 
+/**
+ * Soroban VM diagnostics are sometimes returned with raw ANSI colour codes
+ * (e.g. `\u001b[31m`). Strip them so they render as readable text instead of
+ * garbled escape sequences (issue #668).
+ */
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_PATTERN, "");
+}
+
 function formatTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -112,11 +122,11 @@ function describeValue(value: unknown): string {
 }
 
 function formatSnapshot(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return stripAnsi(value);
   try {
-    return JSON.stringify(value, null, 2);
+    return stripAnsi(JSON.stringify(value, null, 2));
   } catch {
-    return String(value);
+    return stripAnsi(String(value));
   }
 }
 
@@ -277,7 +287,7 @@ export function ContractInteractionDebugger({
           </Button>
         ) : null}
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="mt-3 min-w-0 overflow-x-auto">{children}</div>
     </section>
   );
 
@@ -298,7 +308,7 @@ export function ContractInteractionDebugger({
           {buildSection(
             "Prepared contract call",
             "The contract invocation payload prepared for submission.",
-            <div className="rounded-lg border border-line bg-surface p-3">
+            <div className="rounded-lg border border-line bg-surface p-3 overflow-x-auto">
               <JsonView data={{ contractId, method, args }} shouldExpandNode={() => true} />
             </div>,
             "prepared-call",
@@ -414,7 +424,7 @@ export function ContractInteractionDebugger({
           {buildSection(
             "Final result",
             "The final transaction outcome once the submission completes.",
-            <div className="rounded-lg border border-line bg-surface p-3">
+            <div className="rounded-lg border border-line bg-surface p-3 overflow-x-auto">
               {result ? (
                 <JsonView data={result} shouldExpandNode={() => true} />
               ) : (

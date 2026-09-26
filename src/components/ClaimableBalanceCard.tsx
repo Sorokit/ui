@@ -211,6 +211,14 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
   // Issue #441: marks the next fetch as a post-claim refresh, which must not
   // swap the already-rendered rows out for the loading skeleton.
   const backgroundRefreshRef = useRef(false);
+  // Issue #666: tick once a second so predicate countdowns switch to
+  // "Expired" live without a page reload.
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     claimedIdsRef.current = new Set();
@@ -316,6 +324,7 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
               key={cb.id}
               cb={cb}
               confirmThreshold={confirmThreshold}
+              currentTime={now}
               onClaimed={handleClaimed}
             />
           ))}

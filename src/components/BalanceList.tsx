@@ -15,6 +15,16 @@ function getAssetCode(balance: Balance) {
 }
 
 /**
+ * Parse a raw balance string for sorting. Issue #665: `Number.parseFloat`
+ * handles large decimals and scientific notation, and non-numeric values sort
+ * as 0 instead of producing NaN comparisons.
+ */
+function toNumericAmount(balance: string): number {
+  const n = Number.parseFloat(balance);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
  * Composite React key for a balance row: `asset` alone collides for two
  * balances with the same code but different issuers (e.g. two USDC
  * balances from different issuers), silently dropping re-renders and
@@ -32,8 +42,8 @@ function compareBalances(a: Balance, b: Balance) {
     return aIsXlm ? -1 : 1;
   }
 
-  const aZero = Number(a.balance) === 0;
-  const bZero = Number(b.balance) === 0;
+  const aZero = toNumericAmount(a.balance) === 0;
+  const bZero = toNumericAmount(b.balance) === 0;
   if (aZero !== bZero) {
     return aZero ? 1 : -1;
   }
@@ -43,7 +53,9 @@ function compareBalances(a: Balance, b: Balance) {
 
 function sortBalances(balances: Balance[], mode: SortMode) {
   if (mode === "balance-desc") {
-    return [...balances].sort((a, b) => Number(b.balance) - Number(a.balance));
+    return [...balances].sort(
+      (a, b) => toNumericAmount(b.balance) - toNumericAmount(a.balance),
+    );
   }
   if (mode === "alpha") {
     return [...balances].sort((a, b) =>
@@ -70,7 +82,7 @@ const AssetRow = memo(function AssetRow({
   detailRef?: React.RefObject<HTMLElement | null>;
   showIssuerSuffix?: boolean;
 }) {
-  const isZeroBalance = Number(b.balance) === 0;
+  const isZeroBalance = toNumericAmount(b.balance) === 0;
   const onClick = useCallback(() => {
     onAssetClick?.(b);
     requestAnimationFrame(() => {
@@ -123,8 +135,10 @@ export interface BalanceListProps {
   detailRef?: React.RefObject<HTMLElement | null>;
   /** When true, renders an approximate XLM-equivalent portfolio total in the header. */
   showTotal?: boolean;
-  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a USD-equivalent figure. */
+  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a fiat-equivalent figure. */
   xlmPrice?: number;
+  /** Fiat currency for the portfolio total. Defaults to USD. */
+  currency?: "USD" | "EUR" | "GBP" | "XLM";
 }
 
 export function BalanceList({
@@ -132,10 +146,13 @@ export function BalanceList({
   detailRef,
   showTotal,
   xlmPrice,
+  currency = "USD",
 }: BalanceListProps) {
   const { balances, isLoadingAccount, isConnected, network } = useSorokit();
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
+  // Issue #665: let users hide zero-balance trustlines.
+  const [hideZero, setHideZero] = useState(false);
 
   const isTestnet = network?.name === "testnet";
   const showFriendbot = isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
@@ -151,15 +168,17 @@ export function BalanceList({
     return counts;
   }, [balances]);
 
-  const filtered = useMemo(
-    () =>
-      search
-        ? balances.filter((b) =>
-            getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
-          )
-        : balances,
-    [balances, search],
-  );
+  const filtered = useMemo(() => {
+    let list = search
+      ? balances.filter((b) =>
+          getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
+        )
+      : balances;
+    if (hideZero) {
+      list = list.filter((b) => toNumericAmount(b.balance) !== 0);
+    }
+    return list;
+  }, [balances, search, hideZero]);
 
   const { sorted, sortedLp } = useMemo(() => {
     const regularBalances = filtered.filter(
@@ -180,9 +199,23 @@ export function BalanceList({
     () =>
       balances
         .filter((b) => b.assetType === "native")
-        .reduce((sum, b) => sum + Number(b.balance), 0),
+        .reduce((sum, b) => sum + toNumericAmount(b.balance), 0),
     [balances],
   );
+
+  // Issue #665: format the fiat-equivalent total in the requested currency.
+  const fiatTotal = useMemo(() => {
+    if (typeof xlmPrice !== "number" || currency === "XLM") return null;
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(xlmTotal * xlmPrice);
+    } catch {
+      return null;
+    }
+  }, [currency, xlmPrice, xlmTotal]);
 
   const cycleSort = () => {
     setSortMode((m) =>
@@ -199,14 +232,20 @@ export function BalanceList({
           {showTotal && isConnected && !isLoadingAccount && (
             <p className="text-[11px] text-ink-3 mt-0.5">
               ~{xlmTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM
-              {typeof xlmPrice === "number"
-                ? ` (~$${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
-                : ""}
+              {fiatTotal ? ` (${fiatTotal})` : ""}
             </p>
           )}
         </div>
         {isConnected && !isLoadingAccount && (
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHideZero((v) => !v)}
+              className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
+              title="Hide zero balances"
+              aria-pressed={hideZero}
+            >
+              {hideZero ? "Show zero" : "Hide zero"}
+            </button>
             <button
               onClick={cycleSort}
               className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"

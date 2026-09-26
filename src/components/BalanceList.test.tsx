@@ -807,4 +807,67 @@ describe("BalanceList", () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe("zero-balance toggle (issue #665)", () => {
+    it("hides zero-balance trustlines when the toggle is enabled", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance, mockUsdtZeroBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+      expect(screen.getAllByTestId("asset-badge")).toHaveLength(2);
+
+      fireEvent.click(screen.getByTitle("Hide zero balances"));
+
+      const badges = screen.getAllByTestId("asset-badge");
+      expect(badges).toHaveLength(1);
+      expect(badges[0]).toHaveTextContent("XLM");
+    });
+  });
+
+  describe("numeric sorting (issue #665)", () => {
+    it("sorts scientific-notation balances by numeric value, not alphabetically", () => {
+      const zed = {
+        asset: "ZED",
+        balance: "1.2e10",
+        assetType: "credit_alphanum4" as const,
+        assetCode: "ZED",
+        assetIssuer: "GZEDISSUER1111111111111111111111111111111",
+      };
+      const alpha = {
+        asset: "ALPHA",
+        balance: "0.5",
+        assetType: "credit_alphanum4" as const,
+        assetCode: "ALPHA",
+        assetIssuer: "GALPHAISSUER222222222222222222222222222222",
+      };
+
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [alpha, zed],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+      fireEvent.click(screen.getByTitle("Sort: Default")); // -> balance-desc
+
+      const badges = screen.getAllByTestId("asset-badge");
+      expect(badges.map((b) => b.textContent)).toEqual(["ZED", "ALPHA"]);
+    });
+  });
+
+  describe("currency display (issue #665)", () => {
+    it("formats the portfolio total in the requested currency", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList showTotal xlmPrice={0.5} currency="EUR" />);
+      expect(screen.getByText(/~100 XLM \(/)).toBeInTheDocument();
+    });
+  });
 });
