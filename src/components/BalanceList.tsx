@@ -15,6 +15,16 @@ function getAssetCode(balance: Balance) {
 }
 
 /**
+ * Parse a balance string to a number, tolerating scientific notation and
+ * non-numeric values (issue #665). Returns 0 for anything unparseable so a
+ * single malformed balance can never poison a sort with NaN.
+ */
+function parseAmount(value: string | undefined): number {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
  * Composite React key for a balance row: `asset` alone collides for two
  * balances with the same code but different issuers (e.g. two USDC
  * balances from different issuers), silently dropping re-renders and
@@ -32,8 +42,8 @@ function compareBalances(a: Balance, b: Balance) {
     return aIsXlm ? -1 : 1;
   }
 
-  const aZero = Number(a.balance) === 0;
-  const bZero = Number(b.balance) === 0;
+  const aZero = parseAmount(a.balance) === 0;
+  const bZero = parseAmount(b.balance) === 0;
   if (aZero !== bZero) {
     return aZero ? 1 : -1;
   }
@@ -43,7 +53,9 @@ function compareBalances(a: Balance, b: Balance) {
 
 function sortBalances(balances: Balance[], mode: SortMode) {
   if (mode === "balance-desc") {
-    return [...balances].sort((a, b) => Number(b.balance) - Number(a.balance));
+    return [...balances].sort(
+      (a, b) => parseAmount(b.balance) - parseAmount(a.balance),
+    );
   }
   if (mode === "alpha") {
     return [...balances].sort((a, b) =>
@@ -70,7 +82,7 @@ const AssetRow = memo(function AssetRow({
   detailRef?: React.RefObject<HTMLElement | null>;
   showIssuerSuffix?: boolean;
 }) {
-  const isZeroBalance = Number(b.balance) === 0;
+  const isZeroBalance = parseAmount(b.balance) === 0;
   const onClick = useCallback(() => {
     onAssetClick?.(b);
     requestAnimationFrame(() => {
@@ -125,17 +137,30 @@ export interface BalanceListProps {
   showTotal?: boolean;
   /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a USD-equivalent figure. */
   xlmPrice?: number;
+  /**
+   * Fiat currency used to format the XLM-equivalent total (issue #665).
+   * Defaults to USD; EUR and GBP are also supported.
+   */
+  currency?: string;
 }
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+};
 
 export function BalanceList({
   onAssetClick,
   detailRef,
   showTotal,
   xlmPrice,
+  currency = "USD",
 }: BalanceListProps) {
   const { balances, isLoadingAccount, isConnected, network } = useSorokit();
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
+  const [hideZero, setHideZero] = useState(false);
 
   const isTestnet = network?.name === "testnet";
   const showFriendbot = isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
@@ -151,15 +176,16 @@ export function BalanceList({
     return counts;
   }, [balances]);
 
-  const filtered = useMemo(
-    () =>
-      search
-        ? balances.filter((b) =>
-            getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
-          )
-        : balances,
-    [balances, search],
-  );
+  const filtered = useMemo(() => {
+    const bySearch = search
+      ? balances.filter((b) =>
+          getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
+        )
+      : balances;
+    return hideZero
+      ? bySearch.filter((b) => parseAmount(b.balance) !== 0)
+      : bySearch;
+  }, [balances, hideZero, search]);
 
   const { sorted, sortedLp } = useMemo(() => {
     const regularBalances = filtered.filter(
@@ -180,7 +206,7 @@ export function BalanceList({
     () =>
       balances
         .filter((b) => b.assetType === "native")
-        .reduce((sum, b) => sum + Number(b.balance), 0),
+        .reduce((sum, b) => sum + parseAmount(b.balance), 0),
     [balances],
   );
 
@@ -200,13 +226,22 @@ export function BalanceList({
             <p className="text-[11px] text-ink-3 mt-0.5">
               ~{xlmTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM
               {typeof xlmPrice === "number"
-                ? ` (~$${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
+                ? ` (~${CURRENCY_SYMBOLS[currency] ?? `${currency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
                 : ""}
             </p>
           )}
         </div>
         {isConnected && !isLoadingAccount && (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setHideZero((v) => !v)}
+              aria-pressed={hideZero}
+              title={hideZero ? "Show zero balances" : "Hide zero balances"}
+              className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
+            >
+              {hideZero ? "Show zero" : "Hide zero"}
+            </button>
             <button
               onClick={cycleSort}
               className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
