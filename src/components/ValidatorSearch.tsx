@@ -4,6 +4,7 @@
  */
 
 import {
+  Cancel01Icon,
   FilterHorizontalIcon,
   Search01Icon,
   SortingAZ01Icon,
@@ -71,7 +72,11 @@ export function ValidatorSearch({
         <input
           type="search"
           value={filter.query}
-          onChange={(e) => patch({ query: e.target.value })}
+          // Trim leading/trailing whitespace before it ever reaches the
+          // filter — pasted validator addresses commonly carry surrounding
+          // whitespace, which would otherwise fail every `includes()` match
+          // in filterValidators().
+          onChange={(e) => patch({ query: e.target.value.trim() })}
           placeholder="Search validators…"
           aria-label="Search validators"
           className={cn(
@@ -79,8 +84,28 @@ export function ValidatorSearch({
             "text-[13px] text-ink placeholder:text-ink-4",
             "outline-none transition-colors",
             "focus:border-line-2 focus:ring-1 focus:ring-brand-dim",
+            filter.query.length > 0 && "pr-9",
           )}
         />
+        {filter.query.length > 0 && (
+          <button
+            type="button"
+            onClick={() => patch({ query: "" })}
+            aria-label="Clear search"
+            className={cn(
+              "absolute right-2.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded",
+              "text-ink-3 hover:text-ink-2 transition-colors",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
+            )}
+          >
+            <HugeiconsIcon
+              icon={Cancel01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </button>
+        )}
       </div>
 
       {/* ── Filter + sort row ───────────────────────────────────────────────── */}

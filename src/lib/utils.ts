@@ -120,6 +120,38 @@ export function toXLM(stroops: string): string {
   return (n / STROOPS_PER_XLM).toFixed(7);
 }
 
+/**
+ * Number of bytes `text` occupies when UTF-8 encoded. Stellar's `MEMO_TEXT`
+ * limit (28 bytes) is a byte limit, not a character count — a single
+ * multi-byte character (e.g. emoji, most non-Latin scripts) can consume up
+ * to 4 bytes, so `.length` alone silently under-counts and lets Horizon
+ * reject the transaction after submission instead of catching it at input
+ * time.
+ */
+export function utf8ByteLength(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/**
+ * Truncate `text` so its UTF-8 encoding fits within `maxBytes`, never
+ * splitting a multi-byte character in half. Used to enforce Stellar's
+ * 28-byte `MEMO_TEXT` limit as the user types.
+ */
+export function truncateToUtf8ByteLength(text: string, maxBytes: number): string {
+  if (utf8ByteLength(text) <= maxBytes) return text;
+
+  const chars = Array.from(text);
+  let bytes = 0;
+  let result = "";
+  for (const char of chars) {
+    const charBytes = new TextEncoder().encode(char).length;
+    if (bytes + charBytes > maxBytes) break;
+    bytes += charBytes;
+    result += char;
+  }
+  return result;
+}
+
 export function friendlyError(message: string): string {
   const normalizedMessage = message.trim().toLowerCase();
 

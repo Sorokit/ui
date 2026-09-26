@@ -799,6 +799,182 @@ describe("TransactionHistory", () => {
     });
   });
 
+  describe("unfunded account empty state (#684)", () => {
+    it("shows a friendly unfunded-account message for a 404 account-not-found error", async () => {
+      mockClient.transaction.getHistory = vi.fn().mockResolvedValue({
+        data: null,
+        error: "404: account not found",
+        total: 0,
+      });
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(screen.getByText(/unfunded account.*no transactions yet/i)).toBeInTheDocument();
+      });
+      expect(screen.queryByText("404: account not found")).not.toBeInTheDocument();
+    });
+
+    it("shows the Friendbot link for an unfunded account on testnet", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          network: { name: "testnet" } as ReturnType<typeof useSorokit>["network"],
+        }),
+      );
+      mockClient.transaction.getHistory = vi.fn().mockResolvedValue({
+        data: null,
+        error: "Account not found",
+        total: 0,
+      });
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => screen.getByText(/unfunded account/i));
+      expect(screen.getByRole("link", { name: /fund with friendbot/i })).toHaveAttribute(
+        "href",
+        "https://friendbot.stellar.org",
+      );
+    });
+
+    it("does not treat a generic network error as an unfunded account", async () => {
+      mockClient.transaction.getHistory = vi.fn().mockResolvedValue({
+        data: null,
+        error: "Network request failed",
+        total: 0,
+      });
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(screen.getByText("Network request failed")).toBeInTheDocument();
+      });
+      expect(screen.queryByText(/unfunded account/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("memo search filter (#684)", () => {
+    function makeMemoTx(hashSuffix: string, memo: string | null): Transaction {
+      return {
+        hash: `hash${hashSuffix.padStart(56, "0")}`,
+        ledger: 3000,
+        successful: true,
+        createdAt: new Date("2024-01-01").toISOString(),
+        memo,
+      };
+    }
+
+    it("renders a memo search input", async () => {
+      mockGetHistory([], 0);
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getByText("No transactions yet"));
+
+      expect(
+        screen.getByRole("textbox", { name: /search transactions by memo/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("filters transactions to those whose memo matches the search text", async () => {
+      const invoiceTx = makeMemoTx("1", "invoice #42");
+      const rentTx = makeMemoTx("2", "rent payment");
+      mockGetHistory([invoiceTx, rentTx], 2);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getAllByRole("article"));
+      expect(screen.getAllByRole("article")).toHaveLength(2);
+
+      fireEvent.change(
+        screen.getByRole("textbox", { name: /search transactions by memo/i }),
+        { target: { value: "invoice" } },
+      );
+
+      const rows = screen.getAllByRole("article");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent(invoiceTx.hash.slice(0, 10));
+    });
+
+    it("matches memo search case-insensitively", async () => {
+      const tx = makeMemoTx("1", "Coffee Fund");
+      mockGetHistory([tx], 1);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getAllByRole("article"));
+
+      fireEvent.change(
+        screen.getByRole("textbox", { name: /search transactions by memo/i }),
+        { target: { value: "coffee" } },
+      );
+
+      expect(screen.getAllByRole("article")).toHaveLength(1);
+    });
+
+    it("excludes transactions with no memo when a search term is entered", async () => {
+      const withMemo = makeMemoTx("1", "salary");
+      const withoutMemo = makeMemoTx("2", null);
+      mockGetHistory([withMemo, withoutMemo], 2);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getAllByRole("article"));
+      expect(screen.getAllByRole("article")).toHaveLength(2);
+
+      fireEvent.change(
+        screen.getByRole("textbox", { name: /search transactions by memo/i }),
+        { target: { value: "salary" } },
+      );
+
+      const rows = screen.getAllByRole("article");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent(withMemo.hash.slice(0, 10));
+    });
+
+    it("shows every transaction again once the memo search is cleared", async () => {
+      const tx1 = makeMemoTx("1", "alpha");
+      const tx2 = makeMemoTx("2", "beta");
+      mockGetHistory([tx1, tx2], 2);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getAllByRole("article"));
+
+      const searchInput = screen.getByRole("textbox", {
+        name: /search transactions by memo/i,
+      });
+      fireEvent.change(searchInput, { target: { value: "alpha" } });
+      expect(screen.getAllByRole("article")).toHaveLength(1);
+
+      fireEvent.change(searchInput, { target: { value: "" } });
+      expect(screen.getAllByRole("article")).toHaveLength(2);
+    });
+
+    it("combines the memo search with the status filter", async () => {
+      const okInvoice = { ...makeMemoTx("1", "invoice"), successful: true };
+      const failedInvoice = { ...makeMemoTx("2", "invoice"), successful: false };
+      mockGetHistory([okInvoice, failedInvoice], 2);
+
+      render(<TransactionHistory />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => screen.getAllByRole("article"));
+
+      fireEvent.change(
+        screen.getByRole("textbox", { name: /search transactions by memo/i }),
+        { target: { value: "invoice" } },
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^success$/i }));
+
+      const rows = screen.getAllByRole("article");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent(okInvoice.hash.slice(0, 10));
+    });
+  });
+
   describe("address change resets to page 1", () => {
     it("resets to page 1 when the wallet address changes", async () => {
       const getHistory = vi.fn().mockResolvedValue({
