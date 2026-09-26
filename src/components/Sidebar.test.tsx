@@ -210,4 +210,50 @@ describe("Sidebar", () => {
       expect(onNavigate).toHaveBeenCalledWith("wallet");
     });
   });
+
+  describe("issue #678 fixes", () => {
+    it("locks body scroll overflow to hidden when mobile navigation drawer is open and restores on close", () => {
+      document.body.style.overflow = "auto";
+
+      const { rerender } = render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={true} onClose={onClose} />,
+      );
+
+      expect(document.body.style.overflow).toBe("hidden");
+
+      rerender(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+
+      expect(document.body.style.overflow).toBe("auto");
+
+      // Verify unmount cleanup when open
+      const { unmount: unmountOpen } = render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={true} onClose={onClose} />,
+      );
+      expect(document.body.style.overflow).toBe("hidden");
+      unmountOpen();
+      expect(document.body.style.overflow).toBe("auto");
+    });
+
+    it("highlights parent sidebar navigation item for nested routes", () => {
+      render(
+        <Sidebar active="/nfts/collection/123" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+
+      const nftsBtn = screen.getByRole("button", { name: /nfts/i });
+      expect(nftsBtn).toHaveAttribute("aria-current", "page");
+      expect(nftsBtn.className).toContain("bg-surface-3");
+    });
+
+    it("highlights parent item for nested section route without leading slash", () => {
+      render(
+        <Sidebar active="nfts/collection/456" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+
+      const nftsBtn = screen.getByRole("button", { name: /nfts/i });
+      expect(nftsBtn).toHaveAttribute("aria-current", "page");
+    });
+  });
 });
+
