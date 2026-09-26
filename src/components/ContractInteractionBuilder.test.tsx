@@ -242,4 +242,49 @@ describe("ContractInteractionBuilder", () => {
       screen.queryByRole("combobox", { name: "Method" }),
     ).not.toBeInTheDocument();
   });
+
+  it("rejects a contract address that is too short", () => {
+    render(<ContractInteractionBuilder />);
+    const input = screen.getByRole("textbox", { name: "Contract Address" });
+    fireEvent.change(input, { target: { value: `C${"A".repeat(14)}` } });
+    expect(
+      screen.getByText("Contract address is too short"),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects a 56-char contract address with invalid base32 characters", () => {
+    render(<ContractInteractionBuilder />);
+    const input = screen.getByRole("textbox", { name: "Contract Address" });
+    fireEvent.change(input, { target: { value: `C${"0".repeat(55)}` } });
+    expect(
+      screen.getByText("Contract address is not a valid Soroban contract ID"),
+    ).toBeInTheDocument();
+  });
+
+  it("accepts a strict 56-char contract address", () => {
+    render(<ContractInteractionBuilder />);
+    const input = screen.getByRole("textbox", { name: "Contract Address" });
+    fireEvent.change(input, { target: { value: `C${"A".repeat(55)}` } });
+    expect(
+      screen.queryByText(/not a valid Soroban contract ID/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a JSON input with live validation for complex types", () => {
+    const spec: ContractSpec = {
+      ...MOCK_SPEC,
+      methods: [{ name: "batch", args: [{ name: "items", type: "vec" }] }],
+    };
+    render(<ContractInteractionBuilder contractSpec={spec} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+      target: { value: "batch" },
+    });
+
+    const textarea = screen.getByRole("textbox", { name: "items" });
+    fireEvent.change(textarea, { target: { value: "{bad" } });
+    expect(screen.getByText("Invalid JSON")).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: "[1, 2, 3]" } });
+    expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
+  });
 });

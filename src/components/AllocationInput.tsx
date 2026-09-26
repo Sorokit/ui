@@ -10,6 +10,8 @@
  * - Per-asset diff pill showing how much each target deviates from current
  */
 
+import { useState } from "react";
+
 import { SLICE_COLORS } from "@/components/ui/PieChart";
 import type { PortfolioAsset } from "@/lib/rebalancer";
 import { cn } from "@/lib/utils";
@@ -49,8 +51,27 @@ export function AllocationInput({
   const remaining = parseFloat((100 - sum).toFixed(4));
   const isExact = Math.abs(remaining) < 0.01;
   const isOver = remaining < -0.01;
+  // Issue #655: keep the raw text the user typed so clearing the field does not
+  // immediately collapse to 0. The parsed value is only committed on blur.
+  const [draft, setDraft] = useState<Record<string, string>>({});
 
   function handleChange(assetCode: string, raw: string) {
+    setDraft((prev) => ({ ...prev, [assetCode]: raw }));
+    if (raw.trim() === "") return;
+    const parsed = parseFloat(raw);
+    if (isNaN(parsed)) return;
+    const value = Math.min(100, Math.max(0, parsed));
+    onChange({ ...targets, [assetCode]: value });
+  }
+
+  function handleBlur(assetCode: string) {
+    const raw = draft[assetCode];
+    setDraft((prev) => {
+      const next = { ...prev };
+      delete next[assetCode];
+      return next;
+    });
+    if (raw === undefined) return;
     const parsed = parseFloat(raw);
     const value = isNaN(parsed) ? 0 : Math.min(100, Math.max(0, parsed));
     onChange({ ...targets, [assetCode]: value });
@@ -58,13 +79,24 @@ export function AllocationInput({
 
   function handleEqualise() {
     if (assets.length === 0) return;
-    const equal = parseFloat((100 / assets.length).toFixed(4));
-    // Give the last asset any rounding remainder so the total is exactly 100
-    const last = parseFloat((100 - equal * (assets.length - 1)).toFixed(4));
+    const count = assets.length;
+    // Issue #655: work in whole cents so the remainder can be distributed
+    // without the float drift that produced 99.99% / 100.01% totals.
+    const base = Math.floor((100 / count) * 100) / 100;
     const updated: Record<string, number> = {};
-    assets.forEach((a, i) => {
-      updated[a.assetCode] = i === assets.length - 1 ? last : equal;
+    assets.forEach((a) => {
+      updated[a.assetCode] = base;
     });
+    let remainderCents = Math.round((100 - base * count) * 100);
+    // Hand the leftover cents to the largest current holdings first.
+    const order = [...assets].sort((a, b) => b.currentPct - a.currentPct);
+    let i = 0;
+    while (remainderCents > 0 && order.length > 0) {
+      const a = order[i % order.length];
+      updated[a.assetCode] = Math.round((updated[a.assetCode] + 0.01) * 100) / 100;
+      remainderCents -= 1;
+      i += 1;
+    }
     onChange(updated);
   }
 
@@ -159,11 +191,12 @@ export function AllocationInput({
                   min={0}
                   max={100}
                   step={0.1}
-                  value={target === 0 ? "" : target}
+                  value={draft[asset.assetCode] ?? (target === 0 ? "" : target)}
                   placeholder="0"
                   disabled={disabled}
                   aria-label={`Target allocation for ${asset.assetCode}`}
                   onChange={(e) => handleChange(asset.assetCode, e.target.value)}
+                  onBlur={() => handleBlur(asset.assetCode)}
                   className={cn(
                     "h-8 w-20 rounded-lg border bg-surface-2 pl-3 pr-6",
                     "text-[12px] text-ink tabular-nums",
