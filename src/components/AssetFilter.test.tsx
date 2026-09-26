@@ -295,5 +295,38 @@ describe("AssetFilter", () => {
     const list = screen.getByRole("listbox");
     expect(list).toBeInTheDocument();
   });
+
+  it("matches search case-insensitively and resets the page on change (#664)", () => {
+    const onPageReset = vi.fn();
+    renderComponent({ onPageReset });
+
+    const input = screen.getByPlaceholderText(/search/i);
+    fireEvent.change(input, { target: { value: "usdc" } });
+
+    expect(screen.getByText("USDC")).toBeInTheDocument();
+    expect(onPageReset).toHaveBeenCalled();
+  });
+
+  it("clears all filters and resets the page (#664)", () => {
+    const onPageReset = vi.fn();
+    renderComponent({ onPageReset });
+
+    fireEvent.click(screen.getByText("Verified"));
+    expect(screen.queryByText("yXLM")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    expect(screen.getByText("yXLM")).toBeInTheDocument();
+    expect(onPageReset).toHaveBeenCalled();
+  });
+
+  it("closes the sort popover on Escape (#664)", () => {
+    renderComponent();
+
+    fireEvent.click(screen.getByText(/sort/i));
+    const option = screen.getByText("Default");
+    fireEvent.keyDown(option.closest("div") as HTMLElement, { key: "Escape" });
+
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+  });
 });
 
