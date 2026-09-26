@@ -143,8 +143,17 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       {/* Mobile backdrop */}
       {open && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Close navigation"
           className="fixed inset-0 z-20 bg-black/60 lg:hidden"
           onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onClose();
+            }
+          }}
         />
       )}
 
