@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowUpDown, Info, TrendingUp } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,9 @@ const USD_PRICES: Record<string, number> = {
 
 const ASSETS = ["XLM", "USDC", "USDT", "EURC"];
 
+/** Wait for typing to pause before rebuilding the price-impact SVG. */
+const AMOUNT_CHART_DEBOUNCE_MS = 300;
+
 interface SwapSimulatorProps {
   className?: string;
   onSwap?: (params: {
@@ -60,9 +63,19 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
   const [historyRange, setHistoryRange] = useState<"7d" | "30d">("7d");
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapSuccess, setSwapSuccess] = useState<boolean | null>(null);
+  const [debouncedAmountInStr, setDebouncedAmountInStr] = useState(amountInStr);
 
   // SVG Chart Hover States
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const historyTooltipId = useId();
+  const historyPointRefs = useRef<Array<SVGRectElement | null>>([]);
+
+  useEffect(() => {
+    const timerId = window.setTimeout(() => {
+      setDebouncedAmountInStr(amountInStr);
+    }, AMOUNT_CHART_DEBOUNCE_MS);
+    return () => window.clearTimeout(timerId);
+  }, [amountInStr]);
 
   // Keep assets distinct
   const handleFromAssetChange = (val: string) => {
@@ -93,15 +106,13 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
     return isNaN(parsed) || parsed <= 0 ? 0 : parsed;
   }, [amountInStr]);
 
-  const maxSlippage = useMemo(() => {
+  const parsedSlippage = useMemo(() => {
     const parsed = parseFloat(maxSlippageStr);
-    return isNaN(parsed) || parsed <= 0 || parsed > 50 ? 0.5 : parsed;
+    if (!Number.isFinite(parsed) || parsed < 0.1 || parsed > 50) return null;
+    return parsed;
   }, [maxSlippageStr]);
 
-  const isSlippageInvalid = useMemo(() => {
-    const parsed = parseFloat(maxSlippageStr);
-    return isNaN(parsed) || parsed <= 0 || parsed > 50;
-  }, [maxSlippageStr]);
+  const isSlippageInvalid = parsedSlippage === null;
 
   // Compute Pool Reserves with Multiplier
   const { reservesFrom, reservesTo } = useMemo(() => {
@@ -125,6 +136,11 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
   // Perform Constant Product calculations (0.3% fee)
   const feeRate = 0.003;
   const netAmountIn = amountIn * (1 - feeRate);
+
+  const debouncedAmountIn = useMemo(() => {
+    const parsed = parseFloat(debouncedAmountInStr);
+    return Number.isNaN(parsed) || parsed <= 0 ? 0 : parsed;
+  }, [debouncedAmountInStr]);
 
   const amountOut = useMemo(() => {
     if (amountIn <= 0) return 0;
@@ -165,15 +181,16 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
     });
   }, [amountOut, toPriceUsd]);
 
-  // Check if actual price impact exceeds max slippage tolerance
+  // Check if actual price impact exceeds max slippage tolerance.
+  // Invalid input must not fall back to 0.5% and look like a real tolerance.
   const isSlippageExceeded = useMemo(() => {
-    return priceImpact > maxSlippage;
-  }, [priceImpact, maxSlippage]);
+    return parsedSlippage !== null && priceImpact > parsedSlippage;
+  }, [priceImpact, parsedSlippage]);
 
   // Generate Price Impact Curve points
   const priceImpactCurvePoints = useMemo(() => {
     const points = [];
-    const maxVal = Math.max(amountIn * 2, 500);
+    const maxVal = Math.max(debouncedAmountIn * 2, 500);
     const minVal = 1;
     const steps = 15;
     for (let i = 0; i <= steps; i++) {
@@ -186,7 +203,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
       points.push({ x, y: Math.max(0, impact * 100) });
     }
     return points;
-  }, [amountIn, reservesFrom, reservesTo, spotPrice]);
+  }, [debouncedAmountIn, reservesFrom, reservesTo, spotPrice]);
 
   // Generate Historical Prices (Deterministic based on sinus wave to keep code lean)
   const historicalPrices = useMemo(() => {
@@ -213,7 +230,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
       await connectWallet();
       return;
     }
-    if (amountIn <= 0 || isSlippageInvalid) return;
+    if (amountIn <= 0 || parsedSlippage === null) return;
 
     setIsSwapping(true);
     setSwapSuccess(null);
@@ -231,7 +248,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
         amountIn,
         amountOut,
         priceImpact,
-        slippage: maxSlippage,
+        slippage: parsedSlippage,
         liquiditySize,
       });
     }
@@ -382,7 +399,8 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                   type="text"
                   value={maxSlippageStr}
                   onChange={(e) => setMaxSlippageStr(e.target.value)}
-                  error={isSlippageInvalid ? "Slippage must be between 0.1% and 50%" : undefined}
+                  aria-invalid={isSlippageInvalid}
+                  aria-describedby={isSlippageInvalid ? "swap-slippage-error" : undefined}
                   className="h-8.5"
                 />
               </div>
@@ -404,14 +422,30 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
               </div>
             </div>
 
+            {isSlippageInvalid && (
+              <div
+                id="swap-slippage-error"
+                role="alert"
+                className="bg-error-dim border border-error-dim-strong rounded-xl p-3 flex gap-2 items-start"
+              >
+                <AlertTriangle className="text-red shrink-0 mt-0.5" size={16} />
+                <div>
+                  <h4 className="text-[12px] font-bold text-red">Invalid slippage</h4>
+                  <p className="text-[11px] text-red mt-0.5">
+                    Slippage must be between 0.1% and 50%
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Warn user if price impact exceeds configured slippage tolerance */}
-            {amountIn > 0 && isSlippageExceeded && (
+            {amountIn > 0 && isSlippageExceeded && parsedSlippage !== null && (
               <div className="bg-error-dim border border-error-dim-strong rounded-xl p-3 flex gap-2 items-start">
                 <AlertTriangle className="text-red shrink-0 mt-0.5" size={16} />
                 <div>
                   <h4 className="text-[12px] font-bold text-red">High Slippage Warning</h4>
                   <p className="text-[11px] text-red mt-0.5">
-                    Estimated price impact of {priceImpact.toFixed(2)}% exceeds your slippage tolerance of {maxSlippage}%. The transaction will likely fail or incur heavy losses.
+                    Estimated price impact of {priceImpact.toFixed(2)}% exceeds your slippage tolerance of {parsedSlippage}%. The transaction will likely fail or incur heavy losses.
                   </p>
                 </div>
               </div>
@@ -428,7 +462,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
           <CardFooter className="pt-2 border-t border-line">
             <Button
               className="w-full text-[13px] font-semibold py-2.5 h-auto transition-all active:scale-99"
-              disabled={isSwapping || (isConnected && (amountIn <= 0 || isSlippageInvalid))}
+              disabled={isSwapping || isSlippageInvalid || (isConnected && amountIn <= 0)}
               loading={isSwapping}
               onClick={handleExecuteSwap}
             >
@@ -508,7 +542,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                   <span className="flex items-center gap-1">
                     <TrendingUp size={11} className="text-teal" /> Price Impact (%) vs Size
                   </span>
-                  <span>Max Size: {Math.max(amountIn * 2, 500)} {fromAsset}</span>
+                  <span>Max Size: {Math.max(debouncedAmountIn * 2, 500)} {fromAsset}</span>
                 </div>
                 {/* SVG Render for Price Impact Curve */}
                 <div className="relative flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px]">
@@ -521,7 +555,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                     {/* Plot Line */}
                     <path
                       d={(() => {
-                        const maxVal = Math.max(amountIn * 2, 500);
+                        const maxVal = Math.max(debouncedAmountIn * 2, 500);
                         const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
                         return priceImpactCurvePoints
                           .map((p, idx) => {
@@ -540,7 +574,7 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                     {/* Gradient Fill Area */}
                     <path
                       d={(() => {
-                        const maxVal = Math.max(amountIn * 2, 500);
+                        const maxVal = Math.max(debouncedAmountIn * 2, 500);
                         const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
                         const pathStr = priceImpactCurvePoints
                           .map((p, idx) => {
@@ -562,16 +596,21 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                       </linearGradient>
                     </defs>
 
-                    {/* Current trade point */}
-                    {amountIn > 0 && (
+                    {/* Current trade point — follows the debounced curve, not each keystroke */}
+                    {debouncedAmountIn > 0 && (
                       <circle
                         cx={(() => {
-                          const maxVal = Math.max(amountIn * 2, 500);
-                          return (amountIn / maxVal) * 100;
+                          const maxVal = Math.max(debouncedAmountIn * 2, 500);
+                          return (debouncedAmountIn / maxVal) * 100;
                         })()}
                         cy={(() => {
                           const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
-                          return 100 - (priceImpact / maxY) * 90;
+                          const chartImpact = priceImpactCurvePoints.reduce((nearest, point) =>
+                            Math.abs(point.x - debouncedAmountIn) < Math.abs(nearest.x - debouncedAmountIn)
+                              ? point
+                              : nearest,
+                          ).y;
+                          return 100 - (chartImpact / maxY) * 90;
                         })()}
                         r="3.5"
                         fill="var(--color-brand)"
@@ -580,15 +619,20 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                         className="animate-ping origin-center"
                       />
                     )}
-                    {amountIn > 0 && (
+                    {debouncedAmountIn > 0 && (
                       <circle
                         cx={(() => {
-                          const maxVal = Math.max(amountIn * 2, 500);
-                          return (amountIn / maxVal) * 100;
+                          const maxVal = Math.max(debouncedAmountIn * 2, 500);
+                          return (debouncedAmountIn / maxVal) * 100;
                         })()}
                         cy={(() => {
                           const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
-                          return 100 - (priceImpact / maxY) * 90;
+                          const chartImpact = priceImpactCurvePoints.reduce((nearest, point) =>
+                            Math.abs(point.x - debouncedAmountIn) < Math.abs(nearest.x - debouncedAmountIn)
+                              ? point
+                              : nearest,
+                          ).y;
+                          return 100 - (chartImpact / maxY) * 90;
                         })()}
                         r="3.5"
                         fill="var(--color-brand)"
@@ -628,7 +672,10 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                       30D
                     </button>
                   </div>
-                  <span>
+                  <span
+                    id={historyTooltipId}
+                    role={hoverIndex !== null ? "tooltip" : undefined}
+                  >
                     {hoverIndex !== null
                       ? `${historicalPrices[hoverIndex]?.label}: ${historicalPrices[hoverIndex]?.price.toFixed(4)}`
                       : `Rate: ${fromAsset}/${toAsset}`}
@@ -684,20 +731,47 @@ export function SwapSimulator({ className, onSwap }: SwapSimulatorProps) {
                       const cx = (idx / (historicalPrices.length - 1)) * 100;
                       const cy = 100 - ((p.price - min) / spread) * 80 - 10;
 
+                      const pointLabel = `Price point ${p.label}: ${p.price.toFixed(4)}`;
+                      const focusPoint = (next: number) => {
+                        const clamped = Math.min(historicalPrices.length - 1, Math.max(0, next));
+                        historyPointRefs.current[clamped]?.focus();
+                      };
+
                       return (
                         <g key={idx}>
                           {hoverIndex === idx && (
                             <circle cx={cx} cy={cy} r="3" fill="var(--color-teal)" stroke="var(--color-base)" strokeWidth="1" />
                           )}
-                          {/* Invisible hover targets */}
                           <rect
+                            ref={(node) => {
+                              historyPointRefs.current[idx] = node;
+                            }}
                             x={cx - 100 / (historicalPrices.length - 1) / 2}
                             y="0"
                             width={100 / (historicalPrices.length - 1)}
                             height="100"
                             fill="transparent"
+                            tabIndex={0}
+                            role="button"
+                            aria-label={pointLabel}
+                            aria-describedby={hoverIndex === idx ? historyTooltipId : undefined}
                             onMouseEnter={() => setHoverIndex(idx)}
                             onMouseLeave={() => setHoverIndex(null)}
+                            onFocus={() => setHoverIndex(idx)}
+                            onBlur={() => setHoverIndex((current) => (current === idx ? null : current))}
+                            onKeyDown={(event) => {
+                              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                                event.preventDefault();
+                                focusPoint(idx + 1);
+                              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                                event.preventDefault();
+                                focusPoint(idx - 1);
+                              } else if (event.key === "Escape") {
+                                event.preventDefault();
+                                setHoverIndex(null);
+                                event.currentTarget.blur();
+                              }
+                            }}
                             style={{ cursor: "crosshair" }}
                           />
                         </g>
