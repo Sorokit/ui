@@ -72,6 +72,10 @@ describe("TopBar", () => {
     } as unknown as ReturnType<typeof useSorokit>);
     render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
     expect(screen.getAllByText("Network unavailable").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Network unavailable", { selector: "p" })).toHaveAttribute(
+      "role",
+      "alert",
+    );
   });
 
   it("calls clearError when the dismiss button in the error banner is clicked", () => {
@@ -275,4 +279,3 @@ describe("TopBar — issue #679", () => {
     });
   });
 });
-
