@@ -57,6 +57,14 @@ interface DiffEntry {
 const DEBUG_HISTORY_KEY = "sorokit-soroban-debug-history";
 const DEBUG_HISTORY_LIMIT = 10;
 
+// Issue #668: Soroban VM diagnostics can include ANSI colour escapes which
+// render as garbled characters (e.g. `\u001b[31m`). Strip them before display.
+const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
+
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_ESCAPE_PATTERN, "");
+}
+
 function formatTimestamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
@@ -112,11 +120,11 @@ function describeValue(value: unknown): string {
 }
 
 function formatSnapshot(value: unknown): string {
-  if (typeof value === "string") return value;
+  if (typeof value === "string") return stripAnsi(value);
   try {
-    return JSON.stringify(value, null, 2);
+    return stripAnsi(JSON.stringify(value, null, 2));
   } catch {
-    return String(value);
+    return stripAnsi(String(value));
   }
 }
 
@@ -185,7 +193,7 @@ export function ContractInteractionDebugger({
   state = "idle",
   result,
   txHash,
-  error: _error,
+  error,
   stateBefore,
   stateAfter,
 }: ContractInteractionDebuggerProps) {
@@ -230,7 +238,9 @@ export function ContractInteractionDebugger({
         ? {
             txHash: txHash ?? undefined,
             status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-            summary: typeof result === "string" ? result : result ? JSON.stringify(result) : undefined,
+            summary: result
+              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
+              : undefined,
           }
         : null,
       timestamp: new Date().toISOString(),
@@ -254,7 +264,9 @@ export function ContractInteractionDebugger({
           ? {
               txHash: txHash ?? undefined,
               status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-              summary: typeof result === "string" ? result : result ? JSON.stringify(result) : undefined,
+              summary: result
+              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
+              : undefined,
             }
           : null,
         timestamp: new Date().toISOString(),
@@ -277,7 +289,7 @@ export function ContractInteractionDebugger({
           </Button>
         ) : null}
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="mt-3 overflow-x-auto [scrollbar-width:thin]">{children}</div>
     </section>
   );
 
@@ -415,6 +427,11 @@ export function ContractInteractionDebugger({
             "Final result",
             "The final transaction outcome once the submission completes.",
             <div className="rounded-lg border border-line bg-surface p-3">
+              {error ? (
+                <p className="mb-3 rounded-md border border-error-dim bg-error-dim-muted px-3 py-2 text-[12px] font-mono text-red whitespace-pre-wrap break-words">
+                  {stripAnsi(error)}
+                </p>
+              ) : null}
               {result ? (
                 <JsonView data={result} shouldExpandNode={() => true} />
               ) : (

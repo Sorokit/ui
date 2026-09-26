@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -192,6 +193,63 @@ describe("TransactionConfirmModal", () => {
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /Signing…/i })).toBeInTheDocument();
+  });
+
+  it("preserves precision for stroop amounts beyond Number.MAX_SAFE_INTEGER", () => {
+    const stroops = "9007199254740993";
+    render(
+      <TransactionConfirmModal
+        open={true}
+        transaction={makePreview({
+          fee: { baseFeeStroops: stroops, totalStroops: stroops },
+        })}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByText(/900,719,925\.4740993 XLM/).length).toBeGreaterThan(0);
+  });
+
+  it("wraps long operation descriptions instead of overflowing", () => {
+    const description = `invoke ${"A".repeat(180)}`;
+    render(
+      <TransactionConfirmModal
+        open={true}
+        transaction={makePreview({
+          operations: [{ type: "Invoke Contract", description }],
+        })}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const node = screen.getByText(description);
+    expect(node).toHaveClass("break-words");
+    expect(node).toHaveStyle({ overflowWrap: "anywhere" });
+  });
+
+  it("shows an alert and re-enables actions when signing is rejected", async () => {
+    function Harness() {
+      const [signing, setSigning] = useState(false);
+      return (
+        <TransactionConfirmModal
+          open={true}
+          transaction={makePreview()}
+          isSigning={signing}
+          onCancel={vi.fn()}
+          onConfirm={async () => {
+            setSigning(true);
+            throw new Error("User rejected the request");
+          }}
+        />
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Confirm & Sign" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("User rejected the request");
+    expect(screen.getByRole("button", { name: "Confirm & Sign" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
   });
 
   it("calls onCancel on Escape (unless signing)", () => {

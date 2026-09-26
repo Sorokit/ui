@@ -21,18 +21,31 @@ describe("Input", () => {
     expect(input).toBeInTheDocument();
     
     const id = input.getAttribute("id");
-    expect(id).toBe("username");
-    expect(label.getAttribute("for")).toBe("username");
+    expect(id).toBeTruthy();
+    expect(label.getAttribute("for")).toBe(id);
   });
 
-  it("uses an auto-generated id if label is present but id is not specified", () => {
-    // If we have a label with spaces, it formats it
+  it("generates a unique id when a label is present but id is not specified", () => {
     render(<Input label="My Custom Field" />);
     const label = screen.getByText("My Custom Field");
     const input = screen.getByRole("textbox");
-    
-    expect(input.getAttribute("id")).toBe("my-custom-field");
-    expect(label.getAttribute("for")).toBe("my-custom-field");
+
+    const id = input.getAttribute("id");
+    expect(id).toBeTruthy();
+    expect(label.getAttribute("for")).toBe(id);
+  });
+
+  it("assigns different ids to two inputs that share the same label (#544)", () => {
+    render(
+      <>
+        <Input label="Amount" />
+        <Input label="Amount" />
+      </>,
+    );
+
+    const inputs = screen.getAllByLabelText("Amount");
+    expect(inputs).toHaveLength(2);
+    expect(inputs[0].getAttribute("id")).not.toBe(inputs[1].getAttribute("id"));
   });
 
   it("uses the provided id if id prop is supplied", () => {
@@ -99,8 +112,8 @@ describe("Input", () => {
     expect(textarea.tagName).toBe("TEXTAREA");
     
     const id = textarea.getAttribute("id");
-    expect(id).toBe("description");
-    expect(label.getAttribute("for")).toBe("description");
+    expect(id).toBeTruthy();
+    expect(label.getAttribute("for")).toBe(id);
   });
 
   it("renders error message correctly in multiline mode", () => {

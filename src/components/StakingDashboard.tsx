@@ -17,7 +17,7 @@ import {
   Task01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DelegationRow } from "@/components/DelegationRow";
 import { RewardHistory } from "@/components/RewardHistory";
@@ -150,14 +150,14 @@ export function StakingDashboard({
   const [isClaimingAll, setIsClaimingAll] = useState(false);
   const [localDelegations, setLocalDelegations] = useState<Delegation[]>(delegations);
 
-  // Keep localDelegations in sync if prop changes (test/integration use)
-  const prevDelegationsProp = useRef(delegationsProp);
+  // Issue #651: keep localDelegations in sync with the wallet connection and
+  // any prop changes, so disconnecting clears stale mock delegations.
   useEffect(() => {
-    if (delegationsProp !== prevDelegationsProp.current) {
-      prevDelegationsProp.current = delegationsProp;
-      setLocalDelegations(delegationsProp ?? MOCK_DELEGATIONS);
-    }
-  }, [delegationsProp]);
+    setLocalDelegations(isConnected ? (delegationsProp ?? MOCK_DELEGATIONS) : []);
+  }, [isConnected, delegationsProp]);
+
+  // Issue #651: screen-reader announcement for reward claims.
+  const [announcement, setAnnouncement] = useState("");
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const filteredValidators = useMemo(
@@ -263,6 +263,7 @@ export function StakingDashboard({
   const handleClaim = useCallback(
     async (validatorId: string) => {
       setClaimingIds((ids) => [...ids, validatorId]);
+      setAnnouncement("Claiming rewards…");
       try {
         // In production: call getClient().staking.claimRewards(validatorId)
         await new Promise<void>((resolve) => setTimeout(resolve, 800));
@@ -274,6 +275,7 @@ export function StakingDashboard({
               : d,
           ),
         );
+        setAnnouncement("Rewards claimed");
       } finally {
         setClaimingIds((ids) => ids.filter((id) => id !== validatorId));
       }
@@ -284,11 +286,13 @@ export function StakingDashboard({
   /** Claim all rewards at once */
   const handleClaimAll = useCallback(async () => {
     setIsClaimingAll(true);
+    setAnnouncement("Claiming all rewards…");
     try {
       await new Promise<void>((resolve) => setTimeout(resolve, 1000));
       setLocalDelegations((prev) =>
         prev.map((d) => ({ ...d, claimableReward: "0" })),
       );
+      setAnnouncement("All rewards claimed");
     } finally {
       setIsClaimingAll(false);
     }
@@ -302,6 +306,11 @@ export function StakingDashboard({
         className,
       )}
     >
+      {/* Issue #651: announce reward-claim progress to assistive tech. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+
       {/* ── Card header ───────────────────────────────────────────────────── */}
       <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4 border-b border-line">
         <div>

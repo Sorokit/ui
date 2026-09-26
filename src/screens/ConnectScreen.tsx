@@ -86,6 +86,7 @@ export function ConnectScreen() {
                 <p role="alert" className="text-[13px] text-red">
                   {error}
                 </p>
+                <p role="alert" className="text-[13px] text-red">{error}</p>
 
                 <button
                   onClick={clearError}
