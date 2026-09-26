@@ -340,6 +340,61 @@ describe("SwapSimulator", () => {
     expect(btn).toBeDisabled();
   });
 
+  it("shows a warning banner and blocks swap execution for invalid slippage", () => {
+    vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+    const onSwap = vi.fn();
+    render(<SwapSimulator onSwap={onSwap} />);
+    fireEvent.change(screen.getByLabelText("Max Slippage Tolerance (%)"), {
+      target: { value: "55" },
+    });
+    const banner = screen.getByRole("alert");
+    expect(banner).toHaveTextContent(/invalid slippage/i);
+    expect(banner).toHaveTextContent(/slippage must be between 0\.1% and 50%/i);
+    const btn = screen.getByRole("button", { name: /swap assets/i });
+    expect(btn).toBeDisabled();
+    fireEvent.click(btn);
+    expect(onSwap).not.toHaveBeenCalled();
+  });
+
+  it("debounces price impact chart recalculation while the amount is typed", () => {
+    vi.useFakeTimers();
+    render(<SwapSimulator />);
+    expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "1000" } });
+    expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.getByText("Max Size: 2000 XLM")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("shows a tooltip when a price history point receives keyboard focus", () => {
+    render(<SwapSimulator />);
+    fireEvent.click(screen.getByRole("button", { name: /price history/i }));
+    const points = screen.getAllByRole("button", { name: /price point/i });
+    expect(points.length).toBeGreaterThan(1);
+
+    act(() => {
+      points[0].focus();
+    });
+    expect(points[0]).toHaveFocus();
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip).toHaveTextContent(points[0].getAttribute("aria-label")!.replace(/^Price point /, ""));
+
+    fireEvent.keyDown(points[0], { key: "ArrowRight" });
+    expect(points[1]).toHaveFocus();
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      points[1].getAttribute("aria-label")!.replace(/^Price point /, ""),
+    );
+
+    fireEvent.keyDown(points[1], { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
   // ---- USD display when connected ----
 
   it("shows USD equivalent values when wallet is connected", () => {
