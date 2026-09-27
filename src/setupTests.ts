@@ -76,5 +76,5 @@ if (!Element.prototype.hasPointerCapture) {
 
 vi.mock('@hugeicons/react', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  return { ...actual, Loading01Icon: actual['Loading01Icon'] || (() => null) };
+  return { ...actual, Loading01Icon: actual['Loading01Icon'] || ((): null => null) };
 });
