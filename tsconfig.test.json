@@ -3,8 +3,7 @@
   "compilerOptions": {
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
     "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "ignoreDeprecations": "5.0"
+    "noUnusedParameters": false
   },
   "include": [
     "src/**/*.test.ts",

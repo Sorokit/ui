@@ -12,17 +12,17 @@ import {
 import { Input } from "@/components/ui/Input";
 import { computeBudgetBreakdown } from "@/lib/budget";
 
-interface AssetBreakdown {
+type AssetBreakdown = {
   asset: string;
   amount: number;
   percentage: number;
-}
+};
 
-interface TxBreakdown {
+type TxBreakdown = {
   type: string;
   amount: number;
   count: number;
-}
+};
 
 export function BudgetScreen() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(

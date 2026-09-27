@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -63,51 +63,51 @@ export function SwapExecutionTracker({
   timeoutSeconds = 60,
   onRetry,
 }: SwapExecutionTrackerProps) {
-  // Determine effective execution status
-  const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(() => {
+  // Derive effective status from props — no prop-to-state mirroring needed
+  const derivedStatus = useMemo<SwapExecutionStatus>(() => {
     if (statusProp) return statusProp;
     if (executedAt || actualOutput != null) return "success";
     if (txHash) return "confirming";
     return "submitted";
-  });
+  }, [statusProp, executedAt, actualOutput, txHash]);
+
+  // timedOut cannot be derived from props alone — use a ref to reset it
+  // without a synchronous setState in the effect body.
+  const timedOutRef = useRef(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const internalStatus: SwapExecutionStatus =
+    timedOut && (derivedStatus === "submitted" || derivedStatus === "confirming")
+      ? "timeout"
+      : derivedStatus;
 
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
 
+  // Countdown effect — resets when timeoutSeconds or derivedStatus changes.
+  // No setState is called synchronously in the effect body; all updates happen
+  // inside the setInterval callback, satisfying react-hooks/set-state-in-effect.
   useEffect(() => {
-    if (statusProp) {
-      setInternalStatus(statusProp);
-    } else if (executedAt || actualOutput != null) {
-      setInternalStatus("success");
-    }
-  }, [statusProp, executedAt, actualOutput]);
-
-  // Handle timeout countdown for pending states (submitted / confirming)
-  useEffect(() => {
-    setTimeLeft(timeoutSeconds);
-  }, [timeoutSeconds, internalStatus]);
-
-  useEffect(() => {
-    const isPending = internalStatus === "submitted" || internalStatus === "confirming";
+    timedOutRef.current = false;
+    const isPending = derivedStatus === "submitted" || derivedStatus === "confirming";
     if (!isPending) return;
 
-    if (timeLeft <= 0) {
-      setInternalStatus("timeout");
-      return;
-    }
+    // Start at timeoutSeconds+1 so the first tick immediately renders timeoutSeconds.
+    let remaining = timeoutSeconds + 1;
 
     const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          setInternalStatus("timeout");
-          return 0;
-        }
-        return prev - 1;
-      });
+      remaining -= 1;
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearInterval(timer);
+        timedOutRef.current = true;
+        setTimedOut(true);
+      }
     }, 1000);
 
-    return () => clearInterval(timer);
-  }, [internalStatus, timeLeft]);
+    return () => {
+      clearInterval(timer);
+      if (!timedOutRef.current) setTimedOut(false);
+    };
+  }, [derivedStatus, timeoutSeconds]);
 
   const currentStatus = internalStatus;
   const isTimedOut = currentStatus === "timeout";
