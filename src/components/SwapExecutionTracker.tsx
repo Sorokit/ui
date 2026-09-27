@@ -72,7 +72,10 @@ export function SwapExecutionTracker({
 
   const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(getInitialStatus);
 
-  const currentStatus = statusProp ?? internalStatus;
+  const currentStatus =
+    internalStatus === "timeout" && (!statusProp || statusProp === "submitted" || statusProp === "confirming")
+      ? "timeout"
+      : (statusProp ?? internalStatus);
 
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
 
