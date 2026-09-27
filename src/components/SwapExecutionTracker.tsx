@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -63,36 +63,38 @@ export function SwapExecutionTracker({
   timeoutSeconds = 60,
   onRetry,
 }: SwapExecutionTrackerProps) {
-  const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(() => {
+  const getInitialStatus = (): SwapExecutionStatus => {
     if (statusProp) return statusProp;
     if (executedAt || actualOutput != null) return "success";
     if (txHash) return "confirming";
     return "submitted";
-  });
+  };
 
-  const currentStatus = statusProp ?? (executedAt || actualOutput != null ? "success" : internalStatus);
-  const isPending = currentStatus === "submitted" || currentStatus === "confirming";
+  const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(getInitialStatus);
 
-  const deadlineRef = useRef<number>(0);
+  const currentStatus = statusProp ?? internalStatus;
+
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
 
   useEffect(() => {
+    const isPending = currentStatus === "submitted" || currentStatus === "confirming";
     if (!isPending) return;
-    deadlineRef.current = Date.now() + timeoutSeconds * 1000;
-    const timer = window.setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
-      setTimeLeft(remaining);
-      if (remaining <= 0) {
-        setInternalStatus("timeout");
-        window.clearInterval(timer);
-      }
+    const timeout = window.setTimeout(() => {
+      setInternalStatus("timeout");
+      setTimeLeft(0);
+    }, timeoutSeconds * 1000);
+    const interval = window.setInterval(() => {
+      setTimeLeft((previous) => Math.max(previous - 1, 0));
     }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isPending, timeoutSeconds]);
-
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [currentStatus, timeoutSeconds]);
 
   const isTimedOut = currentStatus === "timeout";
   const isFailed = currentStatus === "failed";
+  const isPending = currentStatus === "submitted" || currentStatus === "confirming";
 
   const expectedMinimumOutput = swap.toAmountExpected;
   const resolvedActualOutput = actualOutput ?? expectedMinimumOutput;
