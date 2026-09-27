@@ -340,6 +340,8 @@ export type AllowanceEntry = {
   spenderName?: string;
   amount: string;
   expirationDate?: string;
+  /** Soroban ledger sequence at which the allowance expires (issue #650). */
+  expirationLedger?: number;
   tokenCode?: string;
   tokenIssuer?: string;
 };

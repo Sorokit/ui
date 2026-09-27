@@ -12,6 +12,7 @@ export interface SorokitState {
   client: SorokitClient;
   address: string | null;
   walletName: string | null;
+  isHardware?: boolean;
   isConnected: boolean;
   isConnecting: boolean;
   isLoading: boolean;

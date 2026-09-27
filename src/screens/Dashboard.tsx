@@ -1,6 +1,7 @@
 import { type ComponentType, lazy, Suspense, useCallback, useEffect, useState } from "react";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
@@ -49,6 +50,7 @@ const PAGE_TITLES: Record<NavSection, string> = {
   farming: "Yield Farming — Sorokit",
   budget: "Budget — Sorokit",
   nfts: "NFTs — Sorokit",
+  governance: "Governance — Sorokit",
 };
 
 const SCREENS: Record<NavSection, ComponentType> = {
@@ -62,6 +64,7 @@ const SCREENS: Record<NavSection, ComponentType> = {
   farming: YieldFarmingScreen,
   budget: BudgetScreen,
   nfts: NFTScreen,
+  governance: GovernanceDashboard,
 };
 
 const SCREEN_LABELS: Record<NavSection, string> = {
@@ -75,6 +78,7 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   farming: "Yield Farming",
   budget: "Budget",
   nfts: "NFTs",
+  governance: "Governance",
 };
 
 /**

@@ -10,6 +10,7 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
 import { AccountCardCompact } from "@/components/AccountCard";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,8 @@ export type NavSection =
   | "charts"
   | "farming"
   | "budget"
-  | "nfts";
+  | "nfts"
+  | "governance";
 
 const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "wallet", label: "Wallet", icon: Wallet01Icon },
@@ -42,12 +44,24 @@ const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "farming", label: "Yield Farming", icon: CodeIcon },
   { id: "budget", label: "Budget Manager", icon: Wallet01Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
+  { id: "governance", label: "Governance", icon: User02Icon },
 ];
 
+export function isItemActive(itemId: string, active: string): boolean {
+  if (!active || !itemId) return false;
+  if (active === itemId) return true;
+  const cleanId = itemId.replace(/^\//, "");
+  const cleanActive = active.replace(/^\//, "");
+  if (cleanActive === cleanId) return true;
+  return cleanActive.startsWith(cleanId + "/");
+}
+
 interface SidebarProps {
-  active: NavSection;
+  active: NavSection | string;
+  /** Fired before closing the drawer so the destination screen can mount while the menu dismisses. */
   onNavigate: (s: NavSection) => void;
   open: boolean;
+  /** Called immediately after navigation when a section is selected. */
   onClose: () => void;
 }
 
@@ -72,6 +86,17 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       onNavigate(saved as NavSection);
     }
   }, [active, onNavigate]);
+
+  // Lock background body scroll while mobile navigation drawer is active
+  useEffect(() => {
+    if (!open) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [open]);
 
   function handleNav(id: NavSection) {
     if (active === id) {
@@ -143,8 +168,17 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       {/* Mobile backdrop */}
       {open && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Close navigation"
           className="fixed inset-0 z-20 bg-black/60 lg:hidden"
           onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onClose();
+            }
+          }}
         />
       )}
 
@@ -219,37 +253,52 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {NAV.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleNav(item.id)}
-                aria-current={active === item.id ? "page" : undefined}
-                className={cn(
-                  "relative w-full flex items-center rounded-lg transition-all cursor-pointer overflow-hidden",
-                  "text-[13px] focus-visible:outline-none mb-0.5",
-                  collapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2.5 text-left",
-                  active === item.id
-                    ? "bg-surface-3 text-ink font-medium border border-line-2"
-                    : "text-ink-3 hover:bg-surface-2 hover:text-ink-2 border border-transparent",
-                )}
-              >
-                {/* Active indicator bar */}
-                {active === item.id && (
-                  <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-brand rounded-r-full" />
-                )}
-                <HugeiconsIcon
-                  icon={item.icon}
-                  size={16}
-                  color="currentColor"
-                  strokeWidth={1.5}
+            {NAV.map((item) => {
+              const activeItem = isItemActive(item.id, active);
+              const navButton = (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleNav(item.id)}
+                  aria-label={collapsed ? item.label : undefined}
+                  aria-current={activeItem ? "page" : undefined}
                   className={cn(
-                    "shrink-0",
-                    active === item.id ? "text-brand" : "",
+                    "relative w-full flex items-center rounded-lg transition-all cursor-pointer overflow-hidden",
+                    "text-[13px] focus-visible:outline-none mb-0.5",
+                    collapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2.5 text-left",
+                    activeItem
+                      ? "bg-surface-3 text-ink font-medium border border-line-2"
+                      : "text-ink-3 hover:bg-surface-2 hover:text-ink-2 border border-transparent",
                   )}
-                />
-                {!collapsed && item.label}
-              </button>
-            ))}
+                >
+                  {/* Active indicator bar */}
+                  {activeItem && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-brand rounded-r-full" />
+                  )}
+                  <HugeiconsIcon
+                    icon={item.icon}
+                    size={16}
+                    color="currentColor"
+                    strokeWidth={1.5}
+                    className={cn(
+                      "shrink-0",
+                      activeItem ? "text-brand" : "",
+                    )}
+                  />
+                  {!collapsed && item.label}
+                </button>
+              );
+
+              if (collapsed) {
+                return (
+                  <Tooltip key={item.id} content={item.label} side="right">
+                    {navButton}
+                  </Tooltip>
+                );
+              }
+
+              return navButton;
+            })}
           </div>
         </nav>
 
@@ -268,3 +317,4 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
     </>
   );
 }
+

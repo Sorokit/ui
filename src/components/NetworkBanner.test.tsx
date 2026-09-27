@@ -96,6 +96,7 @@ describe("NetworkBanner", () => {
 
     const textSpan = container.querySelector(".text-orange");
     expect(textSpan).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
   });
 
   it("renders a visible banner on futurenet", () => {

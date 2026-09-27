@@ -18,6 +18,7 @@ export const SECTION_PATHS: Record<NavSection, string> = {
   farming: "/farming",
   budget: "/budget",
   nfts: "/nfts",
+  governance: "/governance",
 };
 
 const PATH_TO_SECTION: Record<string, NavSection> = Object.fromEntries(

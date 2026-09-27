@@ -260,7 +260,8 @@ export function NetworkBanner({
   return (
     <div
       ref={bannerRef}
-      role="region"
+      role="status"
+      aria-live="polite"
       aria-label="Network status banner"
       data-testid="network-banner"
       className={cn(

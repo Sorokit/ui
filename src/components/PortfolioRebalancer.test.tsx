@@ -229,7 +229,7 @@ describe("PortfolioRebalancer — tab navigation", () => {
     render(<PortfolioRebalancer />);
     await waitFor(() => screen.getByRole("tab", { name: /history/i }));
     fireEvent.click(screen.getByRole("tab", { name: /history/i }));
-    expect(screen.getByText(/no rebalancing history yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no rebalance(ing)? history yet/i)).toBeInTheDocument();
   });
 
   it("Preview tab navigates back to Allocations via button", async () => {
@@ -523,7 +523,7 @@ describe("PortfolioRebalancer — history empty state", () => {
     render(<PortfolioRebalancer />);
     await waitFor(() => screen.getByRole("tab", { name: /history/i }));
     fireEvent.click(screen.getByRole("tab", { name: /history/i }));
-    expect(screen.getByText(/no rebalancing history yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no rebalance(ing)? history yet/i)).toBeInTheDocument();
   });
 
   it("history tab badge is not shown initially (no count)", async () => {

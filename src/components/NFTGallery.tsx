@@ -22,7 +22,8 @@ import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { Nft, NftCollection } from "@/lib/client";
-import { cn } from "@/lib/utils";
+import { IPFS_GATEWAY_COUNT, ipfsContentPath, resolveIpfsUrl } from "@/lib/ipfs";
+import { cn, validateStellarAddress } from "@/lib/utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +60,53 @@ function rarityLabel(nft: Nft): { label: string; variant: "error" | "warning" | 
 
 const ALL_COLLECTION_ID = "__all__";
 
+/** Stellar strkey check for a G... account address. */
+function isValidAddress(address: string): boolean {
+  return validateStellarAddress(address.trim());
+}
+
+function NftImage({
+  image,
+  alt,
+  className,
+  fallback,
+}: {
+  image?: string;
+  alt: string;
+  className?: string;
+  fallback: React.ReactNode;
+}) {
+  const source = image?.trim() ?? "";
+  const isIpfs = ipfsContentPath(source) !== null;
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [trackedSource, setTrackedSource] = useState(source);
+
+  if (trackedSource !== source) {
+    setTrackedSource(source);
+    setAttempt(0);
+    setFailed(false);
+  }
+
+  if (!source || failed) return <>{fallback}</>;
+
+  return (
+    <img
+      src={isIpfs ? resolveIpfsUrl(source, attempt) : source}
+      alt={alt}
+      loading="lazy"
+      onError={() => {
+        if (isIpfs && attempt + 1 < IPFS_GATEWAY_COUNT) {
+          setAttempt((current) => current + 1);
+          return;
+        }
+        setFailed(true);
+      }}
+      className={className}
+    />
+  );
+}
+
 // ─── NFTCard ──────────────────────────────────────────────────────────────────
 
 interface NFTCardProps {
@@ -71,9 +119,7 @@ interface NFTCardProps {
 }
 
 export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: NFTCardProps) {
-  const [imgError, setImgError] = useState(false);
   const rarity = rarityLabel(nft);
-  const hasImage = !!nft.metadata.image && !imgError;
 
   return (
     <article
@@ -110,20 +156,17 @@ export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: N
 
       {/* Image */}
       <div className="aspect-square w-full bg-surface-2 flex items-center justify-center overflow-hidden">
-        {hasImage ? (
-          <img
-            src={nft.metadata.image}
-            alt={nft.metadata.name}
-            loading="lazy"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center gap-2 text-ink-4">
-            <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
-            <span className="text-[10px]">No image</span>
-          </div>
-        )}
+        <NftImage
+          image={nft.metadata.image}
+          alt={nft.metadata.name}
+          className="w-full h-full object-cover"
+          fallback={
+            <div className="flex flex-col items-center gap-2 text-ink-4">
+              <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
+              <span className="text-[10px]">No image</span>
+            </div>
+          }
+        />
       </div>
 
       {/* Info */}
@@ -237,7 +280,7 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
 
   const validate = () => {
     if (!recipient.trim()) { setRecipientError("Recipient address is required"); return false; }
-    if (!recipient.trim().startsWith("G") || recipient.trim().length < 56) {
+    if (!isValidAddress(recipient)) {
       setRecipientError("Enter a valid Stellar address (starts with G, 56 chars)");
       return false;
     }
@@ -308,7 +351,15 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
                 placeholder="GABC…"
                 value={recipient}
                 error={recipientError}
-                onChange={(e) => { setRecipient(e.target.value); setRecipientError(""); }}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setRecipient(next);
+                  if (!next.trim() || isValidAddress(next)) {
+                    setRecipientError("");
+                    return;
+                  }
+                  setRecipientError("Enter a valid Stellar address (starts with G, 56 chars)");
+                }}
               />
               {txError && (
                 <p role="alert" className="text-[12px] text-red">{txError}</p>
@@ -317,7 +368,13 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
                 <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={loading}>
                   Cancel
                 </Button>
-                <Button size="md" className="flex-1" loading={loading} onClick={() => void handleSend()}>
+                <Button
+                  size="md"
+                  className="flex-1"
+                  loading={loading}
+                  disabled={loading || !isValidAddress(recipient)}
+                  onClick={() => void handleSend()}
+                >
                   Send
                 </Button>
               </div>
@@ -492,7 +549,7 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
 
   const validate = () => {
     if (!recipient.trim()) { setRecipientError("Recipient address is required"); return false; }
-    if (!recipient.trim().startsWith("G") || recipient.trim().length < 56) {
+    if (!isValidAddress(recipient)) {
       setRecipientError("Enter a valid Stellar address");
       return false;
     }
@@ -553,7 +610,15 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
               value={recipient}
               error={recipientError}
               disabled={loading}
-              onChange={(e) => { setRecipient(e.target.value); setRecipientError(""); }}
+              onChange={(e) => {
+                const next = e.target.value;
+                setRecipient(next);
+                if (!next.trim() || isValidAddress(next)) {
+                  setRecipientError("");
+                  return;
+                }
+                setRecipientError("Enter a valid Stellar address");
+              }}
             />
             {loading && (
               <div role="status" aria-live="polite" className="flex flex-col gap-1.5">
@@ -574,7 +639,13 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
               <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={loading}>
                 Cancel
               </Button>
-              <Button size="md" className="flex-1" loading={loading} onClick={() => void handleBulkSend()}>
+              <Button
+                size="md"
+                className="flex-1"
+                loading={loading}
+                disabled={loading || !isValidAddress(recipient)}
+                onClick={() => void handleBulkSend()}
+              >
                 Send all
               </Button>
             </div>
@@ -596,10 +667,8 @@ interface NFTDetailDialogProps {
 }
 
 function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialogProps) {
-  const [imgError, setImgError] = useState(false);
   if (!nft) return null;
   const rarity = rarityLabel(nft);
-  const hasImage = !!nft.metadata.image && !imgError;
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -611,13 +680,16 @@ function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialog
         >
           {/* Image */}
           <div className="aspect-square w-full bg-surface-2 overflow-hidden">
-            {hasImage ? (
-              <img src={nft.metadata.image} alt={nft.metadata.name} onError={() => setImgError(true)} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-ink-4">
-                <HugeiconsIcon icon={Album01Icon} size={48} color="currentColor" strokeWidth={0.8} />
-              </div>
-            )}
+            <NftImage
+              image={nft.metadata.image}
+              alt={nft.metadata.name}
+              className="w-full h-full object-cover"
+              fallback={
+                <div className="w-full h-full flex items-center justify-center text-ink-4">
+                  <HugeiconsIcon icon={Album01Icon} size={48} color="currentColor" strokeWidth={0.8} />
+                </div>
+              }
+            />
           </div>
 
           <div className="p-5 flex flex-col gap-4">

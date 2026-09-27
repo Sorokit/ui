@@ -69,6 +69,40 @@ const DEFAULT_MAX_VALUE_LENGTH = 200;
 const TOPIC_PREVIEW_COUNT = 3;
 const HIGHLIGHT_DURATION_MS = 1500;
 
+// Issue #732: persist the last-seen ledger per contract so navigating away and
+// back (an unmount/remount, not just a re-render) resumes where the feed left
+// off instead of silently skipping whatever arrived while it was hidden.
+const FROM_LEDGER_STORAGE_PREFIX = "sorokit:contract-event-feed:fromLedger:";
+
+function fromLedgerStorageKey(contractId: string): string {
+  return `${FROM_LEDGER_STORAGE_PREFIX}${contractId}`;
+}
+
+function readPersistedFromLedger(contractId: string): number | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(fromLedgerStorageKey(contractId));
+    return raw === null ? undefined : Number(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+function persistFromLedger(contractId: string, ledger: number): void {
+  try {
+    window.sessionStorage.setItem(fromLedgerStorageKey(contractId), String(ledger));
+  } catch {
+    /* sessionStorage unavailable (e.g. private browsing) — resume is best-effort */
+  }
+}
+
+function clearPersistedFromLedger(contractId: string): void {
+  try {
+    window.sessionStorage.removeItem(fromLedgerStorageKey(contractId));
+  } catch {
+    /* ignore */
+  }
+}
+
 function formatRelativeTime(fromMs: number, nowMs: number): string {
   const diff = Math.max(0, nowMs - fromMs);
   if (diff < 5000) return "Updated just now";
@@ -131,6 +165,7 @@ function TopicTag({ topic }: { topic: string }) {
         type="button"
         onClick={handleCopy}
         title="Copy topic"
+        aria-label={copied ? "Topic copied" : "Copy topic"}
         className="opacity-0 group-hover:opacity-100 hover:text-ink-1 transition-opacity cursor-pointer p-0.5"
       >
         <HugeiconsIcon
@@ -263,6 +298,14 @@ export function ContractEventFeed({
   const [newEventIds, setNewEventIds] = useState<Set<string>>(new Set());
   const prevEventIdsRef = useRef<Set<string> | null>(null);
 
+  // Issue #732: the ledger actually used for `getEvents`. Seeded from the
+  // `fromLedger` prop, falling back to whatever was persisted for this
+  // contract by a previous mount — this is what makes an unmount/remount
+  // resume instead of resetting to the prop default.
+  const [effectiveFromLedger, setEffectiveFromLedger] = useState<number | undefined>(
+    () => fromLedger ?? readPersistedFromLedger(contractId),
+  );
+
   // Drop the previous contract's events as soon as `contractId` changes.
   // `load` only replaces `events` once the new fetch succeeds, so without this
   // the old contract's events stay on screen — and survive outright if the new
@@ -270,11 +313,23 @@ export function ContractEventFeed({
   // frame is committed.
   const [prevContractId, setPrevContractId] = useState(contractId);
   if (prevContractId !== contractId) {
+    // The old contract's cursor is no longer relevant once we've moved on.
+    clearPersistedFromLedger(prevContractId);
     setPrevContractId(contractId);
     setEvents([]);
     setError(null);
     setLastUpdatedAt(null);
     setNewEventIds(new Set());
+    setEffectiveFromLedger(fromLedger ?? readPersistedFromLedger(contractId));
+  }
+
+  // An explicit `fromLedger` prop change (as opposed to a contractId switch)
+  // always overrides whatever was persisted — the caller asked for a specific
+  // ledger, so honor it exactly, mirroring the `prevContractId` pattern above.
+  const [prevFromLedgerProp, setPrevFromLedgerProp] = useState(fromLedger);
+  if (prevFromLedgerProp !== fromLedger) {
+    setPrevFromLedgerProp(fromLedger);
+    setEffectiveFromLedger(fromLedger ?? readPersistedFromLedger(contractId));
   }
 
   // Issue #442: `live` is seeded from `pollInterval` at mount, so a runtime
@@ -306,7 +361,7 @@ export function ContractEventFeed({
       const { data, error: err } = await client.soroban.getEvents(
         contractId,
         limit,
-        fromLedger,
+        effectiveFromLedger,
       );
       if (isStale()) return;
       if (err) {
@@ -315,6 +370,14 @@ export function ContractEventFeed({
         return;
       }
       const newData = data ?? [];
+      if (newData.length > 0) {
+        // Issue #732: remember the furthest ledger we've seen for this
+        // contract so a future remount can resume past it instead of
+        // re-requesting the default window and silently missing nothing —
+        // just re-fetching what's already been shown.
+        const maxLedger = Math.max(...newData.map((e) => e.ledger));
+        persistFromLedger(contractId, maxLedger + 1);
+      }
       if (prevEventIdsRef.current !== null) {
         const baseline = prevEventIdsRef.current;
         const addedIds = newData
@@ -343,7 +406,7 @@ export function ContractEventFeed({
       // request that superseded it.
       if (!isStale()) setLoading(false);
     }
-  }, [client, contractId, limit, fromLedger]);
+  }, [client, contractId, limit, effectiveFromLedger]);
 
   // Issue #442: the `setEvents([])` effect that used to sit here (behind a
   // react-hooks/set-state-in-effect suppression) duplicated the render-phase
@@ -453,6 +516,7 @@ export function ContractEventFeed({
             <button
               onClick={() => setLive((l) => !l)}
               aria-pressed={live}
+              aria-label={live ? "Live, pause updates" : "Paused, resume updates"}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${live ? "bg-success-dim text-green border-success-dim-strong" : "bg-surface-2 text-ink-3 border-line-2"}`}
             >
               <span
@@ -491,8 +555,11 @@ export function ContractEventFeed({
             Export JSON
           </button>
           <button
+            type="button"
             onClick={() => void load()}
             disabled={loading}
+            aria-label="Refresh"
+            title="Refresh"
             className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
           >
             <HugeiconsIcon

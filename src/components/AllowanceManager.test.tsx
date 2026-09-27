@@ -5,7 +5,7 @@ import { useSorokit } from "@/context/useSorokit";
 import type { AllowanceEntry, SorokitClient } from "@/lib/client";
 import { getClient } from "@/lib/client";
 
-import { AllowanceManager } from "./AllowanceManager";
+import { AllowanceManager, formatCurrency, isExpired } from "./AllowanceManager";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -303,5 +303,35 @@ describe("AllowanceManager", () => {
     await waitFor(() => {
       expect(getClient().allowance.getAllowances).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("marks a ledger-expired allowance as EXPIRED", async () => {
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, expirationDate: undefined, expirationLedger: 500 },
+    ]);
+    render(<AllowanceManager currentLedger={500} />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText("EXPIRED")).toBeInTheDocument();
+    });
+  });
+});
+
+describe("AllowanceManager helpers", () => {
+  it("formats long token amounts without floating-point truncation", () => {
+    expect(formatCurrency("12345678901234567890.123456789", "USDC")).toBe(
+      "12,345,678,901,234,567,890.1234567",
+    );
+  });
+
+  it("detects timestamp-based expiry", () => {
+    expect(isExpired("2000-01-01T00:00:00Z")).toBe(true);
+    expect(isExpired("2999-01-01T00:00:00Z")).toBe(false);
+  });
+
+  it("detects ledger-based expiry", () => {
+    expect(isExpired(undefined, 1000, 1000)).toBe(true);
+    expect(isExpired(undefined, 1000, 999)).toBe(false);
   });
 });

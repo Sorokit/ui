@@ -15,7 +15,16 @@ import { cn } from "@/lib/utils";
 
 interface AllowanceManagerProps {
   className?: string;
+  /** Current Soroban ledger sequence, used to evaluate ledger-based expiry. */
+  currentLedger?: number;
 }
+
+/**
+ * Valid 56-character Stellar testnet account address used when no wallet
+ * address is available. The previous fallback was 55 characters long, which
+ * made the RPC reject it (issue #650).
+ */
+const FALLBACK_ADDRESS = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
 
 function formatAssetName(entry: AllowanceEntry): string {
   if (entry.tokenCode && entry.tokenCode !== "XLM") {
@@ -27,18 +36,35 @@ function formatAssetName(entry: AllowanceEntry): string {
   return entry.asset;
 }
 
-function formatCurrency(amount: string, tokenCode?: string): string {
+export function formatCurrency(amount: string, tokenCode?: string): string {
   if (!tokenCode || tokenCode === "XLM") {
     return amount;
   }
-  const num = parseFloat(amount);
-  if (isNaN(num)) return amount;
-  return num.toFixed(2);
+  if (!amount) return amount;
+  const [intPart, fracPart] = amount.split(".");
+  if (!intPart || !/^-?\d+$/.test(intPart)) return amount;
+  // Issue #650: group the digits as a string instead of routing the balance
+  // through parseFloat, which truncated 7-decimal stroops and 128-bit values.
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (fracPart === undefined) return grouped;
+  const trimmed = fracPart.slice(0, 7);
+  return trimmed ? `${grouped}.${trimmed}` : grouped;
 }
 
-function isExpired(expirationDate?: string): boolean {
+export function isExpired(
+  expirationDate?: string,
+  expirationLedger?: number,
+  currentLedger?: number,
+): boolean {
+  // Issue #650: allowances can expire by Soroban ledger sequence rather than by
+  // wall-clock time — check the ledger first when both values are known.
+  if (typeof expirationLedger === "number" && typeof currentLedger === "number") {
+    return currentLedger >= expirationLedger;
+  }
   if (!expirationDate) return false;
-  return new Date(expirationDate) < new Date();
+  const time = new Date(expirationDate).getTime();
+  if (Number.isNaN(time)) return false;
+  return time < Date.now();
 }
 
 function truncateAddress(address: string, start = 8, end = 6): string {
@@ -46,7 +72,7 @@ function truncateAddress(address: string, start = 8, end = 6): string {
   return `${address.slice(0, start)}...${address.slice(-end)}`;
 }
 
-export function AllowanceManager({ className }: AllowanceManagerProps) {
+export function AllowanceManager({ className, currentLedger }: AllowanceManagerProps) {
   const { address, isConnected, client } = useSorokit();
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -54,7 +80,7 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [processing, setProcessing] = useState<Record<string, 'increase' | 'decrease' | 'revoke' | null>>({});
 
-  const sourceAccount = address || "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN";
+  const sourceAccount = address || FALLBACK_ADDRESS;
 
   const loadAllowances = useCallback(async () => {
     try {
@@ -191,7 +217,7 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
   }
 
   const renderAllowanceCard = (entry: AllowanceEntry) => {
-    const isExp = isExpired(entry.expirationDate);
+    const isExp = isExpired(entry.expirationDate, entry.expirationLedger, currentLedger);
     const isProcessingIncrease = processing[`${entry.asset}-${entry.spender}`] === 'increase';
     const isProcessingDecrease = processing[`${entry.asset}-${entry.spender}`] === 'decrease';
     const isProcessingRevoke = processing[`${entry.asset}-${entry.spender}`] === 'revoke';

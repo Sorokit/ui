@@ -12,4 +12,5 @@ export const SCREEN_LABELS: Record<NavSection, { title: string; sub: string }> =
     charts: { title: "Analytics & Charts", sub: "Market and balance analytics" },
     farming: { title: "Yield Farming", sub: "Manage liquidity and rewards" },
     budget: { title: "Budgeting", sub: "Track spending and budget limits" },
+    governance: { title: "Governance", sub: "Vote on proposals and delegate" },
   };

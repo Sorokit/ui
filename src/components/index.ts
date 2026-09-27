@@ -240,6 +240,15 @@ export { TransactionFeeCalculator } from "./TransactionFeeCalculator";
 export type { ContractSpec } from "./ContractInteractionBuilder";
 export { ContractInteractionBuilder } from "./ContractInteractionBuilder";
 
+// Governance
+export type {
+  GovernanceDashboardProps,
+  GovernanceProposal,
+  ProposalStatus,
+  VoteChoice,
+} from "./GovernanceDashboard";
+export { GovernanceDashboard } from "./GovernanceDashboard";
+
 // Account Balance Chart
 export { AccountBalanceChart } from "./AccountBalanceChart";
 

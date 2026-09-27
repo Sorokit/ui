@@ -37,7 +37,10 @@ function getStorage() {
     // Ignore storage access failures in non-browser or restricted environments.
   }
 
-  const shim = {
+  // Issue #654: return an in-memory shim instead of redefining
+  // `window.localStorage`, which mutated the global and contaminated JSDOM
+  // test suites and other components.
+  return {
     getItem: (key: string) => memoryStorage.get(key) ?? null,
     setItem: (key: string, value: string) => {
       memoryStorage.set(key, value);
@@ -49,20 +52,21 @@ function getStorage() {
       memoryStorage.clear();
     },
   };
-
-  try {
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      value: shim,
-    });
-  } catch {
-    // Ignore if the environment prevents overriding the storage object.
-  }
-
-  return shim;
 }
 
-function createSigner(id: string): Signer {
+let signerSequence = 0;
+
+/** Issue #654: generate collision-free signer ids so removing a middle signer
+ *  and adding a new one cannot produce duplicate React keys. */
+function uniqueSignerId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `signer-${crypto.randomUUID()}`;
+  }
+  signerSequence += 1;
+  return `signer-${Date.now()}-${signerSequence}`;
+}
+
+function createSigner(id: string = uniqueSignerId()): Signer {
   return { id, address: "", weight: 1, signed: false };
 }
 
@@ -87,7 +91,7 @@ function validateThreshold(signers: Signer[], threshold: number) {
 
 export function MultiSigTransactionBuilder() {
   const [step, setStep] = useState<Step>(0);
-  const [signers, setSigners] = useState<Signer[]>([createSigner("signer-1")]);
+  const [signers, setSigners] = useState<Signer[]>([createSigner()]);
   const [threshold, setThreshold] = useState(1);
   const [xdr, setXdr] = useState("<tx:xdr:placeholder>");
   const [status, setStatus] = useState("Draft");
@@ -108,7 +112,7 @@ export function MultiSigTransactionBuilder() {
   }
 
   function addSigner() {
-    setSigners((current) => [...current, createSigner(`signer-${current.length + 1}`)]);
+    setSigners((current) => [...current, createSigner()]);
   }
 
   function removeSigner(index: number) {
@@ -145,7 +149,7 @@ export function MultiSigTransactionBuilder() {
     }
     try {
       const parsed = JSON.parse(raw) as BuilderState;
-      setSigners(parsed.signers ?? [createSigner("signer-1")]);
+      setSigners(parsed.signers ?? [createSigner()]);
       setThreshold(parsed.threshold ?? 1);
       setXdr(parsed.xdr ?? "<tx:xdr:placeholder>");
       setStatus(parsed.status ?? "Draft");
@@ -289,7 +293,13 @@ export function MultiSigTransactionBuilder() {
       <div className="flex flex-wrap items-center justify-between border-t border-line px-6 py-4">
         <div className="flex gap-2">
           <Button variant="secondary" size="sm" onClick={prevStep} disabled={step === 0}>Previous</Button>
-          <Button size="sm" onClick={nextStep} disabled={step === 3}>Next</Button>
+          <Button
+            size="sm"
+            onClick={nextStep}
+            disabled={step === 3 || (step === 0 && !valid)}
+          >
+            Next
+          </Button>
         </div>
         <p className="text-[12px] text-ink-3">Last updated {formatTimestamp(new Date().toISOString())}</p>
       </div>

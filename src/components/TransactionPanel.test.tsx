@@ -402,6 +402,98 @@ describe("TransactionPanel", () => {
     expect(submitBtn).not.toBeDisabled();
   });
 
+  describe("live balance warning badge (#686)", () => {
+    it("shows a live warning badge once the amount exceeds the spendable balance", async () => {
+      const mockSubmit = vi.fn();
+      const feeImpl = vi
+        .fn()
+        .mockResolvedValue({ data: { baseFee: "100", recommended: "100" }, error: null });
+      mockGetClient(mockSubmit, feeImpl);
+      vi.mocked(useSorokit).mockReturnValue({
+        address: MOCK_SOURCE,
+        client: vi.mocked(getClient)(),
+        isConnected: true,
+        balances: [{ asset: "XLM", balance: "10" }],
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<TransactionPanel />);
+      await waitFor(() => expect(feeImpl).toHaveBeenCalled());
+
+      const amountInput = screen.getByLabelText("Amount (XLM)");
+      fireEvent.change(amountInput, { target: { value: "15" } });
+
+      expect(
+        await screen.findByTestId("balance-warning-badge"),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show the warning badge when the amount is within the spendable balance", async () => {
+      const mockSubmit = vi.fn();
+      const feeImpl = vi
+        .fn()
+        .mockResolvedValue({ data: { baseFee: "100", recommended: "100" }, error: null });
+      mockGetClient(mockSubmit, feeImpl);
+
+      render(<TransactionPanel />);
+      await waitFor(() => expect(feeImpl).toHaveBeenCalled());
+
+      const amountInput = screen.getByLabelText("Amount (XLM)");
+      fireEvent.change(amountInput, { target: { value: "5" } });
+
+      expect(screen.queryByTestId("balance-warning-badge")).not.toBeInTheDocument();
+    });
+
+    it("does not show the warning badge before the amount field has been touched", async () => {
+      const mockSubmit = vi.fn();
+      const feeImpl = vi
+        .fn()
+        .mockResolvedValue({ data: { baseFee: "100", recommended: "100" }, error: null });
+      mockGetClient(mockSubmit, feeImpl);
+      vi.mocked(useSorokit).mockReturnValue({
+        address: MOCK_SOURCE,
+        client: vi.mocked(getClient)(),
+        isConnected: true,
+        balances: [{ asset: "XLM", balance: "10" }],
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<TransactionPanel defaultAmount="15" />);
+      await waitFor(() => expect(feeImpl).toHaveBeenCalled());
+
+      expect(screen.queryByTestId("balance-warning-badge")).not.toBeInTheDocument();
+    });
+  });
+
+  it("treats an amount that leaves no room for the network fee as insufficient (#686)", async () => {
+    const mockSubmit = vi.fn();
+    const feeImpl = vi
+      .fn()
+      .mockResolvedValue({ data: { baseFee: "10000000", recommended: "10000000" }, error: null }); // 1 XLM fee
+    mockGetClient(mockSubmit, feeImpl);
+    vi.mocked(useSorokit).mockReturnValue({
+      address: MOCK_SOURCE,
+      client: vi.mocked(getClient)(),
+      isConnected: true,
+      balances: [{ asset: "XLM", balance: "10" }],
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<TransactionPanel />);
+    await waitFor(() => expect(feeImpl).toHaveBeenCalled());
+
+    const amountInput = screen.getByLabelText("Amount (XLM)");
+    const submitBtn = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+
+    // 10 XLM balance minus a 1 XLM fee leaves 9 XLM spendable; requesting
+    // all 10 must be rejected even though it's within the raw balance.
+    fireEvent.change(amountInput, { target: { value: "10" } });
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/amount \+ network fee exceeds available balance/i),
+      ).toBeInTheDocument();
+    });
+    expect(submitBtn).toBeDisabled();
+  });
+
   it("allows submission when amount is within XLM balance", async () => {
     const mockSubmit = vi.fn().mockResolvedValue({ data: { hash: "txhash123", ledger: 100 }, error: null });
     mockGetClient(mockSubmit);
@@ -916,38 +1008,60 @@ describe("TransactionPanel", () => {
   });
 
   describe("memo character counter (#351)", () => {
-    it("shows the counter in the default (non-red) color under 28 characters", () => {
+    it("shows the counter in the default (non-red) color under 28 bytes", () => {
       render(<TransactionPanel />);
       const memoInput = screen.getByLabelText("Memo (optional)");
       fireEvent.change(memoInput, { target: { value: "a".repeat(27) } });
 
-      const counter = screen.getByText("27/28");
+      const counter = screen.getByText("27/28 bytes");
       expect(counter.className).toContain("text-ink-3");
       expect(counter.className).not.toContain("text-red");
     });
 
-    it("turns the counter red at exactly 28 characters", () => {
+    it("turns the counter red at exactly 28 bytes", () => {
       render(<TransactionPanel />);
       const memoInput = screen.getByLabelText("Memo (optional)");
       fireEvent.change(memoInput, { target: { value: "a".repeat(28) } });
 
-      const counter = screen.getByText("28/28");
-      expect(counter.className).toContain("text-red");
-    });
-
-    it("stays red beyond 28 characters", () => {
-      render(<TransactionPanel />);
-      const memoInput = screen.getByLabelText("Memo (optional)");
-      fireEvent.change(memoInput, { target: { value: "a".repeat(35) } });
-
-      const counter = screen.getByText("35/28");
+      const counter = screen.getByText("28/28 bytes");
       expect(counter.className).toContain("text-red");
     });
 
     it("does not render a counter for memo type ID or None", () => {
       render(<TransactionPanel />);
       fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "none" } });
-      expect(screen.queryByText(/^\d+\/28$/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^\d+\/28 bytes$/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("28-byte memo enforcement (#686)", () => {
+    it("prevents typing more than 28 bytes for a text memo", () => {
+      render(<TransactionPanel />);
+      const memoInput = screen.getByLabelText("Memo (optional)") as HTMLInputElement;
+      fireEvent.change(memoInput, { target: { value: "a".repeat(40) } });
+
+      expect(memoInput.value).toHaveLength(28);
+      expect(screen.getByText("28/28 bytes")).toBeInTheDocument();
+    });
+
+    it("truncates by UTF-8 byte count, not character count, for multi-byte memos", () => {
+      render(<TransactionPanel />);
+      const memoInput = screen.getByLabelText("Memo (optional)") as HTMLInputElement;
+      // Each "é" is 2 bytes, so 20 of them (40 bytes) must truncate to 14
+      // characters (28 bytes) — not 28 characters (56 bytes).
+      fireEvent.change(memoInput, { target: { value: "é".repeat(20) } });
+
+      expect(memoInput.value).toBe("é".repeat(14));
+      expect(screen.getByText("28/28 bytes")).toBeInTheDocument();
+    });
+
+    it("does not truncate an ID memo, only text memos", () => {
+      render(<TransactionPanel />);
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "id" } });
+      const memoInput = screen.getByLabelText("Memo ID") as HTMLInputElement;
+      fireEvent.change(memoInput, { target: { value: "123456789012345678901234567890" } });
+
+      expect(memoInput.value).toBe("123456789012345678901234567890");
     });
   });
 

@@ -129,6 +129,21 @@ describe("AccountBalanceChart", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows an accessible empty state when the current asset has no history", () => {
+    vi.mocked(useSorokit).mockReturnValue(mockUseSorokit({ isConnected: true }));
+    render(
+      <AccountBalanceChart
+        balanceHistory={[
+          { asset: "XLM", color: "#55852b", data: [] },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", { name: /No balance history available/i }),
+    ).toBeInTheDocument();
+  });
+
   it("displays fallback simulated data when no history provided", () => {
     vi.mocked(useSorokit).mockReturnValue(
       mockUseSorokit({

@@ -35,9 +35,10 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { formatXlm, STROOPS_PER_XLM } from "@/lib/staking";
+import { STROOPS_PER_XLM } from "@/lib/staking";
 import { truncateAddress } from "@/lib/utils";
 
 export interface TransactionOperationSummary {
@@ -79,10 +80,33 @@ export interface TransactionConfirmModalProps {
   isSigning?: boolean;
 }
 
+function groupIntegerDigits(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Convert stroops to an XLM label with integer division so values past
+ * Number.MAX_SAFE_INTEGER keep every digit.
+ */
 function stroopsToXlmLabel(stroops: string): string {
-  const num = Number(stroops);
-  if (!Number.isFinite(num)) return "—";
-  return formatXlm(num / STROOPS_PER_XLM, 7);
+  const trimmed = stroops.trim();
+  if (!/^\d+$/.test(trimmed)) return "—";
+
+  const value = BigInt(trimmed);
+  const scale = BigInt(STROOPS_PER_XLM);
+  const whole = value / scale;
+  const fraction = value % scale;
+  const wholeLabel = groupIntegerDigits(whole.toString());
+  if (fraction === 0n) return `${wholeLabel} XLM`;
+
+  const fractionLabel = fraction.toString().padStart(7, "0").replace(/0+$/, "");
+  return `${wholeLabel}.${fractionLabel} XLM`;
+}
+
+function signingFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "string" && error.trim()) return error;
+  return "Signing was rejected. Review the transaction and try again.";
 }
 
 export function TransactionConfirmModal({
@@ -92,11 +116,35 @@ export function TransactionConfirmModal({
   onCancel,
   isSigning = false,
 }: TransactionConfirmModalProps) {
+  const [submitting, setSubmitting] = useState(false);
+  const [signingError, setSigningError] = useState<string | null>(null);
+  const [trackedOpen, setTrackedOpen] = useState(open);
+
+  if (trackedOpen !== open) {
+    setTrackedOpen(open);
+    if (!open) setSigningError(null);
+  }
+
+  const showSigning = submitting || (isSigning && signingError === null);
+
+  const handleConfirm = async () => {
+    if (showSigning || !transaction) return;
+    setSigningError(null);
+    setSubmitting(true);
+    try {
+      await onConfirm();
+    } catch (error) {
+      setSigningError(signingFailureMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <Dialog.Root
       open={open && transaction !== null}
       onOpenChange={(next) => {
-        if (!next && !isSigning) onCancel();
+        if (!next && !showSigning) onCancel();
       }}
     >
       <Dialog.Portal>
@@ -114,7 +162,7 @@ export function TransactionConfirmModal({
                 type="button"
                 className="text-ink-4 hover:text-ink-2 transition-colors"
                 aria-label="Close"
-                disabled={isSigning}
+                disabled={showSigning}
               >
                 <HugeiconsIcon
                   icon={Cancel01Icon}
@@ -144,7 +192,10 @@ export function TransactionConfirmModal({
                         <p className="text-[11px] font-semibold text-ink-2">
                           {i + 1}. {op.type}
                         </p>
-                        <p className="text-[12px] text-ink mt-0.5 break-words">
+                        <p
+                          className="text-[12px] text-ink mt-0.5 max-w-full break-words"
+                          style={{ overflowWrap: "anywhere" }}
+                        >
                           {op.description}
                         </p>
                       </div>
@@ -201,24 +252,33 @@ export function TransactionConfirmModal({
             </>
           )}
 
+          {signingError && (
+            <p
+              role="alert"
+              className="mx-6 mt-3 rounded-lg border border-error-dim-strong bg-error-dim px-3 py-2 text-[12px] text-red"
+            >
+              {signingError}
+            </p>
+          )}
+
           <div className="flex gap-2 px-6 py-4 border-t border-line shrink-0">
             <Button
               variant="secondary"
               size="md"
               className="flex-1"
               onClick={onCancel}
-              disabled={isSigning}
+              disabled={showSigning}
             >
               Cancel
             </Button>
             <Button
               size="md"
               className="flex-1"
-              loading={isSigning}
-              disabled={!transaction}
-              onClick={() => void onConfirm()}
+              loading={showSigning}
+              disabled={!transaction || showSigning}
+              onClick={() => void handleConfirm()}
             >
-              {isSigning ? "Signing…" : "Confirm & Sign"}
+              {showSigning ? "Signing…" : "Confirm & Sign"}
             </Button>
           </div>
         </Dialog.Content>

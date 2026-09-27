@@ -329,6 +329,8 @@ interface AssetFilterProps {
   showNetworkFilter?: boolean;
   allowCustomAssets?: boolean;
   renderRow?: (asset: AssetItem, isFavorite: boolean) => ReactNode;
+  /** Called whenever a filter changes (or is cleared) so the parent can reset its page index. */
+  onPageReset?: () => void;
 }
 
 function AssetFilter({
@@ -339,6 +341,7 @@ function AssetFilter({
   className,
   countLabel,
   renderRow,
+  onPageReset,
 }: AssetFilterProps) {
   // ── State ──────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -354,6 +357,24 @@ function AssetFilter({
   const [addingCustom, setAddingCustom] = useState(false);
   const [customCode, setCustomCode] = useState("");
   const [customIssuer, setCustomIssuer] = useState("");
+
+  // Issue #664: clearing or changing filters must reset the parent's page index.
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    verifiedFilter !== "all" ||
+    networkFilter !== null ||
+    showFavoritesOnly ||
+    sortKey !== "default";
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setVerifiedFilter("all");
+    setNetworkFilter(null);
+    setShowFavoritesOnly(false);
+    setSortKey("default");
+    setFocusedIndex(-1);
+    onPageReset?.();
+  }, [onPageReset]);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const inputRef = useRef<HTMLInputElement>(null);
@@ -533,6 +554,35 @@ function AssetFilter({
     [filtered, focusedIndex, onSelect],
   );
 
+  // Issue #664: move focus into the sort popover and trap Tab / Escape inside it.
+  useEffect(() => {
+    if (!showSortDropdown) return;
+    sortDropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [showSortDropdown]);
+
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setShowSortDropdown(false);
+      sortBtnRef.current?.focus();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const nodes = sortDropdownRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!nodes || nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -577,7 +627,10 @@ function AssetFilter({
           ref={inputRef}
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            onPageReset?.();
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Search assets…"
           className="w-full rounded-lg border border-line bg-surface-2 h-9 pl-9 pr-9 text-[13px] text-ink placeholder:text-ink-4 outline-none transition-colors focus:border-line-2 focus:ring-1 focus:ring-brand-dim"
@@ -600,7 +653,10 @@ function AssetFilter({
           <button
             key={tab.key}
             type="button"
-            onClick={() => setVerifiedFilter(tab.key)}
+            onClick={() => {
+              setVerifiedFilter(tab.key);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
               verifiedFilter === tab.key
@@ -614,7 +670,10 @@ function AssetFilter({
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setShowFavoritesOnly((p) => !p)}
+            onClick={() => {
+              setShowFavoritesOnly((p) => !p);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full p-1.5 transition-colors",
               showFavoritesOnly
@@ -628,6 +687,15 @@ function AssetFilter({
               size={14}
             />
           </button>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-ink-4 hover:text-ink-2 transition-colors"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -637,7 +705,10 @@ function AssetFilter({
         <div className="flex flex-wrap gap-1.5 px-4 pb-2">
           <button
             type="button"
-            onClick={() => setNetworkFilter(null)}
+            onClick={() => {
+              setNetworkFilter(null);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
               !networkFilter
@@ -651,7 +722,10 @@ function AssetFilter({
             <button
               key={net}
               type="button"
-              onClick={() => setNetworkFilter(net)}
+              onClick={() => {
+                setNetworkFilter(net);
+                onPageReset?.();
+              }}
               className={cn(
                 "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                 networkFilter === net
@@ -685,6 +759,7 @@ function AssetFilter({
           {showSortDropdown && (
             <div
               ref={sortDropdownRef}
+              onKeyDown={handleDropdownKeyDown}
               className="absolute right-0 top-full z-10 mt-1 w-36 rounded-lg border border-line bg-surface shadow-lg"
             >
               {SORT_OPTIONS.map((opt) => (
@@ -694,6 +769,7 @@ function AssetFilter({
                   onClick={() => {
                     setSortKey(opt.key);
                     setShowSortDropdown(false);
+                    onPageReset?.();
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-surface-2",

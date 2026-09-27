@@ -9,9 +9,11 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle01Icon,
+  Copy01Icon,
   Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -119,8 +121,19 @@ interface SwapRowProps {
   error?: string | null;
 }
 
+const EXPLORER_TX_BASE = "https://stellar.expert/explorer/public/tx/";
+
 function SwapRow({ swap, index, status, txHash, error }: SwapRowProps) {
   const badge = statusBadge(status);
+  const [copied, setCopied] = useState(false);
+
+  function handleCopyHash() {
+    if (!txHash) return;
+    // Issue #657: swallow clipboard rejections so they never escape unhandled.
+    void Promise.resolve(navigator.clipboard?.writeText(txHash)).catch(() => {});
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
 
   return (
     <div
@@ -182,11 +195,35 @@ function SwapRow({ swap, index, status, txHash, error }: SwapRowProps) {
         <p className="pl-11 text-[11px] text-red">{error}</p>
       )}
 
-      {/* Tx hash */}
+      {/* Tx hash — copy + explorer link (issue #657) */}
       {status === "success" && txHash && (
-        <p className="pl-11 text-[10px] text-ink-3 font-mono break-all">
-          {txHash}
-        </p>
+        <div className="pl-11 flex flex-wrap items-center gap-2">
+          <p className="text-[10px] text-ink-3 font-mono break-all">{txHash}</p>
+          <button
+            type="button"
+            onClick={handleCopyHash}
+            aria-label={
+              copied ? "Transaction hash copied" : "Copy transaction hash"
+            }
+            className="inline-flex items-center gap-1 text-[10px] text-ink-4 hover:text-ink-2 shrink-0"
+          >
+            <HugeiconsIcon
+              icon={Copy01Icon}
+              size={11}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <a
+            href={`${EXPLORER_TX_BASE}${txHash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-brand hover:underline shrink-0"
+          >
+            View on explorer
+          </a>
+        </div>
       )}
     </div>
   );
@@ -234,6 +271,8 @@ export function SwapRoute({
     );
   }
 
+  // Issue #657: tolerate partial/mismatched status, hash and error arrays by
+  // falling back per index rather than indexing past the array bounds.
   const resolvedStatuses: SwapStatus[] = statuses ?? swaps.map(() => "pending");
   const totalCost = totalRebalanceCostUsd(swaps);
   const totalFee = totalFeeStroops(swaps);

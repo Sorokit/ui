@@ -149,6 +149,80 @@ describe("ValidatorSearch — interactions", () => {
   });
 });
 
+// ─── Query trimming and clear button (#690) ───────────────────────────────────
+
+describe("ValidatorSearch — query trimming and clear button (#690)", () => {
+  it("trims leading whitespace from a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "   GABC123" },
+    });
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
+  });
+
+  it("trims trailing whitespace from a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "GABC123   " },
+    });
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
+  });
+
+  it("trims whitespace on both ends of a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "  Alpha Staking  " },
+    });
+    expect(onChange).toHaveBeenCalledWith({
+      ...filter,
+      query: "Alpha Staking",
+    });
+  });
+
+  it("does not render a clear button when the query is empty", () => {
+    renderSearch({ filter: { ...createDefaultFilter(), query: "" } });
+    expect(
+      screen.queryByRole("button", { name: /clear search/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a clear button once the query has text", () => {
+    renderSearch({ filter: { ...createDefaultFilter(), query: "alpha" } });
+    expect(
+      screen.getByRole("button", { name: /clear search/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clears the query when the clear button is clicked", () => {
+    const { onChange, filter } = renderSearch({
+      filter: { ...createDefaultFilter(), query: "alpha" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /clear search/i }));
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "" });
+  });
+
+  it("hides the clear button again once the query becomes empty", () => {
+    const { rerender } = renderSearch({
+      filter: { ...createDefaultFilter(), query: "alpha" },
+    });
+    expect(
+      screen.getByRole("button", { name: /clear search/i }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ValidatorSearch
+        filter={{ ...createDefaultFilter(), query: "" }}
+        onChange={vi.fn()}
+        totalCount={6}
+        filteredCount={6}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /clear search/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 // ─── Accessibility ────────────────────────────────────────────────────────────
 
 describe("ValidatorSearch — accessibility", () => {

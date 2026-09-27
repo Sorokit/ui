@@ -408,8 +408,9 @@ export function AccountBalanceChart({
               <div
                 className="flex h-[200px] items-center justify-center text-center text-[13px] text-ink-3"
                 role="status"
+                aria-label="No balance history available"
               >
-                No historical balance points are available for this timeframe.
+                No balance history available
               </div>
             ) : (
               <LineChart

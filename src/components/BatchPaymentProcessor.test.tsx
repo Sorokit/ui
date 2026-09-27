@@ -62,6 +62,28 @@ describe("validateEntries — validation rules", () => {
     expect(errors.every((e) => !e.includes("28 bytes"))).toBe(true);
   });
 
+  it("rejects a 10-emoji memo even though it is only 10 characters long", () => {
+    // 10 emoji = 10 chars but 40 UTF-8 bytes — a character-length check would
+    // wrongly accept this.
+    const emojiMemo = "\u{1F600}".repeat(10);
+    const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo: emojiMemo }]);
+    expect(errors.some((e) => e.includes("28 bytes"))).toBe(true);
+  });
+
+  it("rejects a mixed-script memo whose byte length exceeds 28 despite fewer than 28 characters", () => {
+    // 14 CJK characters = 14 chars but 42 UTF-8 bytes (3 bytes each).
+    const cjkMemo = "你好世界你好世界你好世界你好";
+    const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo: cjkMemo }]);
+    expect(errors.some((e) => e.includes("28 bytes"))).toBe(true);
+  });
+
+  it("accepts a mixed-script memo within the 28-byte budget", () => {
+    // 14 characters, but accented Latin characters keep it at 17 UTF-8 bytes.
+    const memo = "café ñandú hi";
+    const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo } ]);
+    expect(errors.every((e) => !e.includes("28 bytes"))).toBe(true);
+  });
+
   it("rejects duplicate addresses", () => {
     const entries = [
       { address: VALID_ADDR, amount: "1", asset: "", memo: "" },

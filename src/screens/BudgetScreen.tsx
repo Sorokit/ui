@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { computeBudgetBreakdown } from "@/lib/budget";
 
 interface AssetBreakdown {
   asset: string;
@@ -38,12 +39,50 @@ export function BudgetScreen() {
     { asset: "USDC", amount: 480, percentage: 37.5 },
   ]);
 
-  // Tx type breakdown mock data
-  const [txTypes] = useState<TxBreakdown[]>([
-    { type: "Payment", amount: 950, count: 14 },
-    { type: "Swap", amount: 230, count: 4 },
-    { type: "Farming Deposit", amount: 100, count: 1 },
+  const txBreakdown = computeBudgetBreakdown([
+    {
+      hash: "mock-payment-1",
+      ledger: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+      successful: true,
+      operationCount: 1,
+      feePaid: "950",
+      type: "Payment",
+    },
+    {
+      hash: "mock-payment-2",
+      ledger: 2,
+      createdAt: "2026-01-02T00:00:00Z",
+      successful: true,
+      operationCount: 1,
+      feePaid: "950",
+      type: "Payment",
+    },
+    {
+      hash: "mock-swap-1",
+      ledger: 3,
+      createdAt: "2026-01-03T00:00:00Z",
+      successful: true,
+      operationCount: 1,
+      feePaid: "230",
+      type: "Swap",
+    },
+    {
+      hash: "mock-farming-1",
+      ledger: 4,
+      createdAt: "2026-01-04T00:00:00Z",
+      successful: true,
+      operationCount: 1,
+      feePaid: "100",
+      type: "Farming Deposit",
+    },
   ]);
+
+  const txTypes = txBreakdown.categories.map((category) => ({
+    type: category.type,
+    amount: category.amount,
+    count: category.count,
+  }));
 
   // Calculations
   const percentageUsed = (currentSpent / budgetLimit) * 100;
