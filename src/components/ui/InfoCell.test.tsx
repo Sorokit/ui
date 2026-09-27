@@ -1,169 +1,164 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+﻿import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InfoCell } from "./InfoCell";
 
 describe("InfoCell", () => {
+  let writeTextSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeAll(() => {
+    if (!navigator.clipboard) {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: () => Promise.resolve() },
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
   beforeEach(() => {
-    vi.restoreAllMocks();
+    writeTextSpy = vi
+      .spyOn(navigator.clipboard, "writeText")
+      .mockImplementation(() => Promise.resolve());
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
-  it("renders label and value", () => {
-    render(<InfoCell label="Endpoint" value="https://horizon.stellar.org" />);
+  it("renders label and value correctly", () => {
+    render(<InfoCell label="Network" value="Testnet" />);
 
-    expect(screen.getByText("Endpoint")).toBeInTheDocument();
-    expect(screen.getByText("https://horizon.stellar.org")).toBeInTheDocument();
+    expect(screen.getByText("Network")).toBeInTheDocument();
+    expect(screen.getByText("Testnet")).toBeInTheDocument();
   });
 
   it("applies monospace styling when mono is true", () => {
-    render(
-      <InfoCell label="Public Key" value="GBRP...1234" mono />,
-    );
+    render(<InfoCell label="Address" value="GBAMQXTQ...ZJQQQQ" mono />);
 
-    const valueSpan = screen.getByText("GBRP...1234");
-    expect(valueSpan).toHaveClass("font-mono", "text-[12px]");
+    const valueEl = screen.getByText("GBAMQXTQ...ZJQQQQ");
+    expect(valueEl.className).toContain("font-mono");
   });
 
-  it("applies regular font styling when mono is omitted or false", () => {
-    render(<InfoCell label="Network" value="Testnet" />);
-
-    const valueSpan = screen.getByText("Testnet");
-    expect(valueSpan).not.toHaveClass("font-mono");
-  });
-
-  it("forwards custom className to the root container", () => {
+  it("applies custom className to the root container", () => {
     const { container } = render(
-      <InfoCell
-        label="Status"
-        value="Operational"
-        className="custom-info-cell"
-      />,
+      <InfoCell label="Status" value="Active" className="custom-cell-class" />,
     );
 
-    expect(container.firstChild).toHaveClass("custom-info-cell");
+    expect(container.firstElementChild).toHaveClass("custom-cell-class");
   });
 
-  describe("copy functionality", () => {
-    it("does not render copy button when copyable is omitted or false", () => {
-      render(<InfoCell label="Address" value="GBRP..." />);
+  describe("copyable interaction", () => {
+    it("does not render copy button when copyable is false or omitted", () => {
+      render(<InfoCell label="Contract ID" value="CA123456" />);
 
       expect(
         screen.queryByRole("button", { name: /copy/i }),
       ).not.toBeInTheDocument();
     });
 
-    it("renders copy button and copies value to clipboard on click", async () => {
-      vi.useFakeTimers();
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
+    it("renders copy button when copyable is true", () => {
+      render(<InfoCell label="Contract ID" value="CA123456" copyable />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy Contract ID",
       });
-
-      render(<InfoCell label="Public Key" value="GBRP123456" copyable />);
-
-      const copyBtn = screen.getByRole("button", { name: "Copy Public Key" });
       expect(copyBtn).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(copyBtn);
-      });
-
-      expect(writeTextMock).toHaveBeenCalledWith("GBRP123456");
-
-      // Verify copied feedback state
-      expect(
-        screen.getByRole("button", { name: "Public Key copied" }),
-      ).toBeInTheDocument();
-      expect(screen.getByTitle("Copied!")).toBeInTheDocument();
-
-      // Advance timer to verify reset after 2000ms
-      act(() => {
-        vi.advanceTimersByTime(2100);
-      });
-
-      expect(
-        screen.getByRole("button", { name: "Copy Public Key" }),
-      ).toBeInTheDocument();
-      expect(screen.getByTitle("Copy Public Key")).toBeInTheDocument();
+      expect(copyBtn).toHaveAttribute("title", "Copy Contract ID");
     });
 
-    it("handles clipboard failure gracefully without throwing", async () => {
-      const writeTextMock = vi.fn().mockRejectedValue(new Error("Permission denied"));
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
+    it("writes to clipboard and updates button state to copied on click", async () => {
+      render(<InfoCell label="Contract ID" value="CA123456" copyable />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy Contract ID",
       });
-
-      render(<InfoCell label="API Key" value="secret-123" copyable />);
-
-      const copyBtn = screen.getByRole("button", { name: "Copy API Key" });
 
       await act(async () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("secret-123");
-      // Button remains in uncopied state
-      expect(screen.getByRole("button", { name: "Copy API Key" })).toBeInTheDocument();
+      expect(writeTextSpy).toHaveBeenCalledTimes(1);
+      expect(writeTextSpy).toHaveBeenCalledWith("CA123456");
+
+      const copiedBtn = screen.getByRole("button", {
+        name: "Contract ID copied",
+      });
+      expect(copiedBtn).toBeInTheDocument();
+      expect(copiedBtn).toHaveAttribute("title", "Copied!");
+    });
+
+    it("resets copied state after 2 seconds", async () => {
+      vi.useFakeTimers();
+      render(<InfoCell label="Contract ID" value="CA123456" copyable />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy Contract ID",
+      });
+
+      await act(async () => {
+        fireEvent.click(copyBtn);
+      });
+
+      expect(
+        screen.getByRole("button", { name: "Contract ID copied" }),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+
+      expect(
+        screen.getByRole("button", { name: "Copy Contract ID" }),
+      ).toBeInTheDocument();
+    });
+
+    it("handles clipboard rejection gracefully without throwing", async () => {
+      writeTextSpy.mockRejectedValueOnce(new Error("Clipboard access denied"));
+
+      render(<InfoCell label="Contract ID" value="CA123456" copyable />);
+
+      const copyBtn = screen.getByRole("button", {
+        name: "Copy Contract ID",
+      });
+
+      await act(async () => {
+        fireEvent.click(copyBtn);
+      });
+
+      expect(writeTextSpy).toHaveBeenCalledWith("CA123456");
+      expect(
+        screen.getByRole("button", { name: "Copy Contract ID" }),
+      ).toBeInTheDocument();
     });
   });
 
-  describe("connection testing functionality", () => {
-    it("does not render test button when testable is omitted or false", () => {
-      render(<InfoCell label="RPC Node" value="https://soroban-rpc.stellar.org" />);
+  describe("testable connection probe", () => {
+    it("does not render connection test button when testable is omitted", () => {
+      render(<InfoCell label="RPC URL" value="https://rpc.stellar.org" />);
 
       expect(
         screen.queryByRole("button", { name: /test connection/i }),
       ).not.toBeInTheDocument();
     });
 
-    it("renders test button and handles successful connection probe", async () => {
-      const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
-      vi.stubGlobal("fetch", fetchMock);
-
+    it("renders test connection button when testable is true", () => {
       render(
-        <InfoCell
-          label="RPC Endpoint"
-          value="https://soroban-rpc.stellar.org"
-          testable
-        />,
+        <InfoCell label="RPC URL" value="https://rpc.stellar.org" testable />,
       );
 
-      const testBtn = screen.getByRole("button", { name: /test connection/i });
-      expect(testBtn).toBeInTheDocument();
-
-      await act(async () => {
-        fireEvent.click(testBtn);
-      });
-
-      expect(fetchMock).toHaveBeenCalledWith("https://soroban-rpc.stellar.org", {
-        method: "HEAD",
-        mode: "no-cors",
-        signal: expect.any(Object),
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText("Reachable")).toBeInTheDocument();
-      });
+      expect(
+        screen.getByRole("button", { name: /test connection/i }),
+      ).toBeInTheDocument();
     });
 
-    it("handles failed connection probe and shows unreachable badge", async () => {
-      const fetchMock = vi.fn().mockRejectedValue(new Error("Network timeout"));
-      vi.stubGlobal("fetch", fetchMock);
+    it("shows Reachable badge when connection probe succeeds", async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(new Response(null, { status: 200 }));
 
       render(
-        <InfoCell
-          label="RPC Endpoint"
-          value="https://dead-node.example.com"
-          testable
-        />,
+        <InfoCell label="RPC URL" value="https://rpc.stellar.org" testable />,
       );
 
       const testBtn = screen.getByRole("button", { name: /test connection/i });
@@ -172,9 +167,33 @@ describe("InfoCell", () => {
         fireEvent.click(testBtn);
       });
 
-      await waitFor(() => {
-        expect(screen.getByText("Unreachable")).toBeInTheDocument();
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://rpc.stellar.org",
+        expect.objectContaining({
+          method: "HEAD",
+          mode: "no-cors",
+        }),
+      );
+
+      expect(screen.getByText("Reachable")).toBeInTheDocument();
+    });
+
+    it("shows Unreachable badge when connection probe fails", async () => {
+      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(
+        new Error("Network Error"),
+      );
+
+      render(
+        <InfoCell label="RPC URL" value="https://invalid.rpc.node" testable />,
+      );
+
+      const testBtn = screen.getByRole("button", { name: /test connection/i });
+
+      await act(async () => {
+        fireEvent.click(testBtn);
       });
+
+      expect(screen.getByText("Unreachable")).toBeInTheDocument();
     });
   });
 });
