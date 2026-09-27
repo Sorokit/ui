@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -63,56 +63,36 @@ export function SwapExecutionTracker({
   timeoutSeconds = 60,
   onRetry,
 }: SwapExecutionTrackerProps) {
-  // Derive effective status from props — no prop-to-state mirroring needed
-  const derivedStatus = useMemo<SwapExecutionStatus>(() => {
+  const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(() => {
     if (statusProp) return statusProp;
     if (executedAt || actualOutput != null) return "success";
     if (txHash) return "confirming";
     return "submitted";
-  }, [statusProp, executedAt, actualOutput, txHash]);
+  });
 
-  // timedOut cannot be derived from props alone — use a ref to reset it
-  // without a synchronous setState in the effect body.
-  const timedOutRef = useRef(false);
-  const [timedOut, setTimedOut] = useState(false);
-  const internalStatus: SwapExecutionStatus =
-    timedOut && (derivedStatus === "submitted" || derivedStatus === "confirming")
-      ? "timeout"
-      : derivedStatus;
+  const currentStatus = statusProp ?? (executedAt || actualOutput != null ? "success" : internalStatus);
+  const isPending = currentStatus === "submitted" || currentStatus === "confirming";
 
+  const deadlineRef = useRef<number>(0);
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
 
-  // Countdown effect — resets when timeoutSeconds or derivedStatus changes.
-  // No setState is called synchronously in the effect body; all updates happen
-  // inside the setInterval callback, satisfying react-hooks/set-state-in-effect.
   useEffect(() => {
-    timedOutRef.current = false;
-    const isPending = derivedStatus === "submitted" || derivedStatus === "confirming";
     if (!isPending) return;
-
-    // Start at timeoutSeconds+1 so the first tick immediately renders timeoutSeconds.
-    let remaining = timeoutSeconds + 1;
-
-    const timer = setInterval(() => {
-      remaining -= 1;
+    deadlineRef.current = Date.now() + timeoutSeconds * 1000;
+    const timer = window.setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000));
       setTimeLeft(remaining);
       if (remaining <= 0) {
-        clearInterval(timer);
-        timedOutRef.current = true;
-        setTimedOut(true);
+        setInternalStatus("timeout");
+        window.clearInterval(timer);
       }
     }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isPending, timeoutSeconds]);
 
-    return () => {
-      clearInterval(timer);
-      if (!timedOutRef.current) setTimedOut(false);
-    };
-  }, [derivedStatus, timeoutSeconds]);
 
-  const currentStatus = internalStatus;
   const isTimedOut = currentStatus === "timeout";
   const isFailed = currentStatus === "failed";
-  const isPending = currentStatus === "submitted" || currentStatus === "confirming";
 
   const expectedMinimumOutput = swap.toAmountExpected;
   const resolvedActualOutput = actualOutput ?? expectedMinimumOutput;
