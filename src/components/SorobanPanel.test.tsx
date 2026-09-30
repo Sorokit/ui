@@ -186,6 +186,39 @@ describe("SorobanPanel", () => {
     expect(textarea.rows).toBe(6);
   });
 
+  // Issue #543 — the Arguments textarea must be programmatically associated
+  // with its label, and its validation error with the field itself.
+  describe("arguments textarea accessibility", () => {
+    it("associates the label with the textarea via htmlFor and id", () => {
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      const textarea = screen.getByRole("textbox", {
+        name: "Arguments (JSON array)",
+      });
+      expect(textarea.tagName).toBe("TEXTAREA");
+      expect(textarea.id).not.toBe("");
+
+      const label = screen.getByText("Arguments (JSON array)");
+      expect(label.tagName).toBe("LABEL");
+      expect(label).toHaveAttribute("for", textarea.id);
+    });
+
+    it("points aria-describedby at the error message when the JSON is invalid", () => {
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      const textarea = screen.getByLabelText("Arguments (JSON array)");
+      expect(textarea).not.toHaveAttribute("aria-describedby");
+      expect(textarea).toHaveAttribute("aria-invalid", "false");
+
+      fireEvent.change(textarea, { target: { value: "[1, 2" } });
+
+      expect(textarea).toHaveAttribute("aria-invalid", "true");
+      const describedBy = textarea.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toHaveTextContent(
+        "Invalid JSON in arguments",
+      );
+    });
+  });
+
   describe("simulate mode", () => {
     it("renders Simulate badge and subtitle", () => {
       render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} mode="simulate" />);

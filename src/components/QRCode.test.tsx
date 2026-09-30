@@ -54,7 +54,7 @@ describe("QRCode", () => {
     getContextSpy.mockReturnValue(null);
     const { container } = render(<QRCode value={value} />);
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
-    expect(screen.getByText("QR Code failed to load")).toBeInTheDocument();
+    expect(screen.getByText("Unable to generate QR code")).toBeInTheDocument();
     expect(screen.getByText(value)).toBeInTheDocument();
   });
 
@@ -68,7 +68,7 @@ describe("QRCode", () => {
 
     const { container } = render(<QRCode value={value} />);
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
-    expect(screen.getByText("QR Code failed to load")).toBeInTheDocument();
+    expect(screen.getByText("Unable to generate QR code")).toBeInTheDocument();
     expect(screen.getByText(value)).toBeInTheDocument();
   });
 

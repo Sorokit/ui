@@ -1,5 +1,6 @@
 import { Cancel01Icon,Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useRef } from "react";
 
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
 import type { NavSection } from "@/components/Sidebar";
@@ -20,6 +21,20 @@ export function TopBar({
 }) {
   const { error, clearError } = useSorokit();
   const { title, sub } = LABELS[active];
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const isFirstRender = useRef(true);
+
+  // Move focus to the heading when the active section changes so screen
+  // readers announce the new context. Focus is used instead of an aria-live
+  // region to avoid announcing the change twice. Skipped on first render so
+  // mounting the dashboard doesn't steal focus.
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    headingRef.current?.focus({ preventScroll: true });
+  }, [active]);
 
   return (
     <div className="shrink-0">
@@ -62,7 +77,11 @@ export function TopBar({
             />
           </button>
           <div>
-            <h1 className="text-[15px] font-semibold text-ink leading-none">
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              className="text-[15px] font-semibold text-ink leading-none outline-none"
+            >
               {title}
             </h1>
             <p className="text-[11px] text-ink-3 mt-0.5 hidden sm:block">

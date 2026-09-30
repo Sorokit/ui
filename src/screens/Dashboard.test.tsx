@@ -150,6 +150,19 @@ describe("Dashboard", () => {
       ).toHaveAttribute("hidden");
     });
 
+    it("sets aria-hidden on non-active screens and clears it on the active one", async () => {
+      render(<Dashboard />);
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      await screen.findByTestId("screen-soroban");
+
+      expect(screen.getByTestId("screen-wrapper-wallet")).toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByTestId("screen-wrapper-soroban")).toHaveAttribute("aria-hidden", "false");
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(screen.getByTestId("screen-wrapper-wallet")).toHaveAttribute("aria-hidden", "false");
+      expect(screen.getByTestId("screen-wrapper-soroban")).toHaveAttribute("aria-hidden", "true");
+    });
+
     it("still reports navigation through onSectionChange", async () => {
       const onSectionChange = vi.fn();
       render(<Dashboard onSectionChange={onSectionChange} />);
