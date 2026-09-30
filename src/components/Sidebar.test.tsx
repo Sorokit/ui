@@ -5,7 +5,7 @@ import { beforeEach,describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 
 import packageJson from "../../package.json";
-import { Sidebar } from "./Sidebar";
+import { NAV, Sidebar } from "./Sidebar";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -342,6 +342,53 @@ describe("Sidebar", () => {
       expect(transactions).not.toHaveTextContent("Transactions");
 
       localStorage.removeItem("sorokit-sidebar-collapsed");
+    });
+  });
+
+  describe("distinct nav section icons (#744)", () => {
+    it("assigns a unique icon to every NavSection entry in NAV", () => {
+      expect(NAV.length).toBeGreaterThan(0);
+      const icons = NAV.map((item) => item.icon);
+      const uniqueIcons = new Set(icons);
+      expect(uniqueIcons.size).toBe(NAV.length);
+    });
+
+    it("verifies each nav item renders a distinct icon in the DOM", () => {
+      render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+
+      const nav = screen.getByRole("navigation", { name: "Main navigation" });
+      const navButtons = within(nav).getAllByRole("button");
+      expect(navButtons).toHaveLength(NAV.length);
+
+      const renderedSvgs = navButtons.map((button) => {
+        const svg = button.querySelector("svg");
+        expect(svg).toBeInTheDocument();
+        return svg!.innerHTML;
+      });
+
+      const uniqueSvgs = new Set(renderedSvgs);
+      expect(uniqueSvgs.size).toBe(NAV.length);
+    });
+
+    it("uses semantically appropriate icons for charts, farming, budget, recovery, and governance", () => {
+      const chartsItem = NAV.find((item) => item.id === "charts");
+      const farmingItem = NAV.find((item) => item.id === "farming");
+      const budgetItem = NAV.find((item) => item.id === "budget");
+      const transactionsItem = NAV.find((item) => item.id === "transactions");
+      const sorobanItem = NAV.find((item) => item.id === "soroban");
+      const walletItem = NAV.find((item) => item.id === "wallet");
+      const accountItem = NAV.find((item) => item.id === "account");
+      const recoveryItem = NAV.find((item) => item.id === "recovery");
+      const governanceItem = NAV.find((item) => item.id === "governance");
+
+      expect(chartsItem?.icon).not.toBe(transactionsItem?.icon);
+      expect(farmingItem?.icon).not.toBe(sorobanItem?.icon);
+      expect(budgetItem?.icon).not.toBe(walletItem?.icon);
+      expect(recoveryItem?.icon).not.toBe(accountItem?.icon);
+      expect(governanceItem?.icon).not.toBe(accountItem?.icon);
+      expect(recoveryItem?.icon).not.toBe(governanceItem?.icon);
     });
   });
 });

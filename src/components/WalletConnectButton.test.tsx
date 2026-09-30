@@ -184,7 +184,7 @@ describe("WalletConnectButton", () => {
       expect(statusDot).toBeInTheDocument();
     });
 
-    it("calls onOpenModal when address pill is clicked and the prop is provided", () => {
+    it("calls onOpenModal when address pill is clicked and skips DropdownMenu entirely", () => {
       const mockOnOpenModal = vi.fn();
       vi.mocked(useSorokit).mockReturnValue(
         mockUseSorokit({
@@ -198,11 +198,22 @@ describe("WalletConnectButton", () => {
         name: `Wallet connected: ${fullAddress}. Click to manage.`,
       });
 
+      // Plain button: should not have DropdownMenu trigger attributes
+      expect(addressPill).not.toHaveAttribute("aria-haspopup");
+      expect(addressPill).not.toHaveAttribute("aria-expanded");
+
       fireEvent.click(addressPill);
       expect(mockOnOpenModal).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+
+      // Repeated clicks invoke onOpenModal without Radix state confusion
+      fireEvent.click(addressPill);
+      expect(mockOnOpenModal).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
 
-    it("does not crash and toggles dropdown when address pill is clicked without onOpenModal", () => {
+    it("renders DropdownMenu and toggles dropdown flow when onOpenModal is absent", () => {
       vi.mocked(useSorokit).mockReturnValue(
         mockUseSorokit({
           isConnected: true,
@@ -216,16 +227,19 @@ describe("WalletConnectButton", () => {
         name: `Wallet connected: ${fullAddress}. Click to manage.`,
       });
 
-      expect(() => {
-        fireEvent.click(addressPill);
-      }).not.toThrow();
+      expect(addressPill).toHaveAttribute("aria-haspopup", "menu");
+      expect(addressPill).toHaveAttribute("aria-expanded", "false");
 
-      // Dropdown with disconnect button appears
+      // Clicking opens the dropdown menu
+      fireEvent.click(addressPill);
+      expect(addressPill).toHaveAttribute("aria-expanded", "true");
+
       const disconnectBtn = screen.getByRole("menuitem", { name: /disconnect/i });
       expect(disconnectBtn).toBeInTheDocument();
 
       // Clicking again closes the dropdown
       fireEvent.click(addressPill);
+      expect(addressPill).toHaveAttribute("aria-expanded", "false");
       expect(
         screen.queryByRole("menuitem", { name: /disconnect/i }),
       ).not.toBeInTheDocument();
