@@ -1,10 +1,15 @@
 import {
   ArrowDataTransferHorizontalIcon,
   Blockchain01Icon,
+  ChartLineDataIcon,
   CodeIcon,
   Globe02Icon,
+  Legal01Icon,
+  Plant01Icon,
+  Shield02Icon,
   User02Icon,
   Wallet01Icon,
+  Wallet03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
@@ -29,7 +34,7 @@ export type NavSection =
   | "nfts"
   | "governance";
 
-const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
+export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "wallet", label: "Wallet", icon: Wallet01Icon },
   { id: "account", label: "Account", icon: User02Icon },
   {
@@ -39,12 +44,12 @@ const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   },
   { id: "soroban", label: "Soroban", icon: CodeIcon },
   { id: "network", label: "Network", icon: Globe02Icon },
-  { id: "recovery", label: "Recovery Assistant", icon: User02Icon },
-  { id: "charts", label: "Advanced Charting", icon: ArrowDataTransferHorizontalIcon },
-  { id: "farming", label: "Yield Farming", icon: CodeIcon },
-  { id: "budget", label: "Budget Manager", icon: Wallet01Icon },
+  { id: "recovery", label: "Recovery Assistant", icon: Shield02Icon },
+  { id: "charts", label: "Advanced Charting", icon: ChartLineDataIcon },
+  { id: "farming", label: "Yield Farming", icon: Plant01Icon },
+  { id: "budget", label: "Budget Manager", icon: Wallet03Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
-  { id: "governance", label: "Governance", icon: User02Icon },
+  { id: "governance", label: "Governance", icon: Legal01Icon },
 ];
 
 export function isItemActive(itemId: string, active: string): boolean {
