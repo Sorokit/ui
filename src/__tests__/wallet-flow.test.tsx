@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,11 @@ import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { SorokitProvider } from "@/context/SorokitProvider";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
+
+function getWalletButton(name: RegExp | string) {
+  const grid = screen.getByRole("grid", { name: /available wallets/i });
+  return within(grid).getByRole("button", { name });
+}
 
 // The connected WalletConnectButton opens a management modal rather than
 // exposing a direct "Disconnect" control, so drive disconnect through context.
@@ -61,7 +66,7 @@ describe("Wallet Connect Flow Integration", () => {
       screen.getByRole("dialog", { name: /connect a wallet/i }),
     );
     await act(async () => {
-      fireEvent.click(screen.getByRole("radio", { name: /Freighter/i }));
+      fireEvent.click(getWalletButton(/Freighter/i));
     });
 
     // Verification 1: Wallet connected, AccountCard renders account data

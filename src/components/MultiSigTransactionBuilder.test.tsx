@@ -4,7 +4,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
 
 vi.mock("@/context/ToastContext", () => ({
-  useToast: () => ({ showToast: vi.fn() }),
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    addToast: vi.fn(),
+    removeToast: vi.fn(),
+    dismissAll: vi.fn(),
+    clearAll: vi.fn(),
+    toasts: [],
+  }),
 }));
 
 describe("MultiSigTransactionBuilder", () => {
