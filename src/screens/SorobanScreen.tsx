@@ -85,7 +85,7 @@ export function SorobanScreen() {
   function handleClearContracts() {
     writeRecent([]);
     setSavedContractsBase([]);
-    setRemoved(new Set(readAllRecent()));
+    setRemoved(new Set());
   }
 
   return (
