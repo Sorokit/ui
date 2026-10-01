@@ -157,7 +157,8 @@ export function friendlyError(message: string): string {
 
   if (
     normalizedMessage.includes("op_underfunded") ||
-    normalizedMessage.includes("underfunded")
+    normalizedMessage.includes("underfunded") ||
+    normalizedMessage.includes("insufficient balance")
   ) {
     return "Insufficient balance to submit this transaction. Add more XLM and try again.";
   }

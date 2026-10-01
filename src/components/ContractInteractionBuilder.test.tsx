@@ -137,6 +137,46 @@ describe("ContractInteractionBuilder", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    [
+      "u64",
+      [{ name: "amount", type: "u64" as const }],
+      { amount: "42" },
+      "eyJjb250cmFjdElkIjoiQ0EzUTVUNlk1SDdYUVdaNVg0WDdZNUg3WFFXWjVYNFg3WTVIN1hRV1o1WDRYN1k1SDdYUVdaNVg0IiwibWV0aG9kIjoicmVhZCIsImFyZ3MiOlt7Im5hbWUiOiJhbW91bnQiLCJ0eXBlIjoidTY0IiwidmFsdWUiOiI0MiJ9XX0=",
+    ],
+    [
+      "string",
+      [{ name: "message", type: "string" as const }],
+      { message: "hello" },
+      "eyJjb250cmFjdElkIjoiQ0EzUTVUNlk1SDdYUVdaNVg0WDdZNUg3WFFXWjVYNFg3WTVIN1hRV1o1WDRYN1k1SDdYUVdaNVg0IiwibWV0aG9kIjoicmVhZCIsImFyZ3MiOlt7Im5hbWUiOiJtZXNzYWdlIiwidHlwZSI6InN0cmluZyIsInZhbHVlIjoiaGVsbG8ifV19",
+    ],
+    [
+      "address",
+      [{ name: "owner", type: "address" as const }],
+      { owner: "GABC" },
+      "eyJjb250cmFjdElkIjoiQ0EzUTVUNlk1SDdYUVdaNVg0WDdZNUg3WFFXWjVYNFg3WTVIN1hRV1o1WDRYN1k1SDdYUVdaNVg0IiwibWV0aG9kIjoicmVhZCIsImFyZ3MiOlt7Im5hbWUiOiJvd25lciIsInR5cGUiOiJhZGRyZXNzIiwidmFsdWUiOiJHQUJDIn1dfQ==",
+    ],
+  ])("generates the expected XDR preview for a %s argument", (_type, args, values, expectedXdr) => {
+    const spec: ContractSpec = {
+      contractId: MOCK_SPEC.contractId,
+      methods: [{ name: "read", args }],
+    };
+    render(<ContractInteractionBuilder contractSpec={spec} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Contract Address" }), {
+      target: { value: MOCK_SPEC.contractId },
+    });
+    fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+      target: { value: "read" },
+    });
+    const [argName] = Object.keys(values);
+    fireEvent.change(screen.getByRole("textbox", { name: argName }), {
+      target: { value: (values as Record<string, string>)[argName] },
+    });
+
+    expect(screen.getByText(expectedXdr)).toBeInTheDocument();
+  });
+
   it("calls onParamsReady when Generate button is clicked", () => {
     const onParamsReady = vi.fn();
     render(

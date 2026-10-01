@@ -1,10 +1,15 @@
 import {
   ArrowDataTransferHorizontalIcon,
   Blockchain01Icon,
+  ChartLineDataIcon,
   CodeIcon,
   Globe02Icon,
+  Legal01Icon,
+  Plant01Icon,
+  Shield02Icon,
   User02Icon,
   Wallet01Icon,
+  Wallet03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
@@ -29,7 +34,7 @@ export type NavSection =
   | "nfts"
   | "governance";
 
-const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
+export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "wallet", label: "Wallet", icon: Wallet01Icon },
   { id: "account", label: "Account", icon: User02Icon },
   {
@@ -39,12 +44,12 @@ const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   },
   { id: "soroban", label: "Soroban", icon: CodeIcon },
   { id: "network", label: "Network", icon: Globe02Icon },
-  { id: "recovery", label: "Recovery Assistant", icon: User02Icon },
-  { id: "charts", label: "Advanced Charting", icon: ArrowDataTransferHorizontalIcon },
-  { id: "farming", label: "Yield Farming", icon: CodeIcon },
-  { id: "budget", label: "Budget Manager", icon: Wallet01Icon },
+  { id: "recovery", label: "Recovery Assistant", icon: Shield02Icon },
+  { id: "charts", label: "Advanced Charting", icon: ChartLineDataIcon },
+  { id: "farming", label: "Yield Farming", icon: Plant01Icon },
+  { id: "budget", label: "Budget Manager", icon: Wallet03Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
-  { id: "governance", label: "Governance", icon: User02Icon },
+  { id: "governance", label: "Governance", icon: Legal01Icon },
 ];
 
 export function isItemActive(itemId: string, active: string): boolean {
@@ -69,6 +74,13 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   const { isConnected } = useSorokit();
   const sidebarRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const initialActive = useRef(active);
+
+  const [visualActive, setVisualActive] = useState<NavSection | string>(() => {
+    if (typeof localStorage === "undefined") return active;
+    const saved = localStorage.getItem("sorokit-active-nav");
+    return saved && NAV.some((item) => item.id === saved) ? saved : active;
+  });
 
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof localStorage === "undefined") return false;
@@ -81,11 +93,10 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   }, [collapsed]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("sorokit-active-nav");
-    if (saved && saved !== active) {
-      onNavigate(saved as NavSection);
-    }
-  }, [active, onNavigate]);
+    if (initialActive.current === active) return;
+    setVisualActive(active);
+    initialActive.current = active;
+  }, [active]);
 
   // Lock background body scroll while mobile navigation drawer is active
   useEffect(() => {
@@ -99,6 +110,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   }, [open]);
 
   function handleNav(id: NavSection) {
+    setVisualActive(id);
     if (active === id) {
       onClose();
       return;
@@ -254,7 +266,7 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
           )}
           <div className="flex flex-col gap-0.5">
             {NAV.map((item) => {
-              const activeItem = isItemActive(item.id, active);
+              const activeItem = isItemActive(item.id, visualActive);
               const navButton = (
                 <button
                   key={item.id}
@@ -317,4 +329,3 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
     </>
   );
 }
-

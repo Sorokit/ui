@@ -254,4 +254,42 @@ describe("SorobanInvokeButton", () => {
     expect(screen.getByRole("button", { name: "transfer()" })).toBeDisabled();
     expect(screen.getByText("Connect wallet to invoke")).toBeInTheDocument();
   });
+
+  it("aborts in-flight invocation and prevents state updates on unmount", async () => {
+    let resolveInvoke!: (value: { data: unknown; error: string | null; status: string }) => void;
+    const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+    const onSuccess = vi.fn();
+    const onError = vi.fn();
+
+    vi.mocked(getClient).mockReturnValue({
+      soroban: {
+        invokeContract: vi.fn().mockImplementation(
+          () => new Promise((resolve) => { resolveInvoke = resolve; }),
+        ),
+      },
+    } as unknown as SorokitClient);
+
+    const { unmount } = render(
+      <SorobanInvokeButton params={PARAMS} onSuccess={onSuccess} onError={onError} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "transfer()" }));
+
+    expect(screen.getByRole("button").textContent).toContain("Invoking transfer…");
+
+    // Unmount before invocation resolves
+    unmount();
+
+    expect(abortSpy).toHaveBeenCalled();
+
+    // Resolve after unmount
+    await act(async () => {
+      resolveInvoke({ data: { ok: true }, error: null, status: "success" });
+    });
+
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+
+    abortSpy.mockRestore();
+  });
 });

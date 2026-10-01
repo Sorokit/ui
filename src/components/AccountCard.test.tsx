@@ -9,6 +9,11 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
 
+const successToast = vi.fn();
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({ success: successToast }),
+}));
+
 describe("AccountCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -124,6 +129,75 @@ describe("AccountCard", () => {
     expect(
       screen.queryByText(/prevent replay attacks/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+// ── Stellar Expert URL tests (#716) ──────────────────────────────────────
+describe("AccountCard — Stellar Expert URL (#716)", () => {
+  const ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("links to mainnet with /explorer/public/ path", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDRESS,
+      account: { sequence: "1", subentryCount: 0 },
+      isLoadingAccount: false,
+      network: { name: "public" },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const link = screen.getByText(/View on Stellar Expert/);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/public/account/${ADDRESS}`,
+    );
+  });
+
+  it("links to testnet with /explorer/testnet/ path", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDRESS,
+      account: { sequence: "1", subentryCount: 0 },
+      isLoadingAccount: false,
+      network: { name: "testnet" },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const link = screen.getByText(/View on Stellar Expert/);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://testnet.stellar.expert/explorer/testnet/account/${ADDRESS}`,
+    );
+  });
+
+  it("disables the link for futurenet", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDRESS,
+      account: { sequence: "1", subentryCount: 0 },
+      isLoadingAccount: false,
+      network: { name: "futurenet" },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const link = screen.getByText(/View on Stellar Expert/);
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).not.toHaveAttribute("href");
+  });
+
+  it("disables the link for localnet", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDRESS,
+      account: { sequence: "1", subentryCount: 0 },
+      isLoadingAccount: false,
+      network: { name: "localnet" },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const link = screen.getByText(/View on Stellar Expert/);
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).not.toHaveAttribute("href");
   });
 });
 

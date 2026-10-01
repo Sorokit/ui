@@ -332,6 +332,38 @@ describe("ErrorBoundary", () => {
     expect(screen.getByTestId("ready")).toBeInTheDocument();
   });
 
+  it("clears all error state atomically on retry, no stale error visible", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const TestWrapper = () => {
+      const [shouldThrow, setShouldThrow] = useState(true);
+      return (
+        <div>
+          <button onClick={() => setShouldThrow(false)}>Fix Error</button>
+          <ErrorBoundary>
+            <ThrowingComponent
+              shouldThrow={shouldThrow}
+              errorMessage="Temporary crash"
+            />
+          </ErrorBoundary>
+        </div>
+      );
+    };
+
+    render(<TestWrapper />);
+
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText("Temporary crash")).toBeInTheDocument();
+
+    // Fix the error and click retry
+    fireEvent.click(screen.getByText("Fix Error"));
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    // Error message should be cleared immediately when attempting retry
+    expect(screen.queryByText("Temporary crash")).not.toBeInTheDocument();
+    expect(screen.getByTestId("child-content")).toBeInTheDocument();
+  });
+
   it("applies scoped container styling when isolate is true", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 

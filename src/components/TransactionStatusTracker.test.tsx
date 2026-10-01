@@ -113,6 +113,47 @@ describe("TransactionStatusTracker", () => {
     ).toBeInTheDocument();
   });
 
+  it("stops polling immediately when terminal status arrives mid-interval (#770)", async () => {
+    const getStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ data: "pending", error: null })
+      .mockResolvedValueOnce({ data: "success", error: null });
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus },
+    } as unknown as ReturnType<typeof getClient>);
+
+    await act(async () => {
+      render(<TransactionStatusTracker hash="tx-mid" pollIntervalMs={2000} />);
+    });
+    await flushAsyncUpdates();
+    expect(getStatus).toHaveBeenCalledTimes(1);
+
+    // Advance halfway through interval (1000ms)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(getStatus).toHaveBeenCalledTimes(1);
+
+    // Complete interval to trigger second poll returning "success"
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await flushAsyncUpdates();
+    expect(getStatus).toHaveBeenCalledTimes(2);
+
+    // Advance halfway into the next interval
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(getStatus).toHaveBeenCalledTimes(2);
+
+    // Advance through multiple subsequent intervals
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    expect(getStatus).toHaveBeenCalledTimes(2);
+  });
+
   it("tracks several hashes concurrently and supports copying the hash", async () => {
     const getStatus = vi
       .fn()

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -9,6 +9,11 @@ import { WalletConnectModal } from "./WalletConnectModal";
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
+
+function getWalletButton(name: RegExp | string) {
+  const grid = screen.getByRole("grid", { name: /available wallets/i });
+  return within(grid).getByRole("button", { name });
+}
 
 function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
   return {
@@ -49,10 +54,10 @@ describe("WalletConnectModal", () => {
     vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
     expect(screen.getByRole("dialog", { name: /connect a wallet/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Freighter" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "xBull" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Lobstr" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Albedo" })).toBeInTheDocument();
+    expect(getWalletButton(/Freighter/i)).toBeInTheDocument();
+    expect(getWalletButton(/xBull/i)).toBeInTheDocument();
+    expect(getWalletButton(/Lobstr/i)).toBeInTheDocument();
+    expect(getWalletButton(/Albedo/i)).toBeInTheDocument();
   });
 
   it("supports a custom wallet option list", () => {
@@ -64,8 +69,8 @@ describe("WalletConnectModal", () => {
         walletOptions={[{ id: "rabet", name: "Rabet", initial: "R", color: "#000" }]}
       />,
     );
-    expect(screen.getByRole("button", { name: "Rabet" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Freighter" })).not.toBeInTheDocument();
+    expect(getWalletButton(/Rabet/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Freighter/i })).not.toBeInTheDocument();
   });
 
   it("calls connectWallet and shows a connecting state when a wallet is selected", () => {
@@ -74,7 +79,7 @@ describe("WalletConnectModal", () => {
     );
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
 
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("status")).toHaveTextContent(/waiting for freighter approval/i);
@@ -87,7 +92,7 @@ describe("WalletConnectModal", () => {
     );
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
 
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: /connected/i })).toBeInTheDocument(),
@@ -106,7 +111,7 @@ describe("WalletConnectModal", () => {
     );
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
 
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: /connection failed/i })).toBeInTheDocument(),
@@ -128,7 +133,7 @@ describe("WalletConnectModal", () => {
     );
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
 
     await waitFor(() =>
       expect(screen.getByText(/install the freighter browser extension/i)).toBeInTheDocument(),
@@ -149,7 +154,7 @@ describe("WalletConnectModal", () => {
     );
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
     await waitFor(() => screen.getByRole("button", { name: "Done" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(mockOnClose).toHaveBeenCalledTimes(1);
@@ -181,7 +186,7 @@ describe("WalletConnectModal", () => {
       );
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+      fireEvent.click(getWalletButton(/Freighter/i));
 
       await waitFor(() =>
         expect(screen.getByTestId("install-wallet-link")).toBeInTheDocument(),
@@ -211,6 +216,86 @@ describe("WalletConnectModal", () => {
         value: originalUserAgent,
         configurable: true,
       });
+    });
+  });
+
+  // ── Arrow Key Navigation (#746) ───────────
+  describe("Arrow Key Navigation", () => {
+    it("supports arrow key navigation between wallet options", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const grid = screen.getByRole("grid", { name: /available wallets/i });
+      const buttons = within(grid).getAllByRole("button");
+
+      // Initially first wallet should be pressed
+      expect(buttons[0]).toHaveAttribute("aria-pressed", "true");
+      expect(buttons[1]).toHaveAttribute("aria-pressed", "false");
+
+      // ArrowDown moves to next wallet
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      expect(buttons[1]).toHaveFocus();
+
+      // ArrowDown again moves to third wallet
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      expect(buttons[2]).toHaveFocus();
+
+      // ArrowUp moves back to second wallet
+      fireEvent.keyDown(grid, { key: "ArrowUp" });
+      expect(buttons[1]).toHaveFocus();
+    });
+
+    it("wraps around when arrow key navigation reaches the end", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const grid = screen.getByRole("grid", { name: /available wallets/i });
+      const buttons = within(grid).getAllByRole("button");
+
+      // Move to last wallet
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+
+      // Wrap around to first wallet
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      expect(buttons[0]).toHaveFocus();
+
+      // Wrap backward from first to last
+      fireEvent.keyDown(grid, { key: "ArrowUp" });
+      expect(buttons[buttons.length - 1]).toHaveFocus();
+    });
+
+    it("selects wallet when Enter is pressed on focused option", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ connectWallet: mockConnect, isConnecting: true }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const grid = screen.getByRole("grid", { name: /available wallets/i });
+
+      // Move to second wallet and press Enter
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      fireEvent.keyDown(grid, { key: "Enter" });
+
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("status")).toHaveTextContent(/waiting for xbull approval/i);
+    });
+
+    it("selects wallet when Space is pressed on focused option", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ connectWallet: mockConnect, isConnecting: true }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const grid = screen.getByRole("grid", { name: /available wallets/i });
+
+      // Move to second wallet and press Space
+      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      fireEvent.keyDown(grid, { key: " " });
+
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("status")).toHaveTextContent(/waiting for xbull approval/i);
     });
   });
 });

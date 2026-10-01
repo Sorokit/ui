@@ -1,14 +1,14 @@
 import "react-json-view-lite/dist/index.css";
 
-import { type ReactNode,useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { JsonView } from "react-json-view-lite";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
-type DebuggerState = "idle" | "loading" | "success" | "error";
+export type DebuggerState = "idle" | "loading" | "success" | "error";
 
-interface DebuggerEntry {
+export interface DebuggerEntry {
   contractId: string;
   method: string;
   args: unknown[];
@@ -34,7 +34,7 @@ interface DebuggerEntry {
   timestamp: string;
 }
 
-interface ContractInteractionDebuggerProps {
+export interface ContractInteractionDebuggerProps {
   contractId: string;
   method: string;
   args?: unknown[];
@@ -44,6 +44,8 @@ interface ContractInteractionDebuggerProps {
   error?: string | null;
   stateBefore?: unknown;
   stateAfter?: unknown;
+  history?: DebuggerEntry[];
+  onHistoryChange?: (history: DebuggerEntry[]) => void;
 }
 
 interface DiffEntry {
@@ -57,12 +59,20 @@ interface DiffEntry {
 const DEBUG_HISTORY_KEY = "sorokit-soroban-debug-history";
 const DEBUG_HISTORY_LIMIT = 10;
 
+/**
+ * Soroban VM diagnostics are sometimes returned with raw ANSI colour codes
+ * (e.g. `\u001b[31m`). Strip them so they render as readable text instead of
+ * garbled escape sequences (issue #668).
+ */
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
+function stripAnsi(value: string): string {
+  return value.replace(ANSI_PATTERN, "");
 // Issue #668: Soroban VM diagnostics can include ANSI colour escapes which
 // render as garbled characters (e.g. `\u001b[31m`). Strip them before display.
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
 
-function stripAnsi(value: string): string {
+export function stripAnsi(value: string): string {
   return value.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
@@ -79,7 +89,7 @@ function formatTimestamp(value: string): string {
   });
 }
 
-function readDebugHistory(): DebuggerEntry[] {
+export function readDebugHistory(): DebuggerEntry[] {
   try {
     const raw = window.sessionStorage.getItem(DEBUG_HISTORY_KEY);
     if (!raw) return [];
@@ -90,7 +100,7 @@ function readDebugHistory(): DebuggerEntry[] {
   }
 }
 
-function addDebugHistory(entry: DebuggerEntry, current: DebuggerEntry[]): DebuggerEntry[] {
+export function addDebugHistory(entry: DebuggerEntry, current: DebuggerEntry[]): DebuggerEntry[] {
   const next = [entry, ...current.filter((item) => item.timestamp !== entry.timestamp)].slice(0, DEBUG_HISTORY_LIMIT);
   try {
     window.sessionStorage.setItem(DEBUG_HISTORY_KEY, JSON.stringify(next));
@@ -187,6 +197,37 @@ function collectDiffEntries(before: unknown, after: unknown, basePath = ""): Dif
   }];
 }
 
+export function createDebuggerEntry(props: Omit<ContractInteractionDebuggerProps, "history" | "onHistoryChange">): DebuggerEntry {
+  const preparedCall = JSON.stringify({ contractId: props.contractId, method: props.method, args: props.args || [] }, null, 2);
+  const simulation = {
+    gasEstimate: 123456,
+    gasXlm: "0.00123456",
+    baseFee: "100000",
+    totalCostXlm: "0.00133456",
+  };
+  const attempts = [
+    { id: "attempt-1", timestamp: new Date().toISOString(), retryCount: 0, status: props.state === "success" ? "submitted" : props.state === "error" ? "failed" : "pending", hash: props.txHash ?? undefined },
+  ];
+  return {
+    contractId: props.contractId,
+    method: props.method,
+    args: props.args || [],
+    preparedCall,
+    simulation,
+    attempts,
+    result: props.txHash || props.result
+      ? {
+          txHash: props.txHash ?? undefined,
+          status: props.state === "success" ? "submitted" : props.state === "error" ? "failed" : "pending",
+          summary: props.result
+            ? stripAnsi(typeof props.result === "string" ? props.result : JSON.stringify(props.result))
+            : undefined,
+        }
+      : null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 export function ContractInteractionDebugger({
   contractId,
   method,
@@ -197,10 +238,11 @@ export function ContractInteractionDebugger({
   error,
   stateBefore,
   stateAfter,
+  history = [],
+  onHistoryChange,
 }: ContractInteractionDebuggerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [history, setHistory] = useState<DebuggerEntry[]>(() => readDebugHistory());
 
   const preparedCall = useMemo(() => {
     return JSON.stringify({ contractId, method, args }, null, 2);
@@ -226,53 +268,15 @@ export function ContractInteractionDebugger({
     return collectDiffEntries(stateBefore, stateAfter);
   }, [stateAfter, stateBefore]);
 
-  useEffect(() => {
-    if (!contractId || !method) return;
-    const entry: DebuggerEntry = {
-      contractId,
-      method,
-      args,
-      preparedCall,
-      simulation,
-      attempts,
-      result: txHash || result
-        ? {
-            txHash: txHash ?? undefined,
-            status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-            summary: result
-              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
-              : undefined,
-          }
-        : null,
-      timestamp: new Date().toISOString(),
-    };
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHistory((current) => addDebugHistory(entry, current));
-  }, [args, attempts, contractId, method, preparedCall, result, simulation, state, txHash]);
-
   const handleCopy = async (key: string, value: string) => {
     await copyToClipboard(value);
     setCopiedKey(key);
     if (contractId && method) {
-      const entry: DebuggerEntry = {
-        contractId,
-        method,
-        args,
-        preparedCall,
-        simulation,
-        attempts,
-        result: txHash || result
-          ? {
-              txHash: txHash ?? undefined,
-              status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-              summary: result
-              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
-              : undefined,
-            }
-          : null,
-        timestamp: new Date().toISOString(),
-      };
-      setHistory((current) => addDebugHistory(entry, current));
+      const entry = createDebuggerEntry({ contractId, method, args, state, result, txHash, error, stateBefore, stateAfter });
+      // Persist first: an optional call would skip `addDebugHistory` entirely
+      // when no `onHistoryChange` handler is supplied, silently losing the entry.
+      const nextHistory = addDebugHistory(entry, history);
+      onHistoryChange?.(nextHistory);
     }
     window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1600);
   };
@@ -290,6 +294,7 @@ export function ContractInteractionDebugger({
           </Button>
         ) : null}
       </div>
+      <div className="mt-3 min-w-0 overflow-x-auto">{children}</div>
       <div className="mt-3 overflow-x-auto [scrollbar-width:thin]">{children}</div>
     </section>
   );
@@ -311,7 +316,7 @@ export function ContractInteractionDebugger({
           {buildSection(
             "Prepared contract call",
             "The contract invocation payload prepared for submission.",
-            <div className="rounded-lg border border-line bg-surface p-3">
+            <div className="rounded-lg border border-line bg-surface p-3 overflow-x-auto">
               <JsonView data={{ contractId, method, args }} shouldExpandNode={() => true} />
             </div>,
             "prepared-call",
@@ -427,6 +432,7 @@ export function ContractInteractionDebugger({
           {buildSection(
             "Final result",
             "The final transaction outcome once the submission completes.",
+            <div className="rounded-lg border border-line bg-surface p-3 overflow-x-auto">
             <div className="rounded-lg border border-line bg-surface p-3">
               {error ? (
                 <p className="mb-3 rounded-md border border-error-dim bg-error-dim-muted px-3 py-2 text-[12px] font-mono text-red whitespace-pre-wrap break-words">

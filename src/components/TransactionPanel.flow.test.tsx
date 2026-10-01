@@ -112,7 +112,13 @@ describe("TransactionPanel form flow with SorokitProvider", () => {
     await user.click(screen.getByRole("button", { name: "Send XLM" }));
 
     expect(await screen.findByText("Transaction failed")).toBeVisible();
-    expect(screen.getByText("Payment was rejected")).toBeVisible();
+    // The raw client error is surfaced through the friendly-error mapper, so an
+    // unrecognised message falls back to the generic invocation failure copy.
+    expect(
+      screen.getByText(
+        "Something went wrong while invoking the contract. Please try again.",
+      ),
+    ).toBeVisible();
   });
 
   it("returns to an empty idle form after New Transaction", async () => {

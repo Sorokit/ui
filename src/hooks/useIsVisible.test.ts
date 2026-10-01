@@ -134,4 +134,27 @@ describe("useIsVisible", () => {
 
     expect(result.current).toBe(true);
   });
+
+  it("returns true (fails open) when window.IntersectionObserver is deleted", () => {
+    vi.unstubAllGlobals();
+    const win = window as unknown as Record<string, unknown>;
+    const originalIO = win.IntersectionObserver;
+    delete win.IntersectionObserver;
+
+    try {
+      const node = document.createElement("div");
+      const { result, unmount } = renderHook(() => {
+        const [ref, isVisible] = useIsVisible<HTMLDivElement>();
+        ref.current = node;
+        return isVisible;
+      });
+
+      expect(typeof window.IntersectionObserver).toBe("undefined");
+      expect(result.current).toBe(true);
+      expect(MockIntersectionObserver.instances.length).toBe(0);
+      expect(() => unmount()).not.toThrow();
+    } finally {
+      win.IntersectionObserver = originalIO;
+    }
+  });
 });

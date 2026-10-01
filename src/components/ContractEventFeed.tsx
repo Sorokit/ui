@@ -274,7 +274,7 @@ export function ContractEventFeed({
   fromLedger,
   className,
 }: ContractEventFeedProps) {
-  const { client } = useSorokit();
+  const { client, registerWatcher } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [events, setEvents] = useState<ContractEvent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -447,6 +447,22 @@ export function ContractEventFeed({
       }
     };
   }, [live, isVisible, pollInterval, load, contractId]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715).
+  useEffect(() => {
+    const cancel = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
 
   // Tick the relative "Last updated" label once a second while polling is
   // active and visible — ticking a hidden screen's clock wastes a timer for

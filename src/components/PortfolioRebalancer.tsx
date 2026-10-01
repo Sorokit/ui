@@ -55,7 +55,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Stub price map used when no live oracle is wired up.
- * In production this would be replaced by a real price feed.
+ * @todo Replace with a real price feed (Stellar Expert / CoinGecko free tier).
+ * These values are hardcoded and will drift from real market prices.
  */
 const STUB_PRICES: Record<string, number> = {
   XLM: 0.11,
@@ -65,9 +66,18 @@ const STUB_PRICES: Record<string, number> = {
   ETH: 3200,
 };
 
-async function fetchPrices(codes: string[]): Promise<Record<string, number>> {
+type PriceProvider = (codes: string[]) => Promise<Record<string, number>>;
+
+const defaultPriceProvider: PriceProvider = async (codes) => {
   // Return stub prices for any known code; fall back to $1 for unknown assets.
   return Object.fromEntries(codes.map((c) => [c, STUB_PRICES[c] ?? 1.0]));
+};
+
+async function fetchPrices(
+  codes: string[],
+  priceProvider: PriceProvider = defaultPriceProvider,
+): Promise<Record<string, number>> {
+  return priceProvider(codes);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -83,6 +93,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 export interface PortfolioRebalancerProps {
   className?: string;
+  priceProvider?: PriceProvider;
 }
 
 export const DUST_THRESHOLD_BALANCE = 0.00001;
@@ -124,12 +135,13 @@ function randomId(): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
+export function PortfolioRebalancer({ className, priceProvider }: PortfolioRebalancerProps) {
   const { isConnected, balances, isLoadingAccount, refreshAccount, client, address } = useSorokit();
 
   // ── Price state ───────────────────────────────────────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [isUsingStubPrices, setIsUsingStubPrices] = useState(false);
 
   // ── Portfolio state ───────────────────────────────────────────────────────
   const [customTargets, setCustomTargets] = useState<Record<string, number>>({});
@@ -178,13 +190,14 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
     if (balances.length === 0) return;
     let active = true;
     const codes = balances.map(getAssetCode);
-    fetchPrices(codes).then((p: Record<string, number>) => {
+    fetchPrices(codes, priceProvider).then((p: Record<string, number>) => {
       if (!active) return;
       setPrices(p);
       setIsPricingLoading(false);
+      setIsUsingStubPrices(!priceProvider);
     });
     return () => { active = false; };
-  }, [balances]);
+  }, [balances, priceProvider]);
 
   // ── Execution ─────────────────────────────────────────────────────────────
   const executeRebalance = useCallback(async () => {
@@ -454,6 +467,15 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
             ))}
           </div>
 
+          {isUsingStubPrices && (
+            <div
+            role="alert"
+            className="flex items-center gap-2 px-5 py-2 bg-[rgba(249,115,22,0.08)] border-b border-[rgba(249,115,22,0.2)] text-[12px] text-orange"
+            >
+              <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} className="shrink-0" />
+              <span>⚠️ Prices are simulated — figures shown are estimates, not live market data.</span>
+            </div>
+          )}
           {/* ── Panel body ───────────────────────────────────────────────── */}
           <div className="p-5">
 

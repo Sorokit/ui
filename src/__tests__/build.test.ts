@@ -81,13 +81,44 @@ describe('Library Build', () => {
 
   it('should produce readable (unminified) output, not a single collapsed line (#350)', () => {
     const esPath = path.resolve(__dirname, '../../dist/sorokit-ui.es.js');
-    if (fs.existsSync(esPath)) {
-      const content = fs.readFileSync(esPath, 'utf-8');
+    const indexPath = path.resolve(__dirname, '../../dist/index.js');
+    const targetPath = fs.existsSync(indexPath) ? indexPath : esPath;
+    if (fs.existsSync(targetPath)) {
+      const content = fs.readFileSync(targetPath, 'utf-8');
       // A minified bundle collapses to one or a handful of very long lines;
       // unminified output keeps source-like line breaks and indentation.
       const lines = content.split('\n');
       expect(lines.length).toBeGreaterThan(20);
       expect(content).toMatch(/\n[\t ]+\S/);
     }
+  });
+
+  describe('Dual ESM/CJS Export and Tree-shaking Compatibility (#698)', () => {
+    it('validates package.json exports map for dual loading integrity', () => {
+      const pkgPath = path.resolve(__dirname, '../../package.json');
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+
+      expect(pkg.exports).toBeDefined();
+      expect(pkg.exports['.']).toBeDefined();
+      expect(pkg.exports['.'].import).toBe('./dist/index.js');
+      expect(pkg.exports['.'].require).toBe('./dist/index.cjs');
+      expect(pkg.exports['.'].types).toBe('./dist/index.d.ts');
+    });
+
+    it('verifies ESM bundle exports named symbols for tree-shaking', () => {
+      const esPath = path.resolve(__dirname, '../../dist/index.js');
+      if (fs.existsSync(esPath)) {
+        const content = fs.readFileSync(esPath, 'utf-8');
+        expect(content).toMatch(/export\s*\{/);
+      }
+    });
+
+    it('verifies CJS bundle provides CommonJS exports', () => {
+      const cjsPath = path.resolve(__dirname, '../../dist/index.cjs');
+      if (fs.existsSync(cjsPath)) {
+        const content = fs.readFileSync(cjsPath, 'utf-8');
+        expect(content).toContain('exports.');
+      }
+    });
   });
 });

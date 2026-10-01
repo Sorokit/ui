@@ -39,6 +39,8 @@ export interface TransactionFilters {
 export interface TransactionHistoryTableProps {
   className?: string;
   pageSize?: number;
+  /** Optional callback for CSV export. If provided, called instead of DOM download. */
+  onExport?: (csv: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,7 +130,7 @@ function escapeCsv(value: string): string {
   return value;
 }
 
-function generateCsv(rows: Transaction[]): Blob {
+function generateCsvString(rows: Transaction[]): string {
   const headers = [
     "Hash",
     "Ledger",
@@ -157,11 +159,20 @@ function generateCsv(rows: Transaction[]): Blob {
     );
   }
 
-  return new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  return lines.join("\n");
 }
 
-function downloadCsv(rows: Transaction[]): void {
-  const blob = generateCsv(rows);
+function downloadCsv(rows: Transaction[], onExport?: (csv: string) => void): void {
+  const csv = generateCsvString(rows);
+
+  // If onExport callback is provided, use it (for testing)
+  if (onExport) {
+    onExport(csv);
+    return;
+  }
+
+  // Default DOM-based download
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -336,6 +347,7 @@ function SortHeader({
 export function TransactionHistoryTable({
   className,
   pageSize = PAGE_SIZE,
+  onExport,
 }: TransactionHistoryTableProps) {
   const { address, isConnected, network, client } = useSorokit();
   const [allTxs, setAllTxs] = useState<Transaction[]>([]);
@@ -439,7 +451,7 @@ export function TransactionHistoryTable({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => downloadCsv(allTxs)}
+              onClick={() => downloadCsv(allTxs, onExport)}
             >
               <HugeiconsIcon
                 icon={Download01Icon}

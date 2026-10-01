@@ -2,6 +2,10 @@ import type {
   AccountData,
   AllowanceEntry,
   Balance,
+  BatchEntry,
+  BatchEntryResult,
+  BatchProgress,
+  BatchResult,
   GasEstimate,
   GasPriceData,
   GroupedTransaction,
@@ -12,6 +16,7 @@ import type {
   SorokitClient,
   TimelineGroup,
   TimelineParams,
+  TxResult,
   TxStatus,
 } from "./client";
 import { deterministicMock } from "./deterministic-mock";
@@ -252,6 +257,7 @@ export function createMockClient(
   let activeNetwork =
     networkName && networkName in NETWORKS ? networkName : "testnet";
   const connectedAddress = MOCK_ADDRESS;
+  const batchProgressState = new Map<string, number>();
 
   if (networkName && !(networkName in NETWORKS)) {
     const validNetworks = Object.keys(NETWORKS).join(", ");
@@ -279,7 +285,21 @@ export function createMockClient(
       }),
       getBalances: async () => ({ data: MOCK_BALANCES, error: null }),
       getClaimableBalances: async () => ({ data: [], error: null }),
-      claimBalance: async () => ({ data: null, error: null }),
+      claimBalance: async (
+        balanceId: string,
+      ): Promise<{ data: TxResult | null; error: string | null }> => {
+        if (!balanceId || balanceId === "invalid" || balanceId === "error") {
+          return { data: null, error: `Invalid claimable balance ID: ${balanceId || "empty"}` };
+        }
+        return {
+          data: {
+            hash: deterministicMock.generateTransactionHash(),
+            ledger: 12345,
+            successful: true,
+          },
+          error: null,
+        };
+      },
     },
     transaction: {
       submit: async () => ({
@@ -585,15 +605,77 @@ export function createMockClient(
       }),
     },
     batch: {
-      submitBatch: async () => ({
-        data: null,
-        error: null,
-        batchId: "batch-mock-123",
-      }),
-      getBatchStatus: async () => ({
-        data: null,
-        error: null,
-      }),
+      submitBatch: async (params: {
+        entries: BatchEntry[];
+        sourceAccount: string;
+        asset?: string;
+        maxRetries?: number;
+      }) => {
+        if (!params || !params.entries || params.entries.length === 0) {
+          return {
+            data: null,
+            error: "Batch entries cannot be empty",
+            batchId: "",
+          };
+        }
+        if (!params.sourceAccount || params.sourceAccount === "invalid") {
+          return {
+            data: null,
+            error: "Invalid source account",
+            batchId: "",
+          };
+        }
+        const batchId = `batch-mock-${deterministicMock.generateHex(8)}`;
+        const entries: BatchEntryResult[] = params.entries.map((e) => ({
+          address: e.address,
+          amount: e.amount,
+          status: "confirmed" as const,
+          txHash: deterministicMock.generateTransactionHash(),
+          retryCount: 0,
+        }));
+        const batchResult: BatchResult = {
+          batchId,
+          totalEntries: entries.length,
+          successful: entries.length,
+          failed: 0,
+          entries,
+        };
+        return {
+          data: batchResult,
+          error: null,
+          batchId,
+        };
+      },
+      getBatchStatus: async (batchId: string) => {
+        if (!batchId || batchId === "invalid" || batchId === "nonexistent") {
+          return {
+            data: null,
+            error: `Batch not found: ${batchId}`,
+          };
+        }
+        const step = (batchProgressState.get(batchId) ?? 0) + 1;
+        batchProgressState.set(batchId, step);
+
+        const total = 10;
+        const completed = Math.min(total, step * 4);
+        const percentage = Math.round((completed / total) * 100);
+        const isDone = completed >= total;
+
+        const progress: BatchProgress = {
+          batchId,
+          completed,
+          total,
+          failed: 0,
+          percentage,
+          etaSeconds: isDone ? 0 : 5,
+          currentStatus: isDone ? "confirmed" : "submitted",
+          status: isDone ? "completed" : "processing",
+        };
+        return {
+          data: progress,
+          error: null,
+        };
+      },
       cancelBatch: async () => ({
         data: true,
         error: null,

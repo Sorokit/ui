@@ -13,14 +13,19 @@ import {
   ContractEventFeed,
   FeeEstimator,
   GasOptimizer,
+  GovernanceDashboard,
+  type GovernanceDashboardProps,
+  type GovernanceProposal,
   type GroupedTransaction,
   type InvokeParams,
   type NetworkInfo,
   type Nft,
   type Operation,
+  type ProposalStatus,
   type TimelineFilter,
   type TimelineGroup,
   type Transaction,
+  type VoteChoice,
 } from "./components/index";
 
 // Dummy usage to prevent unused warnings if strictly checked
@@ -31,6 +36,7 @@ console.log({
   AddressDisplay,
   AssetPill,
   ContractEventFeed,
+  GovernanceDashboard,
 });
 
 // Dummy type usage to prevent unused type warnings
@@ -47,4 +53,8 @@ export type TestExports = {
   groupedTx: GroupedTransaction;
   timelineFilter: TimelineFilter;
   nft: Nft;
+  governanceProps: GovernanceDashboardProps;
+  governanceProposal: GovernanceProposal;
+  proposalStatus: ProposalStatus;
+  voteChoice: VoteChoice;
 };

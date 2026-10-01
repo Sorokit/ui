@@ -155,5 +155,113 @@ describe("mock-client", () => {
     expect(Array.isArray(res.data)).toBe(true);
     expect(res.data!.length).toBeGreaterThan(0);
   });
+
+  describe("account.claimBalance coverage (#773)", () => {
+    it("returns correct TxResult shape for valid claim balance ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.account.claimBalance("cb-12345");
+      expect(res.error).toBeNull();
+      expect(res.data).not.toBeNull();
+      expect(res.data).toHaveProperty("hash");
+      expect(res.data).toHaveProperty("ledger", 12345);
+      expect(res.data).toHaveProperty("successful", true);
+      expect(res.data?.hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("returns error response for invalid claim balance ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.account.claimBalance("invalid");
+      expect(res.data).toBeNull();
+      expect(res.error).toContain("Invalid claimable balance ID");
+    });
+  });
+
+  describe("batch namespace methods coverage (#773)", () => {
+    it("submitBatch returns correct BatchResult shape for valid entries", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.batch.submitBatch({
+        entries: [
+          { address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", amount: "10.0" },
+          { address: "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", amount: "20.0" },
+        ],
+        sourceAccount: mockAddress,
+      });
+
+      expect(res.error).toBeNull();
+      expect(res.batchId).toMatch(/^batch-mock-/);
+      expect(res.data).not.toBeNull();
+      expect(res.data?.totalEntries).toBe(2);
+      expect(res.data?.successful).toBe(2);
+      expect(res.data?.failed).toBe(0);
+      expect(res.data?.entries).toHaveLength(2);
+      expect(res.data?.entries[0].status).toBe("confirmed");
+    });
+
+    it("submitBatch returns error for empty entries or invalid source account", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const emptyRes = await client.batch.submitBatch({
+        entries: [],
+        sourceAccount: mockAddress,
+      });
+      expect(emptyRes.data).toBeNull();
+      expect(emptyRes.error).toBe("Batch entries cannot be empty");
+
+      const invalidAccRes = await client.batch.submitBatch({
+        entries: [{ address: "GCCC...", amount: "5.0" }],
+        sourceAccount: "invalid",
+      });
+      expect(invalidAccRes.data).toBeNull();
+      expect(invalidAccRes.error).toBe("Invalid source account");
+    });
+
+    it("getBatchStatus returns BatchProgress shape and progresses on repeated calls", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const submitRes = await client.batch.submitBatch({
+        entries: [{ address: "GCCC...", amount: "10.0" }],
+        sourceAccount: mockAddress,
+      });
+      const batchId = submitRes.batchId;
+
+      // Call 1
+      const status1 = await client.batch.getBatchStatus(batchId);
+      expect(status1.error).toBeNull();
+      expect(status1.data?.batchId).toBe(batchId);
+      expect(status1.data?.completed).toBe(4);
+      expect(status1.data?.total).toBe(10);
+      expect(status1.data?.percentage).toBe(40);
+      expect(status1.data?.status).toBe("processing");
+
+      // Call 2: progresses further
+      const status2 = await client.batch.getBatchStatus(batchId);
+      expect(status2.data?.completed).toBe(8);
+      expect(status2.data?.percentage).toBe(80);
+      expect(status2.data?.status).toBe("processing");
+
+      // Call 3: reaches completed status
+      const status3 = await client.batch.getBatchStatus(batchId);
+      expect(status3.data?.completed).toBe(10);
+      expect(status3.data?.percentage).toBe(100);
+      expect(status3.data?.status).toBe("completed");
+    });
+
+    it("getBatchStatus returns error for invalid batch ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.batch.getBatchStatus("invalid");
+      expect(res.data).toBeNull();
+      expect(res.error).toContain("Batch not found");
+    });
+  });
 });
 

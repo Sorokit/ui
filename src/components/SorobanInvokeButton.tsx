@@ -103,12 +103,13 @@ export function SorobanInvokeButton({
   const buttonLabel = label ?? `${params.method}()`;
   const loadingLabel = !label ? `Invoking ${params.method}…` : "Invoking…";
 
-  // Cleanup timeout on unmount
+  // Cleanup timeout and pending request on unmount
   useEffect(() => {
     return () => {
       if (resetTimeoutRef.current) {
         clearTimeout(resetTimeoutRef.current);
       }
+      abortControllerRef.current?.abort();
     };
   }, []);
 

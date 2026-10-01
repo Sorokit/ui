@@ -35,7 +35,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Separator } from "@/components/ui/Separator";
@@ -138,6 +138,8 @@ export function WalletConnectModal({
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(
     null,
   );
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const walletButtonsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
   const isMobile = isMobileEnvironment();
 
@@ -179,6 +181,28 @@ export function WalletConnectModal({
     clearError();
     setStep("select");
   }
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (step !== "select") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev + 1) % walletOptions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev - 1 + walletOptions.length) % walletOptions.length);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleSelectWallet(walletOptions[focusedIndex]);
+    }
+  }, [step, walletOptions, focusedIndex]);
+
+  // Focus the button when focusedIndex changes
+  useEffect(() => {
+    if (step === "select" && walletButtonsRef.current[focusedIndex]) {
+      walletButtonsRef.current[focusedIndex]?.focus();
+    }
+  }, [focusedIndex, step]);
 
   const handleExternalLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.stopPropagation();
@@ -242,17 +266,25 @@ export function WalletConnectModal({
           {step === "select" && (
             <div
               className="grid grid-cols-2 gap-3"
-              role="group"
+              role="grid"
               aria-label="Available wallets"
+              onKeyDown={handleKeyDown}
             >
-              {walletOptions.map((wallet) => {
+              {walletOptions.map((wallet, index) => {
                 const installed = isWalletExtensionInstalled(wallet.id);
+                const isFocused = focusedIndex === index;
                 return (
                   <button
                     key={wallet.id}
                     type="button"
+                    ref={(el) => {
+                      walletButtonsRef.current[index] = el;
+                    }}
                     onClick={() => handleSelectWallet(wallet)}
-                    className="relative flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors"
+                    onKeyDown={handleKeyDown}
+                    aria-label={wallet.name}
+                    aria-pressed={isFocused}
+                    className="relative flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     {installed && (
                       <span

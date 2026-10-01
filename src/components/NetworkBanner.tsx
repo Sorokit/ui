@@ -1,6 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { NavSection } from "@/components/Sidebar";
 import { useSorokit } from "@/context/useSorokit";
@@ -166,7 +166,21 @@ export function NetworkBanner({
 
   const bannerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const updateHeight = useCallback(() => {
+    if (!bannerRef.current || typeof document === "undefined") return;
+    const measured =
+      bannerRef.current.offsetHeight ||
+      bannerRef.current.getBoundingClientRect().height ||
+      0;
+    const height = measured > 0 ? measured : 32;
+    document.documentElement.style.setProperty(
+      "--banner-height",
+      `${height}px`,
+    );
+  }, []);
+
+  // Fallback for environments without ResizeObserver
+  useLayoutEffect(() => {
     if (typeof document === "undefined") return;
 
     if (!isVisible) {
@@ -174,18 +188,18 @@ export function NetworkBanner({
       return;
     }
 
-    const updateHeight = () => {
-      if (!bannerRef.current || typeof document === "undefined") return;
-      const measured =
-        bannerRef.current.offsetHeight ||
-        bannerRef.current.getBoundingClientRect().height ||
-        0;
-      const height = measured > 0 ? measured : 32;
-      document.documentElement.style.setProperty(
-        "--banner-height",
-        `${height}px`,
-      );
-    };
+    if (typeof ResizeObserver === "undefined") {
+      updateHeight();
+    }
+  }, [isVisible, updateHeight]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    if (!isVisible) {
+      document.documentElement.style.setProperty("--banner-height", "0px");
+      return;
+    }
 
     updateHeight();
 
@@ -211,7 +225,7 @@ export function NetworkBanner({
         document.documentElement.style.setProperty("--banner-height", "0px");
       }
     };
-  }, [isVisible, networkName]);
+  }, [isVisible, networkName, updateHeight]);
 
   const handleDismiss = useCallback(() => {
     if (networkName) {

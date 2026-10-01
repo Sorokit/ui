@@ -7,7 +7,7 @@ and how each is resolved. All three fixes are implemented and verified.
 
 | # | Location | Problem | Fix |
 |---|----------|---------|-----|
-| 1 | `src/components/TransactionHistory.tsx` | Stale in-flight fetch overwrites the current page's results | `active` cleanup flag guards all state setters |
+| 1 | `src/components/TransactionHistory.tsx` | Stale in-flight fetch overwrites current results on rapid address or page changes | `fetchIdRef` counter invalidates superseded in-flight responses across effect cycles |
 | 2 | `src/components/ContractEventFeed.tsx` | Polling interval captures a stale `load` closure | `load` wrapped in `useCallback`; added to effect deps |
 | 3 | `src/context/SorokitProvider.tsx` | Account fetch resolves for a stale address | `active` cleanup flag guards all state setters |
 
@@ -18,43 +18,48 @@ and how each is resolved. All three fixes are implemented and verified.
 **File:** `src/components/TransactionHistory.tsx`
 
 The history effect fires on both `address` and `page` changes. When the user
-rapidly changes page (or the wallet address updates mid-flight), a previous
-in-flight request could resolve *after* a newer one and overwrite the correct
-results with stale data.
+rapidly changes page (or the wallet address updates mid-flight triggering a
+page-reset cycle), multiple rapid effect executions occur. A previous in-flight
+request could resolve *after* a newer one and overwrite the correct results
+with stale data if an effect's local active flag is reused in subsequent cycles.
 
-**Fix:** the effect declares a local `active` flag and a cleanup function that
-sets `active = false`. Every state setter is guarded so a response from a
-superseded request is discarded:
+**Fix:** A shared `fetchIdRef` counter tracks each fetch cycle. Each fetch start
+increments `fetchIdRef.current` to acquire a unique `fetchId`. Both the timer
+callback and response handler verify `fetchId === fetchIdRef.current` before
+updating state, and the cleanup increments `fetchIdRef.current` and clears the timer:
 
 ```ts
-useEffect(() => {
-  if (!address) return;
+const fetchIdRef = useRef(0);
 
-  let active = true;
+useEffect(() => {
+  if (!address || !client) return;
+
+  const fetchId = ++fetchIdRef.current;
   const timerId = window.setTimeout(() => {
+    if (fetchId !== fetchIdRef.current) return;
     setLoading(true);
-    getClient()
+    client
       .transaction.getHistory(address, page, PAGE_SIZE)
       .then(({ data, error: err, total: t }) => {
-        if (!active) return;            // stale guard
+        if (fetchId !== fetchIdRef.current) return; // stale guard
         if (err) { setError(err); return; }
         setTxs(data ?? []);
         setTotal(t);
         setError(null);
       })
       .finally(() => {
-        if (active) setLoading(false);  // stale guard
+        if (fetchId === fetchIdRef.current) setLoading(false); // stale guard
       });
   }, 0);
 
   return () => {
-    active = false;
+    fetchIdRef.current++;
     window.clearTimeout(timerId);
   };
-}, [address, page]);
+}, [address, client, page]);
 ```
 
-**Result:** rapidly changing page never displays a previous page's results.
+**Result:** rapidly changing address or page never displays a previous fetch's results.
 
 ---
 

@@ -3,6 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
 
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    addToast: vi.fn(),
+    removeToast: vi.fn(),
+    dismissAll: vi.fn(),
+    clearAll: vi.fn(),
+    toasts: [],
+  }),
+}));
+
 describe("MultiSigTransactionBuilder", () => {
   beforeEach(() => {
     const storage = window.localStorage;
@@ -26,6 +40,23 @@ describe("MultiSigTransactionBuilder", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /next/i }));
     expect(screen.getAllByText(/build transaction/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows copy button in step 3 (final confirmation)", () => {
+    render(<MultiSigTransactionBuilder />);
+
+    // Configure signers and move to step 1
+    fireEvent.change(screen.getByLabelText(/signer 1 address/i), { target: { value: "GABC" } });
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    // Move to step 2 (signatures)
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    // Move to step 3 (final confirmation)
+    fireEvent.click(screen.getByRole("button", { name: /next/i }));
+
+    // Verify copy button exists
+    expect(screen.getByRole("button", { name: /Copy XDR/i })).toBeInTheDocument();
   });
 
   it("saves and loads transactions from localStorage", async () => {
@@ -57,6 +88,21 @@ describe("MultiSigTransactionBuilder", () => {
     expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
   });
 
+  it("rejects a threshold greater than the number of configured signers", () => {
+    render(<MultiSigTransactionBuilder />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add signer/i }));
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "3" } });
+
+    expect(screen.getByText(/Threshold exceeds available weight/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "2" } });
+
+    expect(screen.queryByText(/Threshold exceeds available weight/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /next/i })).not.toBeDisabled();
+  });
+
   it("keeps signer keys unique when adding after removing a middle signer", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<MultiSigTransactionBuilder />);
@@ -77,8 +123,39 @@ describe("MultiSigTransactionBuilder", () => {
     const original = window.localStorage;
     render(<MultiSigTransactionBuilder />);
 
-    fireEvent.click(screen.getByRole("button", { name: /save json/i }));
-
     expect(window.localStorage).toBe(original);
+  });
+
+  it("handles corrupt JSON in localStorage without crashing, clears storage and shows warning toast", () => {
+    const storage = window.localStorage;
+    if (storage && typeof storage.setItem === "function") {
+      storage.setItem("sorokit-multisig-builder-state", "{corrupt-json");
+    }
+
+    render(<MultiSigTransactionBuilder />);
+    fireEvent.click(screen.getByRole("button", { name: /load saved/i }));
+
+    expect(
+      screen.getByText(/Saved state was corrupt or invalid and has been reset/i),
+    ).toBeInTheDocument();
+    expect(storage?.getItem("sorokit-multisig-builder-state")).toBeNull();
+  });
+
+  it("handles invalid schema shape in localStorage without crashing, clears storage and shows warning toast", () => {
+    const storage = window.localStorage;
+    if (storage && typeof storage.setItem === "function") {
+      storage.setItem(
+        "sorokit-multisig-builder-state",
+        JSON.stringify({ signers: "not-an-array", threshold: "invalid" }),
+      );
+    }
+
+    render(<MultiSigTransactionBuilder />);
+    fireEvent.click(screen.getByRole("button", { name: /load saved/i }));
+
+    expect(
+      screen.getByText(/Saved state was corrupt or invalid and has been reset/i),
+    ).toBeInTheDocument();
+    expect(storage?.getItem("sorokit-multisig-builder-state")).toBeNull();
   });
 });

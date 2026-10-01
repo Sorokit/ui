@@ -12,6 +12,7 @@ import { useSorokit } from "@/context/useSorokit";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
+  friendlyError,
   truncateAddress,
   truncateToUtf8ByteLength,
   utf8ByteLength,
@@ -44,6 +45,7 @@ export interface TransactionPanelProps {
   defaultAmount?: string;
   defaultMemo?: string;
   previewMode?: boolean;
+  decimals?: number;
   onSuccess?: (result: TxResult) => void;
   onError?: (error: string) => void;
   className?: string;
@@ -54,6 +56,7 @@ export function TransactionPanel({
   defaultAmount = "",
   defaultMemo = "",
   previewMode = true,
+  decimals = 7,
   onSuccess,
   onError,
   className,
@@ -120,7 +123,10 @@ export function TransactionPanel({
   const isDestValid = validateStellarAddress(dest);
   const isSelfPayment = dest.trim() === address;
   const parsedAmount = parseFloat(amount);
-  const isAmountValid = !isNaN(parsedAmount) && parsedAmount >= 0.0000001;
+  const amountStr = amount.trim();
+  const decimalParts = amountStr.includes(".") ? amountStr.split(".")[1] : "";
+  const exceedsDecimals = decimalParts.length > decimals;
+  const isAmountValid = !isNaN(parsedAmount) && parsedAmount >= 0.0000001 && !exceedsDecimals;
   const isMemoIdValid =
     memoType !== "id" || (memo.trim() !== "" && /^\d+$/.test(memo.trim()));
 
@@ -180,9 +186,10 @@ export function TransactionPanel({
       });
       if (signal.aborted) return;
       if (err) {
-        setError(err);
+        const message = friendlyError(err);
+        setError(message);
         setState("error");
-        onError?.(err);
+        onError?.(message);
         return;
       }
       setResult(data);
@@ -196,9 +203,10 @@ export function TransactionPanel({
     } catch (e) {
       if (!signal.aborted) {
         const msg = e instanceof Error ? e.message : "Unknown error";
-        setError(msg);
+        const message = friendlyError(msg);
+        setError(message);
         setState("error");
-        onError?.(msg);
+        onError?.(message);
       }
     } finally {
       setPreview(null);
@@ -404,6 +412,9 @@ export function TransactionPanel({
               step="0.0000001"
               value={amount}
               onChange={(e) => {
+                // Keep exactly what the user typed: truncating here would make
+                // `exceedsDecimals` unreachable, so an 8th decimal would be silently
+                // dropped instead of surfacing the error below.
                 setAmount(e.target.value);
                 setAmountDirty(true);
               }}
@@ -413,6 +424,9 @@ export function TransactionPanel({
                   : undefined
               }
               error={
+                // A sub-minimum amount can only be written with more decimal
+                // places than the asset allows, so the minimum check is reported
+                // first: it is the constraint the user has to act on.
                 amountDirty
                   ? amount.trim() === ""
                     ? "Amount is required"
@@ -420,11 +434,13 @@ export function TransactionPanel({
                       ? "Amount must be greater than 0"
                       : parsedAmount < 0.0000001
                         ? "Minimum amount is 0.0000001 XLM"
-                        : !hasSufficientBalance
-                          ? isSendingXlm && estimatedFeeXlm > 0
-                            ? "Insufficient balance (amount + network fee exceeds available balance)"
-                            : "Insufficient balance"
-                          : undefined
+                        : exceedsDecimals
+                          ? `Amount cannot exceed ${decimals} decimal places`
+                          : !hasSufficientBalance
+                            ? isSendingXlm && estimatedFeeXlm > 0
+                              ? "Insufficient balance (amount + network fee exceeds available balance)"
+                              : "Insufficient balance"
+                            : undefined
                   : undefined
               }
               disabled={state === "loading"}
@@ -507,6 +523,7 @@ export function TransactionPanel({
             size="md"
             loading={state === "loading" || isBuildingPreview}
             disabled={!canSubmit}
+            data-testid="submit-transaction"
           >
             {state === "loading"
               ? "Submitting…"

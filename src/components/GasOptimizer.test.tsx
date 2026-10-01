@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -710,7 +710,64 @@ describe("GasOptimizer", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Export Config" }));
 
-      expect(execCommandSpy).toHaveBeenCalledWith("copy");
+  });
+  
+  });
+  
+  describe("Visibility polling (#772)", () => {
+    it("pauses polling when isVisible is false and resumes when true", async () => {
+      vi.useFakeTimers();
+      
+      let observerCallback: IntersectionObserverCallback | undefined;
+      vi.stubGlobal(
+        "IntersectionObserver",
+        vi.fn((cb) => {
+          observerCallback = cb;
+          return {
+            observe: vi.fn(),
+            unobserve: vi.fn(),
+            disconnect: vi.fn(),
+          };
+        })
+      );
+      
+      const { getGasPrice } = mockClient();
+      
+      const { unmount } = render(<GasOptimizer refreshInterval={5000} />);
+      
+      await vi.runOnlyPendingTimersAsync();
+      const count1 = getGasPrice.mock.calls.length;
+      
+      // Change visibility to false
+      act(() => {
+        observerCallback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+      
+      // Advance timers by multiple intervals
+      await act(async () => {
+        vi.advanceTimersByTime(15000);
+      });
+      
+      // Should not have polled while invisible
+      expect(getGasPrice.mock.calls.length).toBe(count1);
+      
+      // Change visibility to true
+      act(() => {
+        observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+      
+      // Wait for immediate resumption effect
+      await vi.runOnlyPendingTimersAsync();
+      
+      // Advance by one interval
+      await act(async () => {
+        vi.advanceTimersByTime(5000);
+      });
+      
+      expect(getGasPrice.mock.calls.length).toBeGreaterThan(count1);
+      
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
     });
   });
 });

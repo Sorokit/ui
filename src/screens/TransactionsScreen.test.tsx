@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 import type { SorokitClient } from "@/lib/client";
 import { getClient } from "@/lib/client";
@@ -53,6 +54,15 @@ function mockClient() {
   } as unknown as SorokitClient);
 }
 
+// The screen mounts MultiSigTransactionBuilder, which reads the toast context,
+// so these renders need the provider the real app supplies.
+function renderScreen() {
+  return render(
+    <ToastProvider>
+      <TransactionsScreen />
+    </ToastProvider>,
+  );
+}
 describe("TransactionsScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -64,22 +74,22 @@ describe("TransactionsScreen", () => {
   });
 
   it("renders the screen heading", () => {
-    render(<TransactionsScreen />);
+    renderScreen();
     expect(screen.getByText("Transactions")).toBeInTheDocument();
   });
 
   it("renders FeeEstimator with its section title", () => {
-    render(<TransactionsScreen />);
+    renderScreen();
     expect(screen.getByText("Network Fee")).toBeInTheDocument();
   });
 
   it("renders TransactionPanel with its section title", () => {
-    render(<TransactionsScreen />);
+    renderScreen();
     expect(screen.getAllByText(/Send (Payment|XLM)/i)[0]).toBeInTheDocument();
   });
 
   it("renders FeeEstimator above TransactionPanel in the DOM", () => {
-    const { container } = render(<TransactionsScreen />);
+    const { container } = renderScreen();
 
     const allHeadings = Array.from(container.querySelectorAll("h3"));
     const feeHeading = screen.getByText("Network Fee");
@@ -94,12 +104,12 @@ describe("TransactionsScreen", () => {
   });
 
   it("renders ActivityTimeline with its section title", () => {
-    render(<TransactionsScreen />);
+    renderScreen();
     expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
   });
 
   it("renders ActivityTimeline below TransactionPanel in the DOM", () => {
-    const { container } = render(<TransactionsScreen />);
+    const { container } = renderScreen();
 
     const allHeadings = Array.from(container.querySelectorAll("h3"));
     const feeHeading = screen.getByText("Network Fee");

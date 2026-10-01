@@ -5,6 +5,7 @@ import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
+import { PAGE_TITLES } from "@/lib/nav-labels";
 import { AccountScreen } from "@/screens/AccountScreen";
 import { WalletScreen } from "@/screens/WalletScreen";
 
@@ -38,20 +39,6 @@ const YieldFarmingScreen = lazy(() =>
     default: m.YieldFarmingScreen,
   })),
 );
-
-const PAGE_TITLES: Record<NavSection, string> = {
-  wallet: "Wallet — Sorokit",
-  account: "Account — Sorokit",
-  transactions: "Transactions — Sorokit",
-  soroban: "Soroban — Sorokit",
-  network: "Network — Sorokit",
-  recovery: "Recovery — Sorokit",
-  charts: "Charts — Sorokit",
-  farming: "Yield Farming — Sorokit",
-  budget: "Budget — Sorokit",
-  nfts: "NFTs — Sorokit",
-  governance: "Governance — Sorokit",
-};
 
 const SCREENS: Record<NavSection, ComponentType> = {
   wallet: WalletScreen,
@@ -141,6 +128,9 @@ export function Dashboard({
 
   const active = isControlled ? activeSection : internalActive;
 
+  // Keep the browser tab title in sync with the active screen (#551) — screen
+  // readers, multi-tab users and history entries all rely on it. Runs on mount
+  // as well, so the Wallet default is applied without waiting for a nav click.
   useEffect(() => {
     document.title = PAGE_TITLES[active];
   }, [active]);
@@ -191,6 +181,7 @@ export function Dashboard({
                 <div
                   key={section}
                   hidden={section !== active}
+                  aria-hidden={section !== active}
                   data-testid={`screen-wrapper-${section}`}
                 >
                   <ErrorBoundary

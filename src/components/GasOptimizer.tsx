@@ -10,7 +10,7 @@ import {
   ZapIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
@@ -154,22 +154,27 @@ function copyViaExecCommand(text: string): boolean {
     textarea.style.pointerEvents = "none";
     document.body.appendChild(textarea);
     textarea.select();
-    textarea.setSelectionRange(0, text.length);
-    const succeeded = document.execCommand("copy");
-    document.body.removeChild(textarea);
     return succeeded;
   } catch {
     return false;
   }
 }
 
+import { useFeeData } from "@/hooks/useFeeData";
+import { useIsVisible } from "@/hooks/useIsVisible";
+
+const DEFAULT_OPERATIONS = ["payment"];
+
 export function GasOptimizer({
   className,
-  operations = ["payment"],
+  operations = DEFAULT_OPERATIONS,
   refreshInterval = 0,
   onExport,
 }: GasOptimizerProps) {
   const { client, network } = useSorokit();
+  const { fee } = useFeeData(refreshInterval);
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
+  const { client, network, registerWatcher } = useSorokit();
   const [gasPriceData, setGasPriceData] = useState<GasPriceData | null>(null);
   const [estimate, setEstimate] = useState<GasEstimate | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,23 +248,45 @@ export function GasOptimizer({
     }
   }, [client, estimate, operations]);
 
+  const gasIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
+    if (!isVisible) return;
     const timerId = window.setTimeout(() => {
       void loadGasData();
     }, 0);
     if (refreshInterval > 0) {
-      const id = setInterval(() => {
+      gasIntervalRef.current = setInterval(() => {
         void loadGasData();
       }, refreshInterval);
       return () => {
         window.clearTimeout(timerId);
-        clearInterval(id);
+        if (gasIntervalRef.current !== null) {
+          clearInterval(gasIntervalRef.current);
+          gasIntervalRef.current = null;
+        }
       };
     }
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [loadGasData, refreshInterval]);
+  }, [loadGasData, refreshInterval, isVisible]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715).
+  useEffect(() => {
+    const cancel = () => {
+      if (gasIntervalRef.current !== null) {
+        clearInterval(gasIntervalRef.current);
+        gasIntervalRef.current = null;
+      }
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
 
   useEffect(() => {
     if (!estimate) return;
@@ -406,6 +433,7 @@ export function GasOptimizer({
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "rounded-xl border border-line bg-surface overflow-hidden",
         className,

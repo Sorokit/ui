@@ -18,7 +18,6 @@ type AssetBreakdown = {
   percentage: number;
 };
 
-
 export function BudgetScreen() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(
     "monthly",

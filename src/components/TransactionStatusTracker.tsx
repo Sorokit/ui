@@ -160,7 +160,7 @@ export function TransactionStatusTracker({
   pollIntervalMs = 2000,
   className,
 }: TransactionStatusTrackerProps) {
-  const { network, client } = useSorokit();
+  const { network, client, registerWatcher } = useSorokit();
   const initialHashes = useMemo(() => {
     const combined = [hash, ...hashes].filter(Boolean) as string[];
     return [...new Set(combined)];
@@ -169,6 +169,7 @@ export function TransactionStatusTracker({
     initialHashes.map(createTrackedTransaction),
   );
   const trackedRef = useRef(tracked);
+  const txIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
@@ -288,12 +289,34 @@ export function TransactionStatusTracker({
     };
 
     void pollTransactions();
-    const timerId = window.setInterval(() => {
+    const timerId: ReturnType<typeof setInterval> = window.setInterval(() => {
+    txIntervalRef.current = globalThis.setInterval(() => {
       void pollTransactions();
     }, pollIntervalMs);
 
-    return () => window.clearInterval(timerId);
+    return () => {
+      if (txIntervalRef.current !== null) {
+        clearInterval(txIntervalRef.current);
+        txIntervalRef.current = null;
+      }
+    };
   }, [client, network?.name, network?.rpcUrl, pollIntervalMs, tracked.length]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715).
+  useEffect(() => {
+    const cancel = () => {
+      if (txIntervalRef.current !== null) {
+        clearInterval(txIntervalRef.current);
+        txIntervalRef.current = null;
+      }
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
 
   const addTrackedHash = () => {
     const nextHash = inputValue.trim();

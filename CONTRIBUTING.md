@@ -41,6 +41,21 @@ Run tests with coverage:
 npm run test:coverage
 ```
 
+Open the interactive Vitest UI:
+```bash
+npm run test:ui
+```
+
+### Test configuration
+
+Vitest, React Testing Library and jsdom are configured in the `test` block of
+`vite.config.ts`. The shared setup file is `src/test/setup.ts`: it registers the
+jest-dom matchers, cleans the DOM between tests, and provides the jsdom shims
+(`localStorage`, `ResizeObserver`, pointer capture) the component suite needs.
+Add new environment-level shims there rather than at the top of individual test
+files, and keep `src/test/placeholder.test.tsx` passing as a quick check that
+the harness itself still works.
+
 ### Test File Conventions
 
 - Test files live alongside source files: `src/components/MyComponent.test.ts`

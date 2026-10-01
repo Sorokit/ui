@@ -216,7 +216,7 @@ export function AllowanceManager({ className, currentLedger }: AllowanceManagerP
     );
   }
 
-  const renderAllowanceCard = (entry: AllowanceEntry) => {
+  const renderAllowanceCard = (entry: AllowanceEntry, index: number) => {
     const isExp = isExpired(entry.expirationDate, entry.expirationLedger, currentLedger);
     const isProcessingIncrease = processing[`${entry.asset}-${entry.spender}`] === 'increase';
     const isProcessingDecrease = processing[`${entry.asset}-${entry.spender}`] === 'decrease';
@@ -308,7 +308,7 @@ export function AllowanceManager({ className, currentLedger }: AllowanceManagerP
                 <div className="flex flex-wrap gap-2">
                   <IncreaseButton entry={entry} onIncrease={handleIncrease} processing={isProcessingIncrease} />
                   <DecreaseDialog entry={entry} onDecrease={handleDecrease} processing={isProcessingDecrease} />
-                  <RevokeButton entry={entry} onRevoke={handleRevoke} processing={isProcessingRevoke} />
+                  <RevokeButton entry={entry} onRevoke={handleRevoke} processing={isProcessingRevoke} index={index} />
                 </div>
               </div>
             </div>
@@ -531,10 +531,12 @@ function RevokeButton({
   entry,
   onRevoke,
   processing,
+  index,
 }: {
   entry: AllowanceEntry;
   onRevoke: (entry: AllowanceEntry) => void;
   processing: boolean;
+  index: number;
 }) {
   const [confirming, setConfirming] = useState(false);
 
@@ -546,6 +548,7 @@ function RevokeButton({
   return (
     <>
       <button
+        data-testid={`revoke-allowance-${index}`}
         onClick={(e) => {
           e.stopPropagation();
           setConfirming(true);

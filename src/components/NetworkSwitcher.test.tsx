@@ -332,4 +332,28 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
     fireEvent.keyDown(document, { key: "n", altKey: true });
     expect(screen.queryByText("Select Network")).not.toBeInTheDocument();
   });
+
+  it("shows form error when adding a custom network with built-in name", async () => {
+    render(<NetworkSwitcher />);
+    const trigger = screen.getByRole("button", { name: /current network: testnet/i });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+
+    fireEvent.click(screen.getByText("Add Custom Network..."));
+
+    const nameInput = screen.getByLabelText(/network name \*/i);
+    const rpcInput = screen.getByLabelText(/rpc endpoint url \*/i);
+
+    fireEvent.change(nameInput, { target: { value: "testnet" } });
+    fireEvent.change(rpcInput, { target: { value: "https://soroban-testnet.stellar.org" } });
+
+    const form = screen.getByRole("button", { name: /add & switch network/i }).closest("form")!;
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+
+    expect(
+      screen.getByText('Cannot add custom network with built-in name "testnet".'),
+    ).toBeInTheDocument();
+    expect(addCustomNetwork).not.toHaveBeenCalled();
+  });
 });

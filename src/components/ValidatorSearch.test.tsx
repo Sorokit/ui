@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultFilter } from "@/lib/staking";
 
@@ -79,11 +79,20 @@ describe("ValidatorSearch — rendering", () => {
 // ─── Interactions ─────────────────────────────────────────────────────────────
 
 describe("ValidatorSearch — interactions", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
   it("calls onChange with updated query when user types", () => {
     const { onChange, filter } = renderSearch();
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "alpha" },
     });
+    vi.advanceTimersByTime(300);
     expect(onChange).toHaveBeenCalledWith({ ...filter, query: "alpha" });
   });
 
@@ -152,11 +161,20 @@ describe("ValidatorSearch — interactions", () => {
 // ─── Query trimming and clear button (#690) ───────────────────────────────────
 
 describe("ValidatorSearch — query trimming and clear button (#690)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
   it("trims leading whitespace from a pasted query", () => {
     const { onChange, filter } = renderSearch();
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "   GABC123" },
     });
+    vi.advanceTimersByTime(300);
     expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
   });
 
@@ -165,6 +183,7 @@ describe("ValidatorSearch — query trimming and clear button (#690)", () => {
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "GABC123   " },
     });
+    vi.advanceTimersByTime(300);
     expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
   });
 
@@ -173,6 +192,7 @@ describe("ValidatorSearch — query trimming and clear button (#690)", () => {
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "  Alpha Staking  " },
     });
+    vi.advanceTimersByTime(300);
     expect(onChange).toHaveBeenCalledWith({
       ...filter,
       query: "Alpha Staking",

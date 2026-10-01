@@ -1,8 +1,11 @@
+import { Copy01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useToast } from "@/context/ToastContext";
 import { cn } from "@/lib/utils";
 
 type Step = 0 | 1 | 2 | 3;
@@ -20,6 +23,33 @@ interface BuilderState {
   xdr: string;
   status: string;
   notes: string;
+}
+
+function isValidSigner(obj: unknown): obj is Signer {
+  if (!obj || typeof obj !== "object") return false;
+  const s = obj as Record<string, unknown>;
+  return (
+    typeof s.id === "string" &&
+    typeof s.address === "string" &&
+    typeof s.weight === "number" &&
+    !Number.isNaN(s.weight) &&
+    typeof s.signed === "boolean"
+  );
+}
+
+function isValidBuilderState(parsed: unknown): parsed is BuilderState {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  const s = parsed as Record<string, unknown>;
+  if ("signers" in s && s.signers !== undefined) {
+    if (!Array.isArray(s.signers) || !s.signers.every(isValidSigner)) return false;
+  }
+  if ("threshold" in s && s.threshold !== undefined) {
+    if (typeof s.threshold !== "number" || Number.isNaN(s.threshold)) return false;
+  }
+  if ("xdr" in s && s.xdr !== undefined && typeof s.xdr !== "string") return false;
+  if ("status" in s && s.status !== undefined && typeof s.status !== "string") return false;
+  if ("notes" in s && s.notes !== undefined && typeof s.notes !== "string") return false;
+  return true;
 }
 
 const STORAGE_KEY = "sorokit-multisig-builder-state";
@@ -98,6 +128,7 @@ export function MultiSigTransactionBuilder() {
   const [notes, setNotes] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [loadedMessage, setLoadedMessage] = useState<string | null>(null);
+  const { success: showSuccessToast } = useToast();
 
   const { totalWeight, valid } = useMemo(() => validateThreshold(signers, threshold), [signers, threshold]);
 
@@ -148,7 +179,18 @@ export function MultiSigTransactionBuilder() {
       return;
     }
     try {
-      const parsed = JSON.parse(raw) as BuilderState;
+      const parsed = JSON.parse(raw);
+      if (!isValidBuilderState(parsed)) {
+        storage.removeItem(STORAGE_KEY);
+        setSigners([createSigner()]);
+        setThreshold(1);
+        setXdr("<tx:xdr:placeholder>");
+        setStatus("Draft");
+        setNotes("");
+        setStep(0);
+        setLoadedMessage("Saved state was corrupt or invalid and has been reset");
+        return;
+      }
       setSigners(parsed.signers ?? [createSigner()]);
       setThreshold(parsed.threshold ?? 1);
       setXdr(parsed.xdr ?? "<tx:xdr:placeholder>");
@@ -157,7 +199,14 @@ export function MultiSigTransactionBuilder() {
       setStep(1);
       setLoadedMessage("Loaded saved transaction");
     } catch {
-      setLoadedMessage("Unable to load saved transaction");
+      storage.removeItem(STORAGE_KEY);
+      setSigners([createSigner()]);
+      setThreshold(1);
+      setXdr("<tx:xdr:placeholder>");
+      setStatus("Draft");
+      setNotes("");
+      setStep(0);
+      setLoadedMessage("Saved state was corrupt or invalid and has been reset");
     }
   }
 
@@ -283,7 +332,23 @@ export function MultiSigTransactionBuilder() {
               <p className="mt-1 text-[12px] text-ink-3">{notes || "No notes provided."}</p>
             </div>
             <div className="rounded-lg border border-line bg-surface-2 p-4">
-              <p className="text-[12px] font-semibold text-ink">Prepared XDR</p>
+              <div className="flex items-center justify-between">
+                <p className="text-[12px] font-semibold text-ink">Prepared XDR</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-ink-3 hover:text-ink-2 h-auto py-1 px-2 text-[11px]"
+                  onClick={() => {
+                    navigator.clipboard.writeText(xdr).catch(() => {});
+                    showSuccessToast("XDR copied to clipboard");
+                  }}
+                  title="Copy XDR"
+                  aria-label="Copy XDR to clipboard"
+                >
+                  <HugeiconsIcon icon={Copy01Icon} size={14} className="mr-1 inline-block" />
+                  Copy
+                </Button>
+              </div>
               <pre className="mt-2 whitespace-pre-wrap break-all text-[12px] font-mono text-ink-2">{xdr}</pre>
             </div>
           </div>

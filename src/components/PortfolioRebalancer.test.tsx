@@ -691,3 +691,43 @@ describe("PortfolioRebalancer — issue #674", () => {
   });
 });
 
+// ─── Issue #723: injectable price provider ──────────────────────────────────
+
+describe("PortfolioRebalancer — issue #723", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSorokit({ balances: TWO_BALANCES });
+    mockClient();
+  });
+
+  it("shows the simulated-prices disclaimer when no priceProvider is supplied", async () => {
+    render(<PortfolioRebalancer />);
+    await waitFor(() => {
+      expect(screen.getByText(/prices are simulated/i)).toBeInTheDocument();
+    });
+  });
+
+  it("uses an injected priceProvider instead of STUB_PRICES and hides the disclaimer", async () => {
+    const mockPriceProvider = vi.fn().mockResolvedValue({
+      XLM: 999,
+      USDC: 1.0,
+    });
+
+    render(<PortfolioRebalancer priceProvider={mockPriceProvider} />);
+
+    await waitFor(() => {
+      expect(mockPriceProvider).toHaveBeenCalledWith(expect.arrayContaining(["XLM", "USDC"]));
+    });
+
+    // Disclaimer should NOT show since a real provider was supplied
+    expect(screen.queryByText(/prices are simulated/i)).not.toBeInTheDocument();
+
+    // Portfolio value should reflect the injected price (XLM=999), not the stub (XLM=0.11)
+    await waitFor(() => {
+      expect(screen.getByText(/portfolio value/i)).toBeInTheDocument();
+    });
+  });
+});
+
+
+

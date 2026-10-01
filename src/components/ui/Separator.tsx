@@ -31,6 +31,7 @@ export function Separator({
     return (
       <div
         role="separator"
+        aria-orientation="horizontal"
         className={`flex items-center gap-3 ${spacingMap[spacing]} ${className ?? ""}`}
       >
         <div className="flex-1 h-px bg-line" />
@@ -43,6 +44,7 @@ export function Separator({
   return (
     <div
       role="separator"
+      aria-orientation="horizontal"
       className={`h-px bg-line w-full ${spacingMap[spacing]} ${className ?? ""}`}
     />
   );

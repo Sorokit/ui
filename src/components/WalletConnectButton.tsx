@@ -84,24 +84,42 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
   };
 
   if (isConnected && address) {
-    const handleClick = () => {
-      if (onOpenModal) {
-        onOpenModal();
-      } else {
-        setDropdownOpen((prev) => !prev);
-      }
-    };
+    if (onOpenModal) {
+      return (
+        <button
+          type="button"
+          onClick={onOpenModal}
+          className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          aria-label={`Wallet connected: ${address}. Click to manage.`}
+        >
+          <span className="w-2 h-2 rounded-full bg-green shrink-0" />
+          <span data-address className="hidden sm:inline">
+            {truncateAddress(address)}
+          </span>
+          {isHardwareWallet && (
+            <span
+              data-testid="hardware-badge"
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30"
+            >
+              {walletName && walletName.toLowerCase().includes("ledger")
+                ? "Ledger"
+                : "Hardware"}
+            </span>
+          )}
+        </button>
+      );
+    }
 
     return (
-      <DropdownMenu.Root open={onOpenModal ? false : dropdownOpen} onOpenChange={onOpenModal ? undefined : setDropdownOpen}>
+      <DropdownMenu.Root open={dropdownOpen} onOpenChange={setDropdownOpen}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            onClick={handleClick}
+            onClick={() => setDropdownOpen((prev) => !prev)}
             className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             aria-label={`Wallet connected: ${address}. Click to manage.`}
             aria-haspopup="menu"
-            aria-expanded={onOpenModal ? undefined : dropdownOpen}
+            aria-expanded={dropdownOpen}
           >
             <span className="w-2 h-2 rounded-full bg-green shrink-0" />
             <span data-address className="hidden sm:inline">
@@ -120,58 +138,56 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
           </button>
         </DropdownMenu.Trigger>
 
-        {!onOpenModal && (
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              ref={menuRef}
-              align="end"
-              sideOffset={6}
-              onPointerDownOutside={() => setDropdownOpen(false)}
-              className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-top-1 duration-200"
-            >
-              {/* Wallet info header */}
-              <div className="px-3 py-2 border-b border-line mb-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[12px] font-medium text-ink truncate font-mono">
-                    {truncateAddress(address)}
-                  </p>
-                  {isHardwareWallet && (
-                    <span
-                      data-testid="hardware-badge-dropdown"
-                      className="text-[9px] font-medium px-1 py-0.2 rounded bg-purple-500/15 text-purple-400"
-                    >
-                      {walletName && walletName.toLowerCase().includes("ledger")
-                        ? "Ledger"
-                        : "Hardware"}
-                    </span>
-                  )}
-                </div>
-                {network && (
-                  <p className="text-[10px] text-ink-4 mt-0.5 capitalize">
-                    {network.name}
-                  </p>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            ref={menuRef}
+            align="end"
+            sideOffset={6}
+            onPointerDownOutside={() => setDropdownOpen(false)}
+            className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-top-1 duration-200"
+          >
+            {/* Wallet info header */}
+            <div className="px-3 py-2 border-b border-line mb-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12px] font-medium text-ink truncate font-mono">
+                  {truncateAddress(address)}
+                </p>
+                {isHardwareWallet && (
+                  <span
+                    data-testid="hardware-badge-dropdown"
+                    className="text-[9px] font-medium px-1 py-0.2 rounded bg-purple-500/15 text-purple-400"
+                  >
+                    {walletName && walletName.toLowerCase().includes("ledger")
+                      ? "Ledger"
+                      : "Hardware"}
+                  </span>
                 )}
               </div>
+              {network && (
+                <p className="text-[10px] text-ink-4 mt-0.5 capitalize">
+                  {network.name}
+                </p>
+              )}
+            </div>
 
-              {/* Disconnect action */}
-              <DropdownMenu.Item
-                onSelect={() => {
-                  void handleDisconnect();
-                }}
-                disabled={isDisconnecting}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-red hover:bg-error-dim-muted transition-colors cursor-pointer outline-none focus:bg-error-dim-muted disabled:opacity-50"
-              >
-                <HugeiconsIcon
-                  icon={Logout04Icon}
-                  size={14}
-                  color="currentColor"
-                  strokeWidth={2}
-                />
-                {isDisconnecting ? "Disconnecting…" : "Disconnect"}
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        )}
+            {/* Disconnect action */}
+            <DropdownMenu.Item
+              onSelect={() => {
+                void handleDisconnect();
+              }}
+              disabled={isDisconnecting}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-red hover:bg-error-dim-muted transition-colors cursor-pointer outline-none focus:bg-error-dim-muted disabled:opacity-50"
+            >
+              <HugeiconsIcon
+                icon={Logout04Icon}
+                size={14}
+                color="currentColor"
+                strokeWidth={2}
+              />
+              {isDisconnecting ? "Disconnecting…" : "Disconnect"}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
       </DropdownMenu.Root>
     );
   }

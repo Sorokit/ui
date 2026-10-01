@@ -9,7 +9,7 @@ import {
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -307,6 +307,12 @@ export function TransactionHistory({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Shared fetch counter to guard against stale responses when rapid address
+  // or page changes occur (e.g., address change triggering a page-reset cycle).
+  // Responses from superseded fetch IDs are discarded regardless of execution order.
+  // See docs/async-race-conditions.md for background on async race conditions.
+  const fetchIdRef = useRef(0);
+
   if (prevAddress !== address) {
     setPrevAddress(address);
     setPage(1);
@@ -317,13 +323,14 @@ export function TransactionHistory({
   useEffect(() => {
     if (!address || !client) return;
 
-    let active = true;
+    const fetchId = ++fetchIdRef.current;
     const timerId = window.setTimeout(() => {
+      if (fetchId !== fetchIdRef.current) return;
       setLoading(true);
       client
         .transaction.getHistory(address, page, PAGE_SIZE)
         .then(({ data, error: err, total: t }) => {
-          if (!active) return;
+          if (fetchId !== fetchIdRef.current) return;
           if (err) {
             setError(err);
             return;
@@ -333,12 +340,12 @@ export function TransactionHistory({
           setError(null);
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (fetchId === fetchIdRef.current) setLoading(false);
         });
     }, 0);
 
     return () => {
-      active = false;
+      fetchIdRef.current++;
       window.clearTimeout(timerId);
     };
   }, [address, client, page]);

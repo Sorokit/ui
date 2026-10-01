@@ -63,41 +63,71 @@ export function SwapExecutionTracker({
   timeoutSeconds = 60,
   onRetry,
 }: SwapExecutionTrackerProps) {
-  const getInitialStatus = (): SwapExecutionStatus => {
+  // Separate piece of state for the timeout condition only — never set inside
+  // an effect body synchronously; the interval callback is async so it's fine.
+  const [timedOut, setTimedOut] = useState(false);
+
+  // Derive effective status from props + timedOut — no setState inside effects.
+  const internalStatus: SwapExecutionStatus = (() => {
+    if (timedOut) return "timeout";
     if (statusProp) return statusProp;
     if (executedAt || actualOutput != null) return "success";
     if (txHash) return "confirming";
     return "submitted";
-  };
-
-  const [internalStatus, setInternalStatus] = useState<SwapExecutionStatus>(getInitialStatus);
-
-  const currentStatus =
-    internalStatus === "timeout" && (!statusProp || statusProp === "submitted" || statusProp === "confirming")
-      ? "timeout"
-      : (statusProp ?? internalStatus);
+  })();
 
   const [timeLeft, setTimeLeft] = useState(timeoutSeconds);
+  const [previousStatusProps, setPreviousStatusProps] = useState({
+    statusProp,
+    executedAt,
+    actualOutput,
+  });
+  const [previousCountdownConfig, setPreviousCountdownConfig] = useState({
+    timeoutSeconds,
+    internalStatus,
+  });
 
+  // During-render state sync: update previousStatusProps when props change so
+  // that internalStatus (derived from props) reflects the new values immediately.
+  if (
+    previousStatusProps.statusProp !== statusProp ||
+    previousStatusProps.executedAt !== executedAt ||
+    previousStatusProps.actualOutput !== actualOutput
+  ) {
+    setPreviousStatusProps({ statusProp, executedAt, actualOutput });
+  }
+
+  // Reset the countdown when timeout duration or pending status changes.
+  if (
+    previousCountdownConfig.timeoutSeconds !== timeoutSeconds ||
+    previousCountdownConfig.internalStatus !== internalStatus
+  ) {
+    setPreviousCountdownConfig({ timeoutSeconds, internalStatus });
+    setTimeLeft(timeoutSeconds);
+  }
+
+  // Handle timeout countdown for pending states (submitted / confirming)
   useEffect(() => {
-    const isPending = currentStatus === "submitted" || currentStatus === "confirming";
-    if (!isPending) return;
-    const timeout = window.setTimeout(() => {
-      setInternalStatus("timeout");
-      setTimeLeft(0);
-    }, timeoutSeconds * 1000);
-    const interval = window.setInterval(() => {
-      setTimeLeft((previous) => Math.max(previous - 1, 0));
-    }, 1000);
-    return () => {
-      window.clearTimeout(timeout);
-      window.clearInterval(interval);
-    };
-  }, [currentStatus, timeoutSeconds]);
+    const isPending = internalStatus === "submitted" || internalStatus === "confirming";
+    if (!isPending || timeLeft <= 0) return;
 
-  const isTimedOut = currentStatus === "timeout";
-  const isFailed = currentStatus === "failed";
-  const isPending = currentStatus === "submitted" || currentStatus === "confirming";
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setTimedOut(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [internalStatus, timeLeft]);
+
+  const isTimedOut = internalStatus === "timeout";
+  const isFailed = internalStatus === "failed";
+  const isPending = internalStatus === "submitted" || internalStatus === "confirming";
 
   const expectedMinimumOutput = swap.toAmountExpected;
   const resolvedActualOutput = actualOutput ?? expectedMinimumOutput;
@@ -109,8 +139,8 @@ export function SwapExecutionTracker({
   const getBadgeDetails = () => {
     if (isTimedOut) return { label: "Transaction Timed Out", variant: "warning" as const };
     if (isFailed) return { label: "Transaction Failed", variant: "warning" as const };
-    if (currentStatus === "submitted") return { label: "Submitted", variant: "default" as const };
-    if (currentStatus === "confirming") return { label: "Confirming...", variant: "default" as const };
+    if (internalStatus === "submitted") return { label: "Submitted", variant: "default" as const };
+    if (internalStatus === "confirming") return { label: "Confirming...", variant: "default" as const };
     return { label: slippageLabel, variant: slippageTone === "warning" ? "warning" as const : "success" as const };
   };
 
@@ -132,30 +162,30 @@ export function SwapExecutionTracker({
       <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-line bg-surface-2/40 text-[12px]">
         <div className="flex items-center gap-1.5 font-medium">
           <span className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px]">✓</span>
-          <span className={currentStatus === "submitted" ? "text-ink font-semibold" : "text-ink-2"}>Submitted</span>
+          <span className={internalStatus === "submitted" ? "text-ink font-semibold" : "text-ink-2"}>Submitted</span>
         </div>
         <div className="h-[1px] flex-1 bg-line" />
         <div className="flex items-center gap-1.5 font-medium">
           <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
-            currentStatus === "confirming" ? "bg-brand text-white animate-pulse" :
+            internalStatus === "confirming" ? "bg-brand text-white animate-pulse" :
             isTimedOut || isFailed ? "bg-amber-500 text-white" :
-            currentStatus === "success" ? "bg-emerald-500 text-white" : "bg-surface-3 text-ink-4"
+            internalStatus === "success" ? "bg-emerald-500 text-white" : "bg-surface-3 text-ink-4"
           }`}>
-            {currentStatus === "confirming" ? "…" : isTimedOut || isFailed ? "!" : currentStatus === "success" ? "✓" : "2"}
+            {internalStatus === "confirming" ? "…" : isTimedOut || isFailed ? "!" : internalStatus === "success" ? "✓" : "2"}
           </span>
-          <span className={currentStatus === "confirming" ? "text-ink font-semibold" : "text-ink-2"}>
+          <span className={internalStatus === "confirming" ? "text-ink font-semibold" : "text-ink-2"}>
             Confirming {isPending && `(${timeLeft}s)`}
           </span>
         </div>
         <div className="h-[1px] flex-1 bg-line" />
         <div className="flex items-center gap-1.5 font-medium">
           <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
-            currentStatus === "success" ? "bg-emerald-500 text-white" :
+            internalStatus === "success" ? "bg-emerald-500 text-white" :
             isTimedOut ? "bg-amber-500 text-white" : "bg-surface-3 text-ink-4"
           }`}>
-            {currentStatus === "success" ? "✓" : isTimedOut ? "!" : "3"}
+            {internalStatus === "success" ? "✓" : isTimedOut ? "!" : "3"}
           </span>
-          <span className={currentStatus === "success" ? "text-ink font-semibold" : isTimedOut ? "text-amber-500 font-semibold" : "text-ink-4"}>
+          <span className={internalStatus === "success" ? "text-ink font-semibold" : isTimedOut ? "text-amber-500 font-semibold" : "text-ink-4"}>
             {isTimedOut ? "Timed Out" : "Confirmed"}
           </span>
         </div>

@@ -62,7 +62,7 @@ function mockGetClient(
 
 /** Clicks the Send button (label varies by selected asset), waits for the confirmation modal, then confirms. */
 async function reviewAndConfirm() {
-  fireEvent.click(screen.getByRole("button", { name: /^Send (XLM|USDC)/ }));
+  fireEvent.click(screen.getByTestId("submit-transaction"));
   await screen.findByRole("dialog", { name: /confirm transaction/i });
   // act()-wrapped: submitTransaction's state updates can land before this
   // call returns when the mocked API resolves immediately (no artificial
@@ -86,7 +86,7 @@ describe("TransactionPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
     fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Send (XLM|USDC)/ }));
+    fireEvent.click(screen.getByTestId("submit-transaction"));
 
     const dialog = await screen.findByRole("dialog", { name: /confirm transaction/i });
     expect(dialog).toHaveTextContent("Payment — 1 operation");
@@ -104,7 +104,7 @@ describe("TransactionPanel", () => {
 
     const form = document.querySelector("form");
     expect(form).not.toBeNull();
-    const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+    const sendButton = screen.getByTestId("submit-transaction");
     expect(sendButton).toHaveAttribute("type", "submit");
     expect(sendButton).toHaveAttribute("form", form!.id);
   });
@@ -182,7 +182,7 @@ describe("TransactionPanel", () => {
     await reviewAndConfirm();
 
     expect(await screen.findByText("Transaction failed")).toBeInTheDocument();
-    expect(screen.getByText("Submission rejected by network")).toBeInTheDocument();
+    expect(screen.getByText("Something went wrong while invoking the contract. Please try again.")).toBeInTheDocument();
   });
 
   it("shows validation error for invalid destination address", async () => {
@@ -725,6 +725,29 @@ describe("TransactionPanel", () => {
       expect(sendBtn).toBeDisabled();
     });
 
+    it("accepts 7 decimal places and rejects 8 decimal places", () => {
+      render(<TransactionPanel />);
+
+      const sendBtn = screen.getByTestId("submit-transaction");
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: VALID_DEST },
+      });
+
+      // 7 decimals accepted
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "1.1234567" },
+      });
+      expect(screen.queryByText(/Amount cannot exceed 7 decimal places/i)).not.toBeInTheDocument();
+      expect(sendBtn).not.toBeDisabled();
+
+      // 8 decimals rejected
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "1.12345678" },
+      });
+      expect(screen.getByText(/Amount cannot exceed 7 decimal places/i)).toBeInTheDocument();
+      expect(sendBtn).toBeDisabled();
+    });
+
     it("AC3: Successful submit renders the transaction hash in the success panel", async () => {
       const TX_HASH = "abc123def456abc123def456abc123def456abc123def456abc123def456";
       const mockSubmit = vi
@@ -767,7 +790,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
 
       expect(await screen.findByText("Transaction failed")).toBeInTheDocument();
-      expect(screen.getByText(ERROR_MSG)).toBeInTheDocument();
+      expect(screen.getByText("Insufficient balance to submit this transaction. Add more XLM and try again.")).toBeInTheDocument();
     });
 
     it("AC5: clicking 'New Transaction' after success resets the form back to idle state", async () => {
@@ -969,7 +992,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
       await screen.findByText("Transaction failed");
 
-      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Insufficient balance"); });
+      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Insufficient balance to submit this transaction. Add more XLM and try again."); });
       expect(onSuccess).not.toHaveBeenCalled();
     });
 
@@ -988,7 +1011,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
       await screen.findByText("Transaction failed");
 
-      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Network unreachable"); });
+      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Something went wrong while invoking the contract. Please try again."); });
       expect(onSuccess).not.toHaveBeenCalled();
     });
 

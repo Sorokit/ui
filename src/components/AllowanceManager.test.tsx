@@ -316,6 +316,33 @@ describe("AllowanceManager", () => {
       expect(screen.getByText("EXPIRED")).toBeInTheDocument();
     });
   });
+
+  it("marks an allowance expiring today as EXPIRED", async () => {
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, expirationDate: "2026-01-15T00:00:00Z" },
+    ]);
+    render(<AllowanceManager />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText("EXPIRED")).toBeInTheDocument();
+    });
+  });
+
+  it("does not mark an allowance expiring tomorrow as EXPIRED", async () => {
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, expirationDate: "2026-01-16T00:00:00Z" },
+    ]);
+    render(<AllowanceManager />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/DeFi Protocol/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("EXPIRED")).not.toBeInTheDocument();
+  });
 });
 
 describe("AllowanceManager helpers", () => {

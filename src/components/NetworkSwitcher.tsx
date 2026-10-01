@@ -95,12 +95,15 @@ export function NetworkSwitcher() {
     network,
     initialNetwork,
     switchNetwork,
+    // #537 — provider-wide in-flight flag; defaults to `false` so tests that
+    // mock a partial context keep working.
+    isSwitchingNetwork: isSwitchingNetworkProvider = false,
     customNetworks = [],
     addCustomNetwork,
     resetTransactionWatchers,
   } = useSorokit();
 
-  const [isSwitching, setIsSwitching] = useState(false);
+  const [isOwnSwitching, setIsOwnSwitching] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [isCustomDialogOpen, setIsCustomDialogOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
@@ -167,8 +170,11 @@ export function NetworkSwitcher() {
     : "";
 
   const handleSelectNetwork = async (target: NetworkName | NetworkInfo) => {
-    if (isSwitching) return;
-    setIsSwitching(true);
+    // #537 — either this component's own pending switch or one started from
+    // another surface (e.g. NetworkScreen) blocks starting another one; the
+    // provider's in-flight guard is the hard backstop.
+    if (isOwnSwitching || isSwitchingNetworkProvider) return;
+    setIsOwnSwitching(true);
     try {
       resetTransactionWatchers?.();
       await switchNetwork(target);
@@ -178,7 +184,7 @@ export function NetworkSwitcher() {
           : target.name;
       setAnnouncement(`Switched to ${targetLabel}`);
     } finally {
-      setIsSwitching(false);
+      setIsOwnSwitching(false);
     }
   };
 
@@ -201,6 +207,17 @@ export function NetworkSwitcher() {
       return;
     }
 
+    const isBuiltinName =
+      STANDARD_NETWORKS.some(
+        (n) => n.name.toLowerCase() === customName.trim().toLowerCase(),
+      ) || customName.trim().toLowerCase() === "custom";
+    if (isBuiltinName) {
+      setFormError(
+        `Cannot add custom network with built-in name "${customName.trim()}".`,
+      );
+      return;
+    }
+
     setFormError("");
     const newConfig: NetworkInfo = {
       name: customName.trim(),
@@ -210,7 +227,7 @@ export function NetworkSwitcher() {
       status: "online",
     };
 
-    setIsSwitching(true);
+    setIsOwnSwitching(true);
     try {
       resetTransactionWatchers?.();
       if (addCustomNetwork) {
@@ -231,9 +248,14 @@ export function NetworkSwitcher() {
         err instanceof Error ? err.message : "Failed to add custom network",
       );
     } finally {
-      setIsSwitching(false);
+      setIsOwnSwitching(false);
     }
   };
+
+  // #537 — a switch pending here or on any other surface (NetworkScreen,
+  // another NetworkSwitcher instance) disables every interaction in this
+  // dropdown; the provider's in-flight guard is the hard backstop.
+  const isSwitching = isOwnSwitching || isSwitchingNetworkProvider;
 
   return (
     <Tooltip.Provider delayDuration={200}>

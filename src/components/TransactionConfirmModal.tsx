@@ -39,7 +39,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { STROOPS_PER_XLM } from "@/lib/staking";
-import { truncateAddress } from "@/lib/utils";
+import { friendlyError, truncateAddress } from "@/lib/utils";
 
 export interface TransactionOperationSummary {
   /** Short operation type label, e.g. "Payment", "Change Trust" */
@@ -104,8 +104,8 @@ function stroopsToXlmLabel(stroops: string): string {
 }
 
 function signingFailureMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === "string" && error.trim()) return error;
+  if (error instanceof Error && error.message.trim()) return friendlyError(error.message);
+  if (typeof error === "string" && error.trim()) return friendlyError(error);
   return "Signing was rejected. Review the transaction and try again.";
 }
 

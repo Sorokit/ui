@@ -358,7 +358,7 @@ export function buildRebalanceRecord(
 
 /** Format a USD amount for display, e.g. "$1,234.56" */
 export function formatUsd(amount: number): string {
-  return amount.toLocaleString(undefined, {
+  return amount.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,

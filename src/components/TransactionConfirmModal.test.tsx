@@ -247,7 +247,7 @@ describe("TransactionConfirmModal", () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Confirm & Sign" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("User rejected the request");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Something went wrong while invoking the contract. Please try again.");
     expect(screen.getByRole("button", { name: "Confirm & Sign" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
   });

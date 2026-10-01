@@ -57,12 +57,16 @@ function stellarExpertUrl(networkName: string | undefined, contractId: string): 
 export function SorobanScreen() {
   const { network } = useSorokit();
   const [contractId, setContractId] = useState(() => readRecentContract());
-  // IDs removed from the saved list in this session; base list is re-read fresh
-  // from localStorage on each render so external additions are reflected too.
+  // Base list is read once on mount (GH #717 — avoids re-reading localStorage
+  // on every re-render). Mutations (remove, clear) update this state directly
+  // so the UI stays consistent without touching localStorage on every render.
+  const [savedContractsBase, setSavedContractsBase] = useState<string[]>(
+    () => readAllRecent(),
+  );
   const [removed, setRemoved] = useState<Set<string>>(() => new Set());
   const { title, sub } = SCREEN_LABELS.soroban;
 
-  const savedContracts = readAllRecent().filter((id) => !removed.has(id));
+  const savedContracts = savedContractsBase.filter((id) => !removed.has(id));
 
   const validContractId = isValidContractId(contractId);
   const expertUrl = validContractId ? stellarExpertUrl(network?.name, contractId.trim()) : null;
@@ -72,13 +76,16 @@ export function SorobanScreen() {
   }
 
   function handleRemoveContract(id: string) {
-    writeRecent(readAllRecent().filter((entry) => entry !== id));
+    const next = savedContractsBase.filter((entry) => entry !== id);
+    writeRecent(next);
+    setSavedContractsBase(next);
     setRemoved((prev) => new Set(prev).add(id));
   }
 
   function handleClearContracts() {
     writeRecent([]);
-    setRemoved(new Set(readAllRecent()));
+    setSavedContractsBase([]);
+    setRemoved(new Set());
   }
 
   return (

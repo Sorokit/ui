@@ -32,12 +32,12 @@ function renderPanel(
 describe("RewardsPanel — summary tiles", () => {
   it("renders the Claimable tile label", () => {
     renderPanel();
-    expect(screen.getByText("Claimable")).toBeInTheDocument();
+    expect(screen.getAllByText("Claimable Now").length).toBeGreaterThan(0);
   });
 
   it("renders the Pending tile label", () => {
     renderPanel();
-    expect(screen.getByText("Pending")).toBeInTheDocument();
+    expect(screen.getAllByText("Pending Next Epoch").length).toBeGreaterThan(0);
   });
 
   it("displays total claimable XLM amount", () => {
@@ -63,6 +63,40 @@ describe("RewardsPanel — claim all", () => {
       fireEvent.click(screen.getByRole("button", { name: /claim all rewards/i }));
     });
     expect(onClaimAll).toHaveBeenCalledOnce();
+  });
+
+  it("prevents duplicate Claim All requests while the first request is pending", async () => {
+    let resolveClaim!: () => void;
+    const onClaimAll = vi.fn(
+      () => new Promise<void>((resolve) => { resolveClaim = resolve; }),
+    );
+    renderPanel({ onClaimAll });
+    const button = screen.getByRole("button", { name: /claim all rewards/i });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    expect(onClaimAll).toHaveBeenCalledOnce();
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+
+    await act(async () => resolveClaim());
+    expect(button).toBeEnabled();
+  });
+
+  it("re-enables Claim All after the request rejects", async () => {
+    let rejectClaim!: (error: Error) => void;
+    const onClaimAll = vi.fn(
+      () => new Promise<void>((_, reject) => { rejectClaim = reject; }),
+    );
+    renderPanel({ onClaimAll });
+    const button = screen.getByRole("button", { name: /claim all rewards/i });
+
+    fireEvent.click(button);
+    expect(button).toBeDisabled();
+
+    await act(async () => rejectClaim(new Error("User rejected the request")));
+    expect(button).toBeEnabled();
   });
 
   it("does not show Claim All when all rewards are zero", () => {
@@ -140,7 +174,7 @@ describe("RewardsPanel — per-validator claim", () => {
 describe("RewardsPanel — pending rewards", () => {
   it("renders the Pending by Validator section", () => {
     renderPanel();
-    expect(screen.getByText("Pending by Validator")).toBeInTheDocument();
+    expect(screen.getAllByText("Pending Next Epoch").length).toBeGreaterThan(0);
   });
 });
 

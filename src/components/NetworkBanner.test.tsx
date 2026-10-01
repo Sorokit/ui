@@ -210,6 +210,22 @@ describe("NetworkBanner", () => {
       unmount();
       expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
     });
+
+    it("sets --banner-height via fallback when ResizeObserver is unavailable", () => {
+      const originalResizeObserver = global.ResizeObserver;
+      // @ts-expect-error - ResizeObserver is being set to undefined to test fallback behaviour
+      global.ResizeObserver = undefined;
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        render(<NetworkBanner />);
+        const height = document.documentElement.style.getPropertyValue("--banner-height");
+        expect(height).toBeTruthy();
+        expect(height).toMatch(/^\d+px$/);
+      } finally {
+        global.ResizeObserver = originalResizeObserver;
+      }
+    });
   });
 
   describe("Session dismiss behavior", () => {
@@ -319,6 +335,33 @@ describe("NetworkBanner", () => {
       const banner = container.firstChild as HTMLElement;
       expect(banner.style.backgroundColor).toBe("rgb(15, 23, 42)");
       expect(banner.style.borderColor).toBe("rgb(30, 41, 59)");
+    });
+  });
+
+  describe("ResizeObserver teardown (#768)", () => {
+    it("disconnects the ResizeObserver on unmount", () => {
+      const disconnectSpy = vi.fn();
+      const observeSpy = vi.fn();
+      const unobserveSpy = vi.fn();
+
+      const MockResizeObserver = vi.fn().mockImplementation(() => ({
+        observe: observeSpy,
+        unobserve: unobserveSpy,
+        disconnect: disconnectSpy,
+      }));
+
+      vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+      mockNetwork(TESTNET_NETWORK);
+      const { unmount } = render(<NetworkBanner />);
+
+      expect(MockResizeObserver).toHaveBeenCalled();
+
+      unmount();
+
+      expect(disconnectSpy).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
     });
   });
 });

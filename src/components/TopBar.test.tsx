@@ -55,6 +55,19 @@ describe("TopBar", () => {
     expect(screen.getByRole("heading", { name: /network/i })).toBeInTheDocument();
   });
 
+  it("does not steal focus on first render", () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveFocus();
+  });
+
+  it("moves focus to the heading when the active section changes", () => {
+    const { rerender } = render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    rerender(<TopBar active="network" onMenuToggle={onMenuToggle} />);
+    const heading = screen.getByRole("heading", { level: 1, name: /network/i });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute("tabindex", "-1");
+  });
+
   it("does not render the error banner when error is null", () => {
     vi.mocked(useSorokit).mockReturnValue({
       error: null,

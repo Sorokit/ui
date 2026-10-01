@@ -9,9 +9,11 @@ import {
   TimeQuarterIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Tooltip } from "@/components/ui/Tooltip";
 import type { Delegation, RewardScheduleEntry, Validator } from "@/lib/staking";
 import {
   formatXlm,
@@ -94,6 +96,25 @@ export function RewardsPanel({
   const claimableDelegations = delegations.filter(
     (d) => parseFloat(d.claimableReward) > 0,
   );
+  const [isClaimingAll, setIsClaimingAll] = useState(false);
+  const claimAllInFlightRef = useRef(false);
+
+  const handleClaimAll = async () => {
+    if (!onClaimAll || claimAllInFlightRef.current || claimingIds.length > 0) {
+      return;
+    }
+
+    claimAllInFlightRef.current = true;
+    setIsClaimingAll(true);
+    try {
+      await onClaimAll();
+    } catch {
+      // The parent owns transaction error feedback; always release the local guard.
+    } finally {
+      claimAllInFlightRef.current = false;
+      setIsClaimingAll(false);
+    }
+  };
 
   return (
     <div className={cn("flex flex-col gap-5", className)}>
@@ -101,7 +122,7 @@ export function RewardsPanel({
       {/* ── Summary tiles ──────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3">
         <SummaryTile
-          label="Claimable"
+          label="Claimable Now"
           value={formatXlm(totalClaimable)}
           valueClassName="text-green"
           icon={
@@ -114,7 +135,7 @@ export function RewardsPanel({
           }
         />
         <SummaryTile
-          label="Pending"
+          label="Pending Next Epoch"
           value={formatXlm(totalPending)}
           valueClassName="text-ink"
           icon={
@@ -142,9 +163,9 @@ export function RewardsPanel({
           </div>
           <Button
             size="sm"
-            onClick={() => void onClaimAll()}
-            loading={claimingIds.length > 0}
-            disabled={claimingIds.length > 0}
+            onClick={() => void handleClaimAll()}
+            loading={isClaimingAll || claimingIds.length > 0}
+            disabled={isClaimingAll || claimingIds.length > 0}
             aria-label="Claim all rewards"
           >
             Claim All
@@ -162,7 +183,11 @@ export function RewardsPanel({
       {claimableDelegations.length > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-4">
-            By Validator
+            <Tooltip content="Rewards available to withdraw immediately.">
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                Claimable Now
+              </span>
+            </Tooltip>
           </p>
           {claimableDelegations.map((d) => {
             const isClaiming = claimingIds.includes(d.validatorId);
@@ -212,7 +237,11 @@ export function RewardsPanel({
       {totalPending > 0 && (
         <div className="flex flex-col gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-4">
-            Pending by Validator
+            <Tooltip content="Rewards still vesting and expected in the next epoch; they cannot be withdrawn yet.">
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                Pending Next Epoch
+              </span>
+            </Tooltip>
           </p>
           {delegations
             .filter((d) => parseFloat(d.pendingReward) > 0)

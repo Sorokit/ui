@@ -128,7 +128,7 @@ export function QRCode({
             style={{ width: size, height: size }}
           >
             <span className="text-[11px] text-ink-3 font-semibold mb-2">
-              QR Code failed to load
+              Unable to generate QR code
             </span>
             <span className="text-[10px] text-ink-3 break-all font-mono select-all max-w-full">
               {value}

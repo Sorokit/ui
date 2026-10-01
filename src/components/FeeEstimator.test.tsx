@@ -532,6 +532,64 @@ describe("FeeEstimator — issue #670", () => {
         expect(screen.getByText(/Base: 100 stroops/)).toBeInTheDocument();
       });
     });
+
+    it("clears polling interval on unmount even when useIsVisible reported false at unmount time", async () => {
+      vi.useFakeTimers();
+
+      let observerCallback: IntersectionObserverCallback | null = null;
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          constructor(callback: IntersectionObserverCallback) {
+            observerCallback = callback;
+          }
+          observe = vi.fn();
+          disconnect = vi.fn();
+          unobserve = vi.fn();
+        },
+      );
+
+      const estimateFee = vi.fn().mockResolvedValue({
+        data: { baseFee: "100", recommended: "500" },
+        error: null,
+      });
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(
+        <FeeEstimator refreshInterval={1000} />,
+      );
+
+      // Initial load executes
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(1);
+
+      // First interval tick
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(2);
+
+      // Component becomes invisible
+      act(() => {
+        observerCallback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+
+      // Unmount while invisible
+      unmount();
+
+      // Advance time by 5000ms -> assert no further polling calls occur
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
   });
 });
 
