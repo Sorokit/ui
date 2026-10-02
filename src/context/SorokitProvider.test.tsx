@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
 import { getClient } from "@/lib/client";
@@ -9,7 +9,7 @@ import { SorokitProvider } from "./SorokitProvider";
 import { useSorokit } from "./useSorokit";
 
 const TestComponent = () => {
-  const { address, account, balances, connectWallet, disconnectWallet, switchNetwork, refreshAccount, isLoadingAccount, isDisconnecting, error, walletError, errorHistory } = useSorokit();
+  const { address, account, balances, connectWallet, disconnectWallet, switchNetwork, refreshAccount, isLoadingAccount, isDisconnecting, isHardware, error, walletError, errorHistory } = useSorokit();
 
   return (
     <div>
@@ -20,6 +20,7 @@ const TestComponent = () => {
       <div data-testid="walletError">{walletError || "none"}</div>
       <div data-testid="isLoadingAccount">{isLoadingAccount ? "true" : "false"}</div>
       <div data-testid="isDisconnecting">{isDisconnecting ? "true" : "false"}</div>
+      <div data-testid="isHardware">{isHardware ? "true" : "false"}</div>
       <div data-testid="errorHistoryCount">{errorHistory.length}</div>
       <button onClick={() => connectWallet()}>Connect</button>
       <button onClick={() => disconnectWallet()}>Disconnect</button>
@@ -83,6 +84,51 @@ describe("SorokitProvider", () => {
         switchNetwork: vi.fn().mockResolvedValue({ data: { name: "testnet" }, error: null }),
       },
     } as unknown as ReturnType<typeof getClient>;
+  });
+
+  // #713 — the provider is the single source of truth for hardware state. These
+  // cover the contract the button now relies on: isHardware is exposed, it is
+  // set during connectWallet, and it does not outlive the session on disconnect.
+  describe("isHardware (#713)", () => {
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).freighter;
+      delete (window as unknown as Record<string, unknown>).xBull;
+    });
+
+    it("defaults to false before any connection", () => {
+      renderWithProvider(<TestComponent />, { client: mockClient });
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
+
+    it("is set during connectWallet and stays false for a software wallet", async () => {
+      (window as unknown as Record<string, unknown>).freighter = {};
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      // detectWalletName() returns "Freighter" — a software wallet.
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
+
+    it("does not stay true after disconnect (#713)", async () => {
+      (window as unknown as Record<string, unknown>).freighter = {};
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // The flag is derived from the wallet name, so once there is no wallet
+      // there is no hardware state to report.
+      expect(screen.getByTestId("address")).toHaveTextContent("none");
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
   });
 
   it("disconnectWallet clears address, account, balances, and error", async () => {

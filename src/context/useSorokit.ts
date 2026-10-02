@@ -18,6 +18,7 @@ function buildSafeDefaults(): SorokitState {
     },
     address: null,
     walletName: null,
+    isHardware: false,
     isConnected: false,
     isConnecting: false,
     isLoading: false,

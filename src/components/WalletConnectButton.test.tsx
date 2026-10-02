@@ -32,6 +32,7 @@ describe("WalletConnectButton", () => {
       get client() { return getClient(); },
       address: null,
       walletName: null,
+      isHardware: false,
       isConnected: false,
       isConnecting: false,
       isLoading: false,
@@ -345,12 +346,49 @@ describe("WalletConnectButton", () => {
         mockUseSorokit({
           isConnected: true,
           address: fullAddress,
-          walletName: "Ledger",
+          walletName: "Ledger Nano X",
+          isHardware: true,
         }),
       );
 
       render(<WalletConnectButton />);
       expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // #713 — "Ledger Nano X" is the acceptance-criteria case: a name that does
+    // not contain the bare word "Ledger" at position 0, and one the button must
+    // not be re-deriving itself. `isHardware` comes from context only, so if the
+    // provider says true the badge shows regardless of the exact name.
+    it("shows the badge for a hardware wallet named 'Ledger Nano X' (#713)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Ledger Nano X",
+          isHardware: true,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // The regression the issue is really about: the button used to fall back to
+    // string-matching `walletName`, so a consumer that set `isHardware: false`
+    // for a hardware-named wallet would still get a badge. Context is now the
+    // only input, so the two can no longer disagree.
+    it("does not show the badge for a software wallet (#713)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Freighter",
+          isHardware: false,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.queryByTestId("hardware-badge")).toBeNull();
     });
 
     it("purges cached wallet session keys from localStorage on disconnect", async () => {

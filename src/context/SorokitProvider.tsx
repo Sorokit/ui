@@ -39,6 +39,7 @@ export function SorokitProvider({
 
   const [address, setAddress] = useState<string | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
+  const [isHardware, setIsHardware] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [account, setAccount] = useState<AccountData | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
@@ -231,6 +232,26 @@ export function SorokitProvider({
     return null;
   }
 
+  // #713 — hardware detection lives here, once, instead of being re-derived from
+  // `walletName` inside each consumer. The provider already knows the wallet
+  // name at connect time, so it is the only place that can answer this.
+  //
+  // Matched against the name rather than an injected flag because the client
+  // adapter's `connect()` resolves to just an address (`SorokitClient.wallet.
+  // connect` in src/lib/client.ts) and surfaces no wallet metadata, and
+  // `detectWalletName()` only ever returns the four known extension names.
+  // Substring matching is therefore the only signal actually available here; the
+  // win is that it is now defined once and every consumer agrees on the answer.
+  function detectIsHardware(walletName: string | null): boolean {
+    if (!walletName) return false;
+    const name = walletName.toLowerCase();
+    return (
+      name.includes("ledger") ||
+      name.includes("hardware") ||
+      name.includes("webusb")
+    );
+  }
+
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     setWalletError(null);
@@ -239,6 +260,8 @@ export function SorokitProvider({
     try {
       const name = detectWalletName();
       setWalletName(name);
+      // #713 — set alongside walletName so the two can't disagree.
+      setIsHardware(detectIsHardware(name));
       const { data, error } = await clientRef.current.wallet.connect();
       if (error) {
         reportError(error, "wallet", "error");
@@ -278,6 +301,9 @@ export function SorokitProvider({
 
       setAddress(null);
       setWalletName(null);
+      // #713 — a disconnected session has no wallet, so the hardware flag goes
+      // with it rather than outliving the name it was derived from.
+      setIsHardware(false);
       setAccount(null);
       setBalances([]);
       setAccountError(null);
@@ -434,6 +460,7 @@ export function SorokitProvider({
       client: currentClient,
       address,
       walletName,
+      isHardware,
       isConnected: !!address,
       isConnecting,
       isLoading: isConnecting || isLoadingAccount,
@@ -464,6 +491,7 @@ export function SorokitProvider({
       currentClient,
       address,
       walletName,
+      isHardware,
       isConnecting,
       isDisconnecting,
       isLoadingAccount,
