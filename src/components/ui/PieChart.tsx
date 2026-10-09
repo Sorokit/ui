@@ -2,10 +2,10 @@
  * PieChart — a pure-SVG donut/pie chart with no external charting library.
  *
  * Renders accessible SVG with ARIA labels and a colour-keyed legend.
- * Each slice supports an optional tooltip via `title` element.
+ * Each slice supports an optional tooltip with dynamic boundary repositioning and `title` element.
  */
 
-import React from "react";
+import React, { useCallback, useId, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -79,6 +79,32 @@ function arcPath(
   { cx, cy, r, startAngle, endAngle }: ArcParams,
   innerR: number,
 ): string {
+  const sweep = endAngle - startAngle;
+  if (!Number.isFinite(sweep) || sweep <= 0) {
+    return "";
+  }
+
+  // Handle full circle (360 deg) where start and end points coincide
+  if (sweep >= 2 * Math.PI - 0.0001) {
+    if (innerR <= 0) {
+      return [
+        `M ${cx - r} ${cy}`,
+        `A ${r} ${r} 0 1 0 ${cx + r} ${cy}`,
+        `A ${r} ${r} 0 1 0 ${cx - r} ${cy}`,
+        "Z",
+      ].join(" ");
+    }
+    return [
+      `M ${cx - r} ${cy}`,
+      `A ${r} ${r} 0 1 0 ${cx + r} ${cy}`,
+      `A ${r} ${r} 0 1 0 ${cx - r} ${cy}`,
+      `M ${cx - innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 1 ${cx + innerR} ${cy}`,
+      `A ${innerR} ${innerR} 0 1 1 ${cx - innerR} ${cy}`,
+      "Z",
+    ].join(" ");
+  }
+
   const cos = Math.cos;
   const sin = Math.sin;
 
@@ -87,7 +113,7 @@ function arcPath(
   const x2o = cx + r * cos(endAngle);
   const y2o = cy + r * sin(endAngle);
 
-  const largeArc = endAngle - startAngle > Math.PI ? 1 : 0;
+  const largeArc = sweep > Math.PI ? 1 : 0;
 
   if (innerR <= 0) {
     return [
@@ -112,6 +138,55 @@ function arcPath(
   ].join(" ");
 }
 
+export interface TooltipPos {
+  left: number;
+  top: number;
+  transform: string;
+}
+
+/**
+ * Dynamically compute tooltip position and alignment near container boundaries
+ * to prevent clipping at edges.
+ */
+export function computeTooltipPosition(
+  x: number,
+  y: number,
+  size: number,
+): TooltipPos {
+  const padding = 8;
+  const clampedX = Math.max(padding, Math.min(size - padding, x));
+  const clampedY = Math.max(padding, Math.min(size - padding, y));
+
+  // Determine horizontal alignment based on boundary proximity
+  let transformX = "-50%";
+  if (clampedX < size * 0.3) {
+    transformX = "0%";
+  } else if (clampedX > size * 0.7) {
+    transformX = "-100%";
+  }
+
+  // Determine vertical placement based on top/bottom boundary proximity
+  let transformY = "calc(-100% - 8px)";
+  if (clampedY < size * 0.3) {
+    transformY = "8px";
+  } else if (clampedY > size * 0.85) {
+    transformY = "calc(-100% - 8px)";
+  }
+
+  return {
+    left: clampedX,
+    top: clampedY,
+    transform: `translate(${transformX}, ${transformY})`,
+  };
+}
+
+interface HoverState {
+  slice: PieSlice;
+  pct: number;
+  x: number;
+  y: number;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PieChart({
@@ -123,52 +198,82 @@ export function PieChart({
   className,
   ariaLabel,
 }: PieChartProps) {
-  const total = slices.reduce((s, sl) => s + sl.value, 0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [hoverState, setHoverState] = useState<HoverState | null>(null);
+
+  const rawTotal = (slices ?? []).reduce((s, sl) => s + (sl.value > 0 ? sl.value : 0), 0);
+  const total = Number.isFinite(rawTotal) ? rawTotal : 0;
   const cx = size / 2;
   const cy = size / 2;
   const r = size / 2 - 2; // 2px padding so stroke doesn't clip
   const innerR = r * innerRadius;
 
-  // Generate a stable random ID outside of render for the legend
-   
-  const legendIdRef = React.useRef<string | null>(null);
-  if (legendIdRef.current == null) {
-    const randomPart = Array.from({ length: 5 }, () =>
-      // eslint-disable-next-line react-hooks/purity
-      Math.floor(Math.random() * 16).toString(16),
-    ).join("");
-    legendIdRef.current = `pie-legend-${randomPart}`;
-  }
-  // eslint-disable-next-line react-hooks/refs
-  const legendId = legendIdRef.current;
+  const rawId = useId();
+  const legendId = `pie-legend-${rawId.replace(/:/g, "")}`;
 
-  // Build arc segments.  Start at -90° (top) and go clockwise.
-  const segments = React.useMemo(() => {
+  // Build arc segments. Start at -90° (top) and go clockwise.
+  const segments = useMemo(() => {
+    if (!slices || slices.length === 0 || total <= 0) {
+      return [];
+    }
     const result: Array<{
       slice: PieSlice;
       color: string;
       path: string;
       pct: number;
+      midAngle: number;
     }> = [];
     let angle = -Math.PI / 2;
     for (const [i, slice] of slices.entries()) {
-      const sweep = (slice.value / total) * (2 * Math.PI);
+      const val = Math.max(0, slice.value || 0);
+      const sweep = total > 0 ? (val / total) * (2 * Math.PI) : 0;
       const start = angle;
       const end = angle + sweep;
-      const pct = (slice.value / total) * 100;
+      const pct = total > 0 ? (val / total) * 100 : 0;
       const color = resolveColor(slice, i);
-      const path = arcPath(
-        { cx, cy, r, startAngle: start, endAngle: end },
-        innerR,
-      );
-      result.push({ slice, color, path, pct });
+      const path =
+        sweep > 0
+          ? arcPath({ cx, cy, r, startAngle: start, endAngle: end }, innerR)
+          : "";
+      const midAngle = start + sweep / 2;
+      result.push({ slice, color, path, pct, midAngle });
       angle = end;
     }
     return result;
   }, [slices, total, cx, cy, r, innerR]);
 
+  const handlePointerMove = useCallback(
+    (
+      e: React.PointerEvent<SVGPathElement> | React.MouseEvent<SVGPathElement>,
+      slice: PieSlice,
+      pct: number,
+    ) => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      const clientX = typeof e.clientX === "number" ? e.clientX : 0;
+      const clientY = typeof e.clientY === "number" ? e.clientY : 0;
+      const x = rect ? clientX - rect.left : clientX;
+      const y = rect ? clientY - rect.top : clientY;
+      setHoverState({ slice, pct, x, y });
+    },
+    [],
+  );
+
+  const handleFocus = useCallback(
+    (slice: PieSlice, pct: number, midAngle: number) => {
+      const midR = innerR > 0 ? (r + innerR) / 2 : r * 0.65;
+      const x = cx + midR * Math.cos(midAngle);
+      const y = cy + midR * Math.sin(midAngle);
+      setHoverState({ slice, pct, x, y });
+    },
+    [cx, cy, r, innerR],
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    setHoverState(null);
+  }, []);
+
   // Empty state — render a grey placeholder ring
-  if (total === 0 || slices.length === 0) {
+  if (total <= 0 || !slices || slices.length === 0) {
     return (
       <div className={cn("flex flex-col items-center gap-4", className)}>
         <svg
@@ -184,7 +289,7 @@ export function PieChart({
             r={r}
             fill="none"
             stroke="currentColor"
-            strokeWidth={r - innerR}
+            strokeWidth={innerR > 0 ? r - innerR : 2}
             className="text-surface-2"
           />
           {centerLabel && (
@@ -207,7 +312,12 @@ export function PieChart({
 
   return (
     <div className={cn("flex flex-col items-center gap-4", className)}>
-      <div className="relative" style={{ width: size, height: size }}>
+      <div
+        ref={containerRef}
+        className="relative"
+        style={{ width: size, height: size }}
+        onMouseLeave={handlePointerLeave}
+      >
         <svg
           width={size}
           height={size}
@@ -216,18 +326,27 @@ export function PieChart({
           aria-label={ariaLabel ?? "Portfolio allocation chart"}
           aria-describedby={showLegend ? legendId : undefined}
         >
-          {segments.map(({ slice, color, path, pct }) => (
-            <path
-              key={slice.key}
-              d={path}
-              fill={color}
-              className="transition-opacity duration-150 hover:opacity-80"
-            >
-              <title>
-                {slice.label}: {pct.toFixed(1)}%
-              </title>
-            </path>
-          ))}
+          {segments.map(({ slice, color, path, pct, midAngle }) =>
+            path ? (
+              <path
+                key={slice.key}
+                d={path}
+                fill={color}
+                tabIndex={0}
+                role="graphics-symbol"
+                aria-label={`${slice.label}: ${pct.toFixed(1)}%`}
+                className="transition-opacity duration-150 hover:opacity-80 focus:opacity-80 focus:outline-none cursor-pointer"
+                onMouseEnter={(e) => handlePointerMove(e, slice, pct)}
+                onMouseMove={(e) => handlePointerMove(e, slice, pct)}
+                onFocus={() => handleFocus(slice, pct, midAngle)}
+                onBlur={handlePointerLeave}
+              >
+                <title>
+                  {slice.label}: {pct.toFixed(1)}%
+                </title>
+              </path>
+            ) : null,
+          )}
         </svg>
 
         {/* Centre label (renders on top of the SVG via absolute positioning) */}
@@ -238,6 +357,17 @@ export function PieChart({
             style={{ padding: r - innerR + 4 }}
           >
             <div className="text-center">{centerLabel}</div>
+          </div>
+        )}
+
+        {/* Floating tooltip with dynamic repositioning */}
+        {hoverState && (
+          <div
+            role="tooltip"
+            className="pointer-events-none absolute z-50 whitespace-nowrap rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink shadow-lg"
+            style={computeTooltipPosition(hoverState.x, hoverState.y, size)}
+          >
+            {hoverState.slice.label}: {hoverState.pct.toFixed(1)}%
           </div>
         )}
       </div>
@@ -268,3 +398,4 @@ export function PieChart({
     </div>
   );
 }
+
