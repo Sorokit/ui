@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { useSorokit } from "@/context/useSorokit";
+
 import type { FeeData } from "@/components/FeeEstimator"; // Or wherever it's defined
+import { useSorokit } from "@/context/useSorokit";
 
 let globalFeeData: FeeData | null = null;
 let globalLoading = false;

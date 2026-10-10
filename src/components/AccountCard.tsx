@@ -6,8 +6,8 @@ import { AddressDisplay } from "@/components/AddressDisplay";
 import { Badge } from "@/components/ui/Badge";
 import { LabelledValue } from "@/components/ui/LabelledValue";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { useSorokit } from "@/context/useSorokit";
 import { useToast } from "@/context/ToastContext";
+import { useSorokit } from "@/context/useSorokit";
 import { truncateAddress } from "@/lib/utils";
 
 function getStellarExpertUrl(address: string, networkName?: string) {

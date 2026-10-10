@@ -45,7 +45,10 @@ export interface GasPresetConfig {
   multiplier: number;
 }
 
-export const GAS_PRESETS: Record<"Conservative" | "Aggressive", GasPresetConfig> = {
+export const GAS_PRESETS: Record<
+  "Conservative" | "Aggressive",
+  GasPresetConfig
+> = {
   Conservative: {
     cpuInstructions: 50_000_000,
     memoryBytes: 33_554_432, // 32 MiB
@@ -154,13 +157,14 @@ function copyViaExecCommand(text: string): boolean {
     textarea.style.pointerEvents = "none";
     document.body.appendChild(textarea);
     textarea.select();
+    const succeeded = document.execCommand("copy");
+    document.body.removeChild(textarea);
     return succeeded;
   } catch {
     return false;
   }
 }
 
-import { useFeeData } from "@/hooks/useFeeData";
 import { useIsVisible } from "@/hooks/useIsVisible";
 
 const DEFAULT_OPERATIONS = ["payment"];
@@ -171,10 +175,8 @@ export function GasOptimizer({
   refreshInterval = 0,
   onExport,
 }: GasOptimizerProps) {
-  const { client, network } = useSorokit();
-  const { fee } = useFeeData(refreshInterval);
-  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const { client, network, registerWatcher } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [gasPriceData, setGasPriceData] = useState<GasPriceData | null>(null);
   const [estimate, setEstimate] = useState<GasEstimate | null>(null);
   const [loading, setLoading] = useState(true);
@@ -523,10 +525,7 @@ export function GasOptimizer({
                 value={cpuInstructions}
                 onChange={handleCpuChange}
               />
-              <MemorySlider
-                value={memoryBytes}
-                onChange={handleMemoryChange}
-              />
+              <MemorySlider value={memoryBytes} onChange={handleMemoryChange} />
               <MultiplierSlider
                 value={customMultiplier}
                 onChange={handleMultiplierChange}
@@ -693,10 +692,7 @@ function MemorySlider({
           const raw = parseFloat(e.target.value);
           const clamped = Math.max(
             MIN_MEMORY_BYTES,
-            Math.min(
-              MAX_MEMORY_BYTES,
-              isNaN(raw) ? MIN_MEMORY_BYTES : raw,
-            ),
+            Math.min(MAX_MEMORY_BYTES, isNaN(raw) ? MIN_MEMORY_BYTES : raw),
           );
           onChange(clamped);
         }}
@@ -1068,10 +1064,7 @@ function OptimizerSuggestions({
       </div>
       <ul className="flex flex-col gap-1.5">
         {suggestions.map((s, i) => (
-          <li
-            key={i}
-            className="flex items-start gap-2 text-[12px] text-ink-2"
-          >
+          <li key={i} className="flex items-start gap-2 text-[12px] text-ink-2">
             <span className="shrink-0 mt-0.5">{s.icon}</span>
             <span>{s.text}</span>
             <span className="ml-auto shrink-0 text-[10px] font-semibold text-brand">

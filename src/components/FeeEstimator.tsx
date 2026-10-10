@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useSorokit } from "@/context/useSorokit";
-import { useIsVisible } from "@/hooks/useIsVisible";
 import { useFeeData } from "@/hooks/useFeeData";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import { cn, toXLM } from "@/lib/utils";
 
 export const MIN_NETWORK_BASE_FEE = 100;
@@ -38,12 +38,14 @@ export function FeeEstimator({
   customFee: customFeeProp,
   onCustomFeeChange,
 }: FeeEstimatorProps) {
-  const { client, registerWatcher } = useSorokit();
+  const { registerWatcher } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [fee, setFee] = useState<FeeData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [internalCustomFee, setInternalCustomFee] = useState(customFeeProp ?? "");
+  const [internalCustomFee, setInternalCustomFee] = useState(
+    customFeeProp ?? "",
+  );
   const [prevCustomFeeProp, setPrevCustomFeeProp] = useState(customFeeProp);
   const [customFeeError, setCustomFeeError] = useState<string | null>(null);
 
@@ -54,7 +56,8 @@ export function FeeEstimator({
     }
   }
 
-  const customFee = customFeeProp !== undefined ? customFeeProp : internalCustomFee;
+  const customFee =
+    customFeeProp !== undefined ? customFeeProp : internalCustomFee;
 
   const handleCustomFeeChange = (val: string) => {
     setInternalCustomFee(val);
@@ -83,9 +86,17 @@ export function FeeEstimator({
   useEffect(() => {
     onFeeLoadRef.current = onFeeLoad;
   }, [onFeeLoad]);
+
+  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Issue #442: generation counter - an estimate that resolves after a newer
-  const { fee: hookFee, loading: hookLoading, error: hookError, load: hookLoad } = useFeeData(refreshInterval, isVisible);
-  
+  const {
+    fee: hookFee,
+    loading: hookLoading,
+    error: hookError,
+    load: hookLoad,
+  } = useFeeData(refreshInterval, isVisible);
+
   useEffect(() => {
     if (hookFee) {
       setFee(hookFee);
@@ -155,7 +166,9 @@ export function FeeEstimator({
         <>
           <div className="flex items-center justify-between px-5 py-4 border-b border-line">
             <div>
-              <h3 className="text-[13px] font-semibold text-ink">Network Fee</h3>
+              <h3 className="text-[13px] font-semibold text-ink">
+                Network Fee
+              </h3>
               <p className="text-[11px] text-ink-3 mt-0.5">
                 Current Stellar base fee estimate
               </p>
@@ -186,7 +199,9 @@ export function FeeEstimator({
               </div>
             ) : error ? (
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <p className="text-[12px] text-red" role="alert">{error}</p>
+                <p className="text-[12px] text-red" role="alert">
+                  {error}
+                </p>
                 <button
                   type="button"
                   onClick={() => void load()}
@@ -199,7 +214,11 @@ export function FeeEstimator({
             ) : fee ? (
               <>
                 <div className="flex items-center gap-4">
-                  <FeeCell label="Base Fee" value={fee.baseFee} unit="stroops" />
+                  <FeeCell
+                    label="Base Fee"
+                    value={fee.baseFee}
+                    unit="stroops"
+                  />
                   <div className="w-px h-8 bg-line" />
                   <FeeCell
                     label="Recommended"
@@ -207,7 +226,8 @@ export function FeeEstimator({
                     unit="stroops"
                     highlight
                     highFee={
-                      parseInt(fee.recommended, 10) > parseInt(fee.baseFee, 10) * 2
+                      parseInt(fee.recommended, 10) >
+                      parseInt(fee.baseFee, 10) * 2
                     }
                   />
                 </div>
@@ -229,7 +249,9 @@ export function FeeEstimator({
                       className="px-3 py-1.5 text-[12px] bg-surface-2 border border-line rounded-lg text-ink focus:outline-none focus:border-brand w-36"
                       aria-label="Custom fee in stroops"
                       aria-invalid={!!customFeeError}
-                      aria-describedby={customFeeError ? "custom-fee-error" : undefined}
+                      aria-describedby={
+                        customFeeError ? "custom-fee-error" : undefined
+                      }
                     />
                     {customFee && !customFeeError && (
                       <span className="text-[11px] text-ink-3">
@@ -238,7 +260,11 @@ export function FeeEstimator({
                     )}
                   </div>
                   {customFeeError && (
-                    <p id="custom-fee-error" role="alert" className="text-[11px] text-red mt-1">
+                    <p
+                      id="custom-fee-error"
+                      role="alert"
+                      className="text-[11px] text-red mt-1"
+                    >
                       {customFeeError}
                     </p>
                   )}
@@ -285,7 +311,9 @@ export function FeeCell({
         <span className="text-[10px] text-ink-3">{unit}</span>
       </div>
       <span className="text-[10px] text-ink-3">
-        {Number.isNaN(parseInt(value, 10)) ? "(≈ — XLM)" : `(≈ ${toXLM(value)} XLM)`}
+        {Number.isNaN(parseInt(value, 10))
+          ? "(≈ — XLM)"
+          : `(≈ ${toXLM(value)} XLM)`}
       </span>
     </div>
   );

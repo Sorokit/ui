@@ -1,4 +1,8 @@
-import { AlertCircleIcon, Copy01Icon, Search01Icon } from "@hugeicons/core-free-icons";
+import {
+  AlertCircleIcon,
+  Copy01Icon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -64,7 +68,9 @@ export function isRateLimitError(error: string | null | undefined): boolean {
  * envelope's max ledger sequence passed before it was included in a
  * ledger, distinct from an outright rejection.
  */
-export function isTimeoutExpiredError(error: string | null | undefined): boolean {
+export function isTimeoutExpiredError(
+  error: string | null | undefined,
+): boolean {
   if (!error) return false;
   const normalized = error.toLowerCase();
   return (
@@ -81,13 +87,19 @@ export function isTimeoutExpiredError(error: string | null | undefined): boolean
  * that ceiling is chosen so many concurrently polling clients don't retry
  * in lockstep and re-trigger the same rate limit together.
  */
-export function computeBackoffDelayMs(strikes: number, baseMs = BACKOFF_BASE_MS): number {
+export function computeBackoffDelayMs(
+  strikes: number,
+  baseMs = BACKOFF_BASE_MS,
+): number {
   if (strikes <= 0) return 0;
   const ceiling = Math.min(BACKOFF_MAX_MS, baseMs * 2 ** (strikes - 1));
   return Math.floor(Math.random() * ceiling);
 }
 
-function explorerTxUrl(network: NetworkInfo | null, hash: string): string | null {
+function explorerTxUrl(
+  network: NetworkInfo | null,
+  hash: string,
+): string | null {
   if (!network) return null;
   const segment =
     network.name === "mainnet"
@@ -138,7 +150,11 @@ function getStatusTone(status: TrackerStatus): "success" | "error" | "warning" {
 }
 
 function isTerminalStatus(status: TrackerStatus): boolean {
-  return status === "confirmed" || status === "failed" || status === "timeout_expired";
+  return (
+    status === "confirmed" ||
+    status === "failed" ||
+    status === "timeout_expired"
+  );
 }
 
 function createTrackedTransaction(hash: string): TrackedTransaction {
@@ -197,7 +213,9 @@ export function TransactionStatusTracker({
   const prevNetworkRef = useRef(network?.name);
   useEffect(() => {
     if (prevNetworkRef.current && prevNetworkRef.current !== network?.name) {
-      setTracked((prev) => prev.filter((item) => isTerminalStatus(item.status)));
+      setTracked((prev) =>
+        prev.filter((item) => isTerminalStatus(item.status)),
+      );
     }
     prevNetworkRef.current = network?.name;
   }, [network?.name]);
@@ -222,7 +240,9 @@ export function TransactionStatusTracker({
       await Promise.all(
         unresolved.map(async (entry) => {
           try {
-            const { data, error } = await client.transaction.getStatus(entry.hash);
+            const { data, error } = await client.transaction.getStatus(
+              entry.hash,
+            );
 
             if (isRateLimitError(error)) {
               // Back off this entry specifically rather than slowing down
@@ -251,8 +271,14 @@ export function TransactionStatusTracker({
             setTracked((prev) =>
               prev.map((item) => {
                 if (item.hash !== entry.hash) return item;
-                const confirmedAt = nextStatus === "confirmed" ? new Date().toISOString() : item.confirmedAt;
-                const networkError = nextStatus === "network_error" ? (error ?? "Network issue while polling") : null;
+                const confirmedAt =
+                  nextStatus === "confirmed"
+                    ? new Date().toISOString()
+                    : item.confirmedAt;
+                const networkError =
+                  nextStatus === "network_error"
+                    ? (error ?? "Network issue while polling")
+                    : null;
                 return {
                   ...item,
                   status: nextStatus,
@@ -261,7 +287,8 @@ export function TransactionStatusTracker({
                     nextStatus === "failed"
                       ? (error ?? "Transaction failed")
                       : nextStatus === "timeout_expired"
-                        ? (error ?? "The transaction's timeout ledger expired before it was included.")
+                        ? (error ??
+                          "The transaction's timeout ledger expired before it was included.")
                         : null,
                   lastCheckedAt: new Date().toISOString(),
                   networkError,
@@ -278,7 +305,10 @@ export function TransactionStatusTracker({
                       status: "network_error",
                       error: null,
                       lastCheckedAt: new Date().toISOString(),
-                      networkError: e instanceof Error ? e.message : "Network issue while polling",
+                      networkError:
+                        e instanceof Error
+                          ? e.message
+                          : "Network issue while polling",
                     }
                   : item,
               ),
@@ -289,7 +319,6 @@ export function TransactionStatusTracker({
     };
 
     void pollTransactions();
-    const timerId: ReturnType<typeof setInterval> = window.setInterval(() => {
     txIntervalRef.current = globalThis.setInterval(() => {
       void pollTransactions();
     }, pollIntervalMs);
@@ -329,18 +358,28 @@ export function TransactionStatusTracker({
     try {
       await navigator.clipboard.writeText(hash);
       setCopiedHash(hash);
-      window.setTimeout(() => setCopiedHash((current) => (current === hash ? null : current)), 1800);
+      window.setTimeout(
+        () => setCopiedHash((current) => (current === hash ? null : current)),
+        1800,
+      );
     } catch {
       // Ignore clipboard failures and keep the UI responsive.
     }
   };
 
   return (
-    <div className={cn("rounded-xl border border-line bg-surface overflow-hidden", className)}>
+    <div
+      className={cn(
+        "rounded-xl border border-line bg-surface overflow-hidden",
+        className,
+      )}
+    >
       <div className="border-b border-line px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-[14px] font-semibold text-ink">Transaction Status Tracker</h3>
+            <h3 className="text-[14px] font-semibold text-ink">
+              Transaction Status Tracker
+            </h3>
             <p className="text-[12px] text-ink-3 mt-0.5">
               Watch transaction progress in real time and inspect failures.
             </p>
@@ -371,16 +410,28 @@ export function TransactionStatusTracker({
               const explorerUrl = explorerTxUrl(network, entry.hash);
               const statusLabel = getStatusLabel(entry.status);
               return (
-                <div key={entry.hash} className="rounded-lg border border-line bg-surface-2 p-4">
+                <div
+                  key={entry.hash}
+                  className="rounded-lg border border-line bg-surface-2 p-4"
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <Badge variant={getStatusTone(entry.status)}>{statusLabel}</Badge>
+                        <Badge variant={getStatusTone(entry.status)}>
+                          {statusLabel}
+                        </Badge>
                         {entry.status === "network_error" && (
-                          <span className="text-[11px] text-ink-3">Network issue — retrying soon</span>
+                          <span className="text-[11px] text-ink-3">
+                            Network issue — retrying soon
+                          </span>
                         )}
                       </div>
-                      <p className="mt-2 text-[12px] font-medium text-ink" data-testid={`tracker-hash-${entry.hash}`}>Tracking {entry.hash}</p>
+                      <p
+                        className="mt-2 text-[12px] font-medium text-ink"
+                        data-testid={`tracker-hash-${entry.hash}`}
+                      >
+                        Tracking {entry.hash}
+                      </p>
                     </div>
                     <div className="flex items-center gap-2">
                       <button
@@ -390,7 +441,11 @@ export function TransactionStatusTracker({
                         title="Copy transaction hash"
                       >
                         <span className="flex items-center gap-1.5">
-                          <HugeiconsIcon icon={Copy01Icon} size={12} strokeWidth={1.5} />
+                          <HugeiconsIcon
+                            icon={Copy01Icon}
+                            size={12}
+                            strokeWidth={1.5}
+                          />
                           {copiedHash === entry.hash ? "Copied" : "Copy"}
                         </span>
                       </button>
@@ -410,38 +465,61 @@ export function TransactionStatusTracker({
 
                   <div className="mt-3 grid gap-2 text-[12px] text-ink-3 sm:grid-cols-2">
                     <div>
-                      <p className="font-semibold uppercase tracking-[0.08em] text-ink-4">Submitted</p>
+                      <p className="font-semibold uppercase tracking-[0.08em] text-ink-4">
+                        Submitted
+                      </p>
                       <p>{formatTimestamp(entry.submittedAt)}</p>
                     </div>
                     <div>
                       <p className="font-semibold uppercase tracking-[0.08em] text-ink-4">
-                        {entry.status === "confirmed" ? "Confirmed" : entry.status === "failed" ? "Failed" : "Last checked"}
+                        {entry.status === "confirmed"
+                          ? "Confirmed"
+                          : entry.status === "failed"
+                            ? "Failed"
+                            : "Last checked"}
                       </p>
-                      <p>{entry.status === "confirmed" ? formatTimestamp(entry.confirmedAt) : formatTimestamp(entry.lastCheckedAt)}</p>
+                      <p>
+                        {entry.status === "confirmed"
+                          ? formatTimestamp(entry.confirmedAt)
+                          : formatTimestamp(entry.lastCheckedAt)}
+                      </p>
                     </div>
                   </div>
 
                   {entry.status === "failed" && entry.error ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-error-dim-strong bg-error-dim px-3 py-2 text-[12px] text-red">
-                      <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} />
+                      <HugeiconsIcon
+                        icon={AlertCircleIcon}
+                        size={14}
+                        strokeWidth={1.5}
+                      />
                       <p>{entry.error}</p>
                     </div>
                   ) : null}
 
                   {entry.status === "timeout_expired" ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-error-dim-strong bg-error-dim px-3 py-2 text-[12px] text-red">
-                      <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} />
+                      <HugeiconsIcon
+                        icon={AlertCircleIcon}
+                        size={14}
+                        strokeWidth={1.5}
+                      />
                       <p>
-                        This transaction expired before it was included in a ledger (its
-                        timeout was reached). It was not applied to the network - submit a
-                        new transaction if you still intend to send it.
+                        This transaction expired before it was included in a
+                        ledger (its timeout was reached). It was not applied to
+                        the network - submit a new transaction if you still
+                        intend to send it.
                       </p>
                     </div>
                   ) : null}
 
                   {!isTerminalStatus(entry.status) && entry.networkError ? (
                     <div className="mt-3 flex items-start gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-[12px] text-ink-3">
-                      <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} />
+                      <HugeiconsIcon
+                        icon={AlertCircleIcon}
+                        size={14}
+                        strokeWidth={1.5}
+                      />
                       <p>{entry.networkError}</p>
                     </div>
                   ) : null}
@@ -455,7 +533,10 @@ export function TransactionStatusTracker({
   );
 }
 
-function mapStatus(status: TxStatus | null | undefined, error: string | null): TrackerStatus {
+function mapStatus(
+  status: TxStatus | null | undefined,
+  error: string | null,
+): TrackerStatus {
   if (error) {
     return isTimeoutExpiredError(error) ? "timeout_expired" : "failed";
   }

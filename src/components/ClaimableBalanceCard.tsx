@@ -17,9 +17,16 @@ function isPredicateExpired(predicate: unknown, _currentTime: number): boolean {
     if (typeof tb.start === "number" && _currentTime < tb.start) return true;
   }
   if (typeof p.endTime === "number" && _currentTime > p.endTime) return true;
-  if (Array.isArray(p.and)) return p.and.every((child: unknown) => isPredicateExpired(child, _currentTime));
-  if (Array.isArray(p.or)) return p.or.some((child: unknown) => isPredicateExpired(child, _currentTime));
-  if (typeof p.not === "object" && p.not !== null) return !isPredicateExpired(p.not, _currentTime);
+  if (Array.isArray(p.and))
+    return p.and.every((child: unknown) =>
+      isPredicateExpired(child, _currentTime),
+    );
+  if (Array.isArray(p.or))
+    return p.or.some((child: unknown) =>
+      isPredicateExpired(child, _currentTime),
+    );
+  if (typeof p.not === "object" && p.not !== null)
+    return !isPredicateExpired(p.not, _currentTime);
   return false;
 }
 
@@ -52,7 +59,9 @@ function BalanceRow({
   const rawCode = cb.asset.includes(":") ? cb.asset.split(":")[0] : cb.asset;
   const assetCode = rawCode === "native" ? "XLM" : rawCode;
   const amountNum = parseFloat(cb.amount);
-  const expired = cb.claimants.some((c) => isPredicateExpired(c.predicate, currentTime));
+  const expired = cb.claimants.some((c) =>
+    isPredicateExpired(c.predicate, currentTime),
+  );
 
   // Resolves #580: properly handles claim errors and delegates row removal on success
   async function handleClaim() {
@@ -131,7 +140,9 @@ function BalanceRow({
           <span data-address>{truncateAddress(cb.sponsor, 8, 6)}</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-mono text-ink-3">{truncateAddress(cb.id, 8, 6)}</span>
+          <span className="text-[10px] font-mono text-ink-3">
+            {truncateAddress(cb.id, 8, 6)}
+          </span>
           <button
             onClick={handleCopyId}
             aria-label={copiedId ? "Balance ID copied" : "Copy balance ID"}
@@ -148,7 +159,10 @@ function BalanceRow({
             loading={claiming}
             disabled={expired}
             onClick={() => void handleClaim()}
-            className={cn("shrink-0", expired && "opacity-40 cursor-not-allowed")}
+            className={cn(
+              "shrink-0",
+              expired && "opacity-40 cursor-not-allowed",
+            )}
           >
             Claim
           </Button>
@@ -173,15 +187,26 @@ function BalanceRow({
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
         >
           <div className="rounded-xl border border-line bg-surface p-6 max-w-sm w-full shadow-xl">
-            <h4 className="text-[14px] font-semibold text-ink mb-2">Confirm Claim</h4>
+            <h4 className="text-[14px] font-semibold text-ink mb-2">
+              Confirm Claim
+            </h4>
             <p className="text-[13px] text-ink-2 mb-4">
-              You are about to claim {safeFormat(cb.amount)} {assetCode}. This action cannot be undone.
+              You are about to claim {safeFormat(cb.amount)} {assetCode}. This
+              action cannot be undone.
             </p>
             <div className="flex items-center justify-end gap-3">
-              <Button variant="ghost" size="sm" onClick={() => setShowConfirm(false)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowConfirm(false)}
+              >
                 Cancel
               </Button>
-              <Button variant="primary" size="sm" onClick={() => void doClaim()}>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void doClaim()}
+              >
                 Confirm
               </Button>
             </div>
@@ -196,7 +221,9 @@ export interface ClaimableBalanceCardProps {
   confirmThreshold?: string;
 }
 
-export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardProps) {
+export function ClaimableBalanceCard({
+  confirmThreshold,
+}: ClaimableBalanceCardProps) {
   const { isConnected, address, client } = useSorokit();
   const [balances, setBalances] = useState<ClaimableBalance[]>([]);
   const [loading, setLoading] = useState(false);
@@ -218,14 +245,6 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
   // Issue #441: marks the next fetch as a post-claim refresh, which must not
   // swap the already-rendered rows out for the loading skeleton.
   const backgroundRefreshRef = useRef(false);
-  // Issue #666: tick once a second so predicate countdowns switch to
-  // "Expired" live without a page reload.
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     claimedIdsRef.current = new Set();
@@ -252,8 +271,8 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
     const timerId = window.setTimeout(() => {
       if (!background) setLoading(true);
       setError(null);
-      client
-        .account.getClaimableBalances(address)
+      client.account
+        .getClaimableBalances(address)
         .then(({ data, error: err }) => {
           if (!active) return;
           if (err) {
@@ -269,7 +288,9 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
           // rejection and pin the card in its loading state.
           if (!active) return;
           setError(
-            err instanceof Error ? err.message : "Failed to load claimable balances",
+            err instanceof Error
+              ? err.message
+              : "Failed to load claimable balances",
           );
         })
         .finally(() => {
@@ -307,7 +328,10 @@ export function ClaimableBalanceCard({ confirmThreshold }: ClaimableBalanceCardP
           structure={
             <div className="px-5 py-5 flex flex-col gap-4">
               {[1, 2].map((i) => (
-                <div key={i} className="flex items-center justify-between gap-4">
+                <div
+                  key={i}
+                  className="flex items-center justify-between gap-4"
+                >
                   <div className="flex flex-col gap-2 flex-1">
                     <div className="h-4 w-28 rounded bg-surface-2 animate-pulse" />
                     <div className="h-3 w-36 rounded bg-surface-2 animate-pulse" />

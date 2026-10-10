@@ -169,7 +169,7 @@ export function WalletConnectModal({
     setSelectedWallet(wallet);
     if (isMobile && wallet.deepLink) {
       if (typeof window !== "undefined") {
-        // eslint-disable-next-line react-hooks/immutability
+         
         window.location.href = wallet.deepLink;
       }
     }
