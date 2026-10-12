@@ -42,14 +42,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     }
   }, [isConnected]);
 
-  const isHardwareWallet =
-    Boolean(isHardware) ||
-    Boolean(
-      walletName &&
-        (walletName.toLowerCase().includes("ledger") ||
-          walletName.toLowerCase().includes("hardware") ||
-          walletName.toLowerCase().includes("webusb")),
-    );
+  // #713 — read straight from context. The provider owns hardware detection;
+  // re-deriving it here from `walletName` was duplicated logic that could drift
+  // from the provider's own answer.
+  const isHardwareWallet = isHardware;
 
   const handleDisconnect = async () => {
     try {

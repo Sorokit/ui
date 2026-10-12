@@ -12,7 +12,15 @@ export interface SorokitState {
   client: SorokitClient;
   address: string | null;
   walletName: string | null;
-  isHardware?: boolean;
+  /**
+   * Whether the connected wallet is a hardware wallet.
+   *
+   * Owned by the provider so detection lives in exactly one place (#713). It was
+   * previously declared optional here but never assigned, so it was always
+   * `undefined` and `WalletConnectButton` had to re-derive the answer from
+   * `walletName` string-matching — the duplication this field now removes.
+   */
+  isHardware: boolean;
   isConnected: boolean;
   isConnecting: boolean;
   isLoading: boolean;
