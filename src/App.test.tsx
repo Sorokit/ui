@@ -102,4 +102,50 @@ describe("App routing", () => {
 
     expect(screen.getByTestId("active-section")).toHaveTextContent("network");
   });
+
+  it("displays a persistent offline notification banner on offline event and clears on online (#966)", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      isConnected: true,
+    } as ReturnType<typeof useSorokit>);
+    render(<App client={createMockClient() as SorokitClient} />);
+
+    expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument();
+
+    fireEvent(window, new Event("offline"));
+    expect(screen.getByTestId("offline-banner")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/offline/i);
+
+    fireEvent(window, new Event("online"));
+    expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument();
+  });
+
+  it("renders a focusable Skip to main content landmark link (#966)", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      isConnected: true,
+    } as ReturnType<typeof useSorokit>);
+    render(<App client={createMockClient() as SorokitClient} />);
+
+    const skipLink = screen.getByRole("link", { name: /skip to main content/i });
+    expect(skipLink).toHaveAttribute("href", "#main-content");
+    skipLink.focus();
+    expect(document.activeElement).toBe(skipLink);
+  });
+
+  it("renders a 404 Not Found card for unknown route URLs with a Back to Dashboard button (#966)", () => {
+    setPath("/unknown-route-xyz");
+    vi.mocked(useSorokit).mockReturnValue({
+      isConnected: true,
+    } as ReturnType<typeof useSorokit>);
+    render(<App client={createMockClient() as SorokitClient} />);
+
+    expect(screen.getByTestId("not-found-card")).toBeInTheDocument();
+    expect(screen.getByText(/404/i)).toBeInTheDocument();
+
+    const backBtn = screen.getByRole("button", { name: /back to dashboard/i });
+    fireEvent.click(backBtn);
+
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByTestId("dashboard")).toBeInTheDocument();
+  });
 });
+

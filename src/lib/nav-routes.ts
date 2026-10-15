@@ -25,6 +25,10 @@ const PATH_TO_SECTION: Record<string, NavSection> = Object.fromEntries(
   Object.entries(SECTION_PATHS).map(([section, path]) => [path, section]),
 ) as Record<string, NavSection>;
 
+export function isKnownPath(pathname: string): boolean {
+  return Object.prototype.hasOwnProperty.call(PATH_TO_SECTION, pathname);
+}
+
 export function sectionForPath(pathname: string): NavSection {
   return PATH_TO_SECTION[pathname] ?? "wallet";
 }
