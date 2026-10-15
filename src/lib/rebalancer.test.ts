@@ -517,3 +517,51 @@ describe("constants", () => {
     expect(DEFAULT_SWAP_FEE_PCT).toBe(0.3);
   });
 });
+
+// ─── Precision & Zero-Balance Edge Cases (#970) ───────────────────────────────
+
+describe("rebalancer precision and zero-balance edge cases (#970)", () => {
+  it("returns an empty suggestion array without throwing when initial portfolio balance is zero", () => {
+    const emptyAssets = [
+      makeAsset("XLM", "0"),
+      makeAsset("USDC", "0"),
+    ];
+    const allocated = computeCurrentAllocations(emptyAssets, PRICES);
+    expect(allocated.every((a) => a.currentPct === 0)).toBe(true);
+
+    const diffs = computeAllocationDiffs(allocated, { XLM: 50, USDC: 50 }, 0);
+    expect(diffs.every((d) => d.diffUsd === 0)).toBe(true);
+
+    const suggestions = generateSwapSuggestions(diffs, PRICES);
+    expect(suggestions).toEqual([]);
+  });
+
+  it("balances 7-decimal native XLM and 18-decimal wrapped tokens without rounding drift", () => {
+    const assets = [
+      makeAsset("XLM", "1000.1234567"),
+      makeAsset("WETH", "0.033337448556666667"),
+    ];
+    const decimals = { XLM: 7, WETH: 18 };
+    const prices = { XLM: 0.1, WETH: 3000 };
+    const allocated = computeCurrentAllocations(assets, prices, decimals);
+    const pctSum = allocated.reduce((s, a) => s + a.currentPct, 0);
+    expect(pctSum).toBeCloseTo(100, 10);
+
+    const totalUsd = allocated.reduce((s, a) => s + (a.usdValue ?? 0), 0);
+    const diffs = computeAllocationDiffs(allocated, { XLM: 25, WETH: 75 }, totalUsd);
+    const swaps = generateSwapSuggestions(diffs, prices, 0.01, decimals);
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0].from).toBe("XLM");
+    expect(swaps[0].to).toBe("WETH");
+  });
+
+  it("prunes dust orders whose token amount falls below 0.00001 units", () => {
+    const diffs: AllocationDiff[] = [
+      { asset: "XLM", assetCode: "XLM", currentPct: 60, targetPct: 50, diffPct: -10, diffUsd: -1.5 },
+      { asset: "HYPER", assetCode: "HYPER", currentPct: 40, targetPct: 50, diffPct: 10, diffUsd: 1.5 },
+    ];
+    // At $500,000 per HYPER, $1.50 buys ~0.000003 HYPER (< 0.00001 dust threshold)
+    const swaps = generateSwapSuggestions(diffs, { XLM: 0.1, HYPER: 500_000 });
+    expect(swaps).toEqual([]);
+  });
+});
