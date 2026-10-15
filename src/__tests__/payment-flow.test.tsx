@@ -112,4 +112,114 @@ describe("Payment Flow Integration", () => {
       })
     );
   });
+
+  it("submits payment to a 69-character Muxed account (M...) with a valid 64-character MEMO_HASH (#968)", async () => {
+    const ConnectTrigger = () => {
+      const { connectWallet } = useSorokit();
+      return <button onClick={() => connectWallet()}>Test Connect</button>;
+    };
+
+    render(
+      <SorokitProvider client={mockClient}>
+        <TransactionPanel />
+        <ConnectTrigger />
+      </SorokitProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Test Connect" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /XLM/ })).toHaveTextContent("100.5");
+    });
+
+    const muxedDest =
+      "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAACJUQ";
+    const validHash = "a".repeat(64);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: muxedDest },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    fireEvent.change(screen.getByLabelText("Memo type"), {
+      target: { value: "hash" },
+    });
+
+    // Invalid hex memo blocks submission and shows validation message
+    const memoInput = screen.getByLabelText("Memo Hash");
+    fireEvent.change(memoInput, { target: { value: "not-a-valid-64-char-hex" } });
+    expect(
+      screen.getByText(/Memo hash must be a 64-character hexadecimal string/i),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("submit-transaction")).toBeDisabled();
+
+    // Valid 64-char hex memo enables submission
+    fireEvent.change(memoInput, { target: { value: validHash } });
+    const submitBtn = screen.getByTestId("submit-transaction");
+    expect(submitBtn).not.toBeDisabled();
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => screen.getByRole("dialog", { name: /confirm transaction/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Transaction submitted")).toBeInTheDocument();
+    });
+
+    expect(mockClient.transaction.submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        destination: muxedDest,
+        amount: "10",
+        memoType: "hash",
+        memo: validHash,
+      }),
+    );
+  });
+
+  it("displays actionable user guidance when a payment fails due to op_underfunded (#968)", async () => {
+    vi.mocked(mockClient.transaction.submit).mockResolvedValueOnce({
+      data: null,
+      error: "Transaction failed with op_underfunded",
+    });
+
+    const ConnectTrigger = () => {
+      const { connectWallet } = useSorokit();
+      return <button onClick={() => connectWallet()}>Test Connect</button>;
+    };
+
+    render(
+      <SorokitProvider client={mockClient}>
+        <TransactionPanel />
+        <ConnectTrigger />
+      </SorokitProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Test Connect" }));
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: /XLM/ })).toHaveTextContent("100.5");
+    });
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ" },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(screen.getByTestId("submit-transaction"));
+
+    await waitFor(() => screen.getByRole("dialog", { name: /confirm transaction/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Transaction failed")).toBeInTheDocument();
+      expect(
+        screen.getByText(/Insufficient balance to submit this transaction/i),
+      ).toBeInTheDocument();
+    });
+  });
 });
+
