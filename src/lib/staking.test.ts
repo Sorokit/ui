@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateDailyRewards,
+  calculateEstimatedRewards,
+  calculateNetApyPct,
+  calculateUnbondingCompletion,
   computeUptimePct,
   createDefaultFilter,
   estimateDelegationFeeXlm,
@@ -457,5 +460,61 @@ describe("computeUptimePct (#689)", () => {
     expect(
       computeUptimePct({ uptimePct: 0, pingCount: Number.NaN }),
     ).toBeNull();
+  });
+});
+
+describe("calculateEstimatedRewards & calculateUnbondingCompletion (#972)", () => {
+  it("deducts validator commission from gross reward and APY", () => {
+    expect(calculateNetApyPct(10, 8)).toBeCloseTo(9.2);
+    const res = calculateEstimatedRewards({
+      amountXlm: 1000,
+      apyPct: 10,
+      validatorCommission: 8,
+      durationDays: 365,
+    });
+    expect(res.grossRewardXlm).toBeCloseTo(100);
+    expect(res.netRewardXlm).toBeCloseTo(92);
+    expect(res.netApyPct).toBeCloseTo(9.2);
+  });
+
+  it("computes compounding yield for partial redelegations across validators", () => {
+    const res = calculateEstimatedRewards({
+      amountXlm: 2000,
+      apyPct: 10,
+      validatorCommission: 10, // 9% net APY
+      durationDays: 365,
+      compound: true,
+      compoundsPerYear: 365,
+      partialRedelegation: {
+        redelegatedAmountXlm: 1000,
+        atDay: 182.5,
+        targetApyPct: 12,
+        targetValidatorCommission: 0, // 12% net APY
+      },
+    });
+    // Kept 1000 XLM at 9% net daily compounding for 365 days
+    const keptExpected = 1000 * (Math.pow(1 + 0.09 / 365, 365) - 1);
+    // Moved 1000 XLM compounds at 9% for 182.5 days, then at 12% for 182.5 days
+    const movedAfterH1 = 1000 * Math.pow(1 + 0.09 / 365, 182.5);
+    const movedAfterH2 = movedAfterH1 * Math.pow(1 + 0.12 / 365, 182.5) - 1000;
+    expect(res.netRewardXlm).toBeCloseTo(keptExpected + movedAfterH2, 5);
+  });
+
+  it("aligns unbonding completion estimates to protocol epoch boundaries", () => {
+    // Unbonded mid-epoch (14:30 UTC) with 24h UTC epochs -> completes at next 00:00 UTC after 21 days
+    const estimate = calculateUnbondingCompletion("2026-01-01T14:30:00.000Z", {
+      unbondingDays: 21,
+      epochDurationHours: 24,
+    });
+    expect(estimate.completesAt).toBe("2026-01-23T00:00:00.000Z");
+    expect(estimate.epochsRemaining).toBe(22);
+
+    // Exact epoch boundary stays at 21 days without extra rounding
+    const exact = calculateUnbondingCompletion("2026-01-01T00:00:00.000Z", {
+      unbondingDays: 21,
+      epochDurationHours: 24,
+    });
+    expect(exact.completesAt).toBe("2026-01-22T00:00:00.000Z");
+    expect(exact.epochsRemaining).toBe(21);
   });
 });

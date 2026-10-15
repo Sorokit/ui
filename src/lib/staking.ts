@@ -336,6 +336,194 @@ export function validateDelegationAmount(
   return null;
 }
 
+/** Default protocol unbonding period in days */
+export const DEFAULT_UNBONDING_DAYS = 21;
+
+/** Default protocol epoch close duration in hours */
+export const DEFAULT_EPOCH_DURATION_HOURS = 24;
+
+/**
+ * Compute net annual percentage yield after deducting validator commission:
+ *   `grossApyPct * (1 - commissionPct / 100)`
+ */
+export function calculateNetApyPct(grossApyPct: number, commissionPct: number): number {
+  if (!Number.isFinite(grossApyPct) || grossApyPct <= 0) return 0;
+  const clampedCommission = Math.min(100, Math.max(0, Number.isFinite(commissionPct) ? commissionPct : 0));
+  return grossApyPct * (1 - clampedCommission / 100);
+}
+
+export interface EstimatedRewardsParams {
+  /** Principal amount staked in XLM */
+  amountXlm: number;
+  /** Gross annual percentage yield (0–100) */
+  apyPct: number;
+  /** Validator commission percentage (0–100, default 0) */
+  validatorCommission?: number;
+  /** Duration in days (default 365) */
+  durationDays?: number;
+  /** Whether rewards compound at each period (default false) */
+  compound?: boolean;
+  /** Compounding periods per year when compound=true (default 365) */
+  compoundsPerYear?: number;
+  /** Optional partial redelegation split moved to a second validator mid-period */
+  partialRedelegation?: {
+    /** Amount in XLM moved to the target validator */
+    redelegatedAmountXlm: number;
+    /** Day on which the partial redelegation occurs (0 <= atDay <= durationDays) */
+    atDay: number;
+    /** Target validator gross APY percentage */
+    targetApyPct: number;
+    /** Target validator commission percentage */
+    targetValidatorCommission?: number;
+  };
+}
+
+export interface EstimatedRewardsResult {
+  grossRewardXlm: number;
+  netRewardXlm: number;
+  netApyPct: number;
+}
+
+/**
+ * Calculate estimated staking rewards deducting validator commission:
+ *   `netReward = grossReward * (1 - validatorCommission / 100)`
+ * Supports simple and compounding yield as well as partial redelegations.
+ */
+export function calculateEstimatedRewards(
+  params: EstimatedRewardsParams,
+): EstimatedRewardsResult {
+  const {
+    amountXlm,
+    apyPct,
+    validatorCommission = 0,
+    durationDays = 365,
+    compound = false,
+    compoundsPerYear = 365,
+    partialRedelegation,
+  } = params;
+
+  if (!Number.isFinite(amountXlm) || amountXlm <= 0 || !Number.isFinite(durationDays) || durationDays <= 0) {
+    return {
+      grossRewardXlm: 0,
+      netRewardXlm: 0,
+      netApyPct: calculateNetApyPct(apyPct, validatorCommission),
+    };
+  }
+
+  const clampedCommission = Math.min(100, Math.max(0, validatorCommission));
+  const netApyPct = calculateNetApyPct(apyPct, clampedCommission);
+
+  const computeLeg = (
+    principal: number,
+    legApyPct: number,
+    legCommissionPct: number,
+    days: number,
+  ): { gross: number; net: number } => {
+    if (principal <= 0 || days <= 0 || legApyPct <= 0) return { gross: 0, net: 0 };
+    const clampedComm = Math.min(100, Math.max(0, legCommissionPct));
+    const grossRate = legApyPct / 100;
+    const netRate = calculateNetApyPct(legApyPct, clampedComm) / 100;
+    if (!compound) {
+      const gross = principal * grossRate * (days / 365);
+      const net = gross * (1 - clampedComm / 100);
+      return { gross, net };
+    }
+    const n = Math.max(1, compoundsPerYear);
+    const periods = (days / 365) * n;
+    const gross = principal * (Math.pow(1 + grossRate / n, periods) - 1);
+    const net = principal * (Math.pow(1 + netRate / n, periods) - 1);
+    return { gross, net };
+  };
+
+  if (
+    partialRedelegation &&
+    partialRedelegation.redelegatedAmountXlm > 0 &&
+    partialRedelegation.atDay >= 0 &&
+    partialRedelegation.atDay < durationDays
+  ) {
+    const moved = Math.min(amountXlm, partialRedelegation.redelegatedAmountXlm);
+    const kept = amountXlm - moved;
+    const phase1Days = partialRedelegation.atDay;
+    const phase2Days = durationDays - phase1Days;
+
+    const keptLeg = computeLeg(kept, apyPct, clampedCommission, durationDays);
+    const movedPhase1 = computeLeg(moved, apyPct, clampedCommission, phase1Days);
+    const movedPhase2Principal = compound ? moved + movedPhase1.net : moved;
+    const movedPhase2GrossPrincipal = compound ? moved + movedPhase1.gross : moved;
+
+    const targetComm = partialRedelegation.targetValidatorCommission ?? 0;
+    const movedPhase2Net = computeLeg(
+      movedPhase2Principal,
+      partialRedelegation.targetApyPct,
+      targetComm,
+      phase2Days,
+    ).net;
+    const movedPhase2Gross = computeLeg(
+      movedPhase2GrossPrincipal,
+      partialRedelegation.targetApyPct,
+      targetComm,
+      phase2Days,
+    ).gross;
+
+    return {
+      grossRewardXlm: keptLeg.gross + movedPhase1.gross + movedPhase2Gross,
+      netRewardXlm: keptLeg.net + movedPhase1.net + movedPhase2Net,
+      netApyPct,
+    };
+  }
+
+  const full = computeLeg(amountXlm, apyPct, clampedCommission, durationDays);
+  return {
+    grossRewardXlm: full.gross,
+    netRewardXlm: full.net,
+    netApyPct,
+  };
+}
+
+export interface UnbondingEstimateOptions {
+  /** Base unbonding duration in days (default 21) */
+  unbondingDays?: number;
+  /** Protocol epoch duration in hours (default 24) */
+  epochDurationHours?: number;
+  /** Optional genesis/reference epoch timestamp in ms (default 0 = UTC midnight epoch alignment) */
+  epochReferenceMs?: number;
+}
+
+/**
+ * Estimate when an unbonding delegation completes by adding the base unbonding
+ * period and rounding up to the next protocol epoch close boundary.
+ */
+export function calculateUnbondingCompletion(
+  unbondedAt: string | number | Date,
+  options: UnbondingEstimateOptions = {},
+): { completesAt: string; completesAtMs: number; epochsRemaining: number } {
+  const {
+    unbondingDays = DEFAULT_UNBONDING_DAYS,
+    epochDurationHours = DEFAULT_EPOCH_DURATION_HOURS,
+    epochReferenceMs = 0,
+  } = options;
+
+  const startMs =
+    typeof unbondedAt === "number"
+      ? unbondedAt
+      : unbondedAt instanceof Date
+        ? unbondedAt.getTime()
+        : Date.parse(unbondedAt);
+
+  const epochMs = Math.max(1, epochDurationHours) * 3_600_000;
+  const rawEndMs = startMs + unbondingDays * 86_400_000;
+  const offset = rawEndMs - epochReferenceMs;
+  const remainder = ((offset % epochMs) + epochMs) % epochMs;
+  const completesAtMs = remainder === 0 ? rawEndMs : rawEndMs + (epochMs - remainder);
+  const epochsRemaining = Math.ceil((completesAtMs - startMs) / epochMs);
+
+  return {
+    completesAt: new Date(completesAtMs).toISOString(),
+    completesAtMs,
+    epochsRemaining,
+  };
+}
+
 // ─── Mock data ────────────────────────────────────────────────────────────────
 
 /** Deterministic stub validators for UI development and testing. */
