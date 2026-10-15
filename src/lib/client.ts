@@ -511,3 +511,166 @@ export function getClient(): SorokitClient {
     );
   return _client;
 }
+
+export const RETRYABLE_HTTP_STATUSES = new Set([429, 502, 503, 504]);
+export const DEFAULT_RPC_MAX_RETRIES = 3;
+export const DEFAULT_RPC_BASE_DELAY_MS = 300;
+
+const HORIZON_OP_CODE_MESSAGES: Record<string, string> = {
+  op_underfunded: "Insufficient balance to fund this operation (op_underfunded).",
+  op_bad_auth: "Invalid signature or missing signer weight for this operation (op_bad_auth).",
+  op_no_destination: "Destination account does not exist on the network (op_no_destination).",
+  op_no_trust: "Account is missing a trustline for the specified asset (op_no_trust).",
+  op_line_full: "Destination trustline limit would be exceeded (op_line_full).",
+  tx_bad_seq: "Transaction sequence number does not match the account (tx_bad_seq).",
+  tx_bad_auth: "Transaction authentication failed (tx_bad_auth).",
+  tx_insufficient_fee: "Transaction fee is below the network minimum (tx_insufficient_fee).",
+  tx_insufficient_balance: "Account balance cannot cover the fee and reserve (tx_insufficient_balance).",
+};
+
+export interface HorizonErrorPayload {
+  status?: number;
+  title?: string;
+  detail?: string;
+  extras?: {
+    result_codes?: {
+      transaction?: string;
+      operations?: string[];
+    };
+  };
+}
+
+export interface DecodedHorizonError {
+  message: string;
+  transactionCode: string | null;
+  operationCodes: string[];
+}
+
+/**
+ * Decode a Horizon error response, extracting both top-level `detail` and
+ * `extras.result_codes` (`transaction` and `operations` codes) into an
+ * actionable message.
+ */
+export function decodeHorizonError(error: unknown): DecodedHorizonError {
+  if (error && typeof error === "object") {
+    const payload = error as HorizonErrorPayload;
+    const txCode = payload.extras?.result_codes?.transaction ?? null;
+    const opCodes = Array.isArray(payload.extras?.result_codes?.operations)
+      ? payload.extras!.result_codes!.operations!
+      : [];
+
+    const descriptions: string[] = [];
+    if (txCode) {
+      descriptions.push(HORIZON_OP_CODE_MESSAGES[txCode] ?? `Transaction error: ${txCode}`);
+    }
+    for (const op of opCodes) {
+      if (op && op !== "op_success") {
+        descriptions.push(HORIZON_OP_CODE_MESSAGES[op] ?? `Operation error: ${op}`);
+      }
+    }
+
+    const baseDetail = payload.detail || payload.title || "Horizon request failed";
+    const message =
+      descriptions.length > 0
+        ? `${baseDetail} — ${descriptions.join(" ")}`
+        : baseDetail;
+
+    return {
+      message,
+      transactionCode: txCode,
+      operationCodes: opCodes,
+    };
+  }
+
+  const fallback = error instanceof Error ? error.message : String(error ?? "Unknown error");
+  return {
+    message: fallback,
+    transactionCode: null,
+    operationCodes: [],
+  };
+}
+
+export interface RpcRetryOptions {
+  maxRetries?: number;
+  baseDelayMs?: number;
+  jitterRatio?: number;
+  randomFn?: () => number;
+  onRetry?: (attempt: number, delayMs: number, error: unknown) => Promise<void> | void;
+}
+
+function isTransientRpcError(error: unknown): boolean {
+  if (!error) return false;
+  if (typeof error === "object") {
+    const status = (error as { status?: number; statusCode?: number }).status ??
+      (error as { statusCode?: number }).statusCode;
+    if (typeof status === "number" && RETRYABLE_HTTP_STATUSES.has(status)) {
+      return true;
+    }
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return /\b(429|502|503|504|rate limit|service unavailable|bad gateway|gateway timeout|network dropout|econnreset|etimedout)\b/i.test(
+    msg,
+  );
+}
+
+/**
+ * Execute an async RPC operation with automatic retries, exponential backoff,
+ * and jitter for transient HTTP 429, 502, 503, and 504 errors.
+ */
+export async function withRpcRetry<T>(
+  operation: () => Promise<T>,
+  options: RpcRetryOptions = {},
+): Promise<T> {
+  const {
+    maxRetries = DEFAULT_RPC_MAX_RETRIES,
+    baseDelayMs = DEFAULT_RPC_BASE_DELAY_MS,
+    jitterRatio = 0.2,
+    randomFn = Math.random,
+    onRetry,
+  } = options;
+
+  let attempt = 0;
+  while (true) {
+    try {
+      return await operation();
+    } catch (err) {
+      if (attempt >= maxRetries || !isTransientRpcError(err)) {
+        throw err;
+      }
+      attempt += 1;
+      const expDelay = baseDelayMs * 2 ** (attempt - 1);
+      const jitter = Math.round(expDelay * jitterRatio * randomFn());
+      const delayMs = expDelay + jitter;
+      if (onRetry) {
+        await onRetry(attempt, delayMs, err);
+      } else {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+  }
+}
+
+/**
+ * Soroban RPC wrapper that applies exponential-backoff retries on transient
+ * HTTP 429/502/503/504 failures and decodes Horizon operation error codes.
+ */
+export class SorobanClient {
+  constructor(
+    private readonly transport: {
+      request: <T>(method: string, params?: unknown) => Promise<T>;
+    },
+    private readonly retryOptions: RpcRetryOptions = {},
+  ) {}
+
+  async call<T>(method: string, params?: unknown): Promise<T> {
+    try {
+      return await withRpcRetry(
+        () => this.transport.request<T>(method, params),
+        this.retryOptions,
+      );
+    } catch (err) {
+      const decoded = decodeHorizonError(err);
+      throw new Error(decoded.message);
+    }
+  }
+}
