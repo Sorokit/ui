@@ -97,7 +97,7 @@ describe("Wallet Connect Flow Integration", () => {
     const { TransactionPanel } = await import("@/components/TransactionPanel");
     const ConnectDirect = () => {
       const { connectWallet } = useSorokit();
-      return <button onClick={() => connectWallet()}>Direct Connect</button>;
+      return <button onClick={() => connectWallet()}>Test Sign In</button>;
     };
 
     (mockClient as unknown as Record<string, unknown>).transaction = {
@@ -122,8 +122,9 @@ describe("Wallet Connect Flow Integration", () => {
     );
 
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Direct Connect" }));
+      fireEvent.click(screen.getByRole("button", { name: "Test Sign In" }));
     });
+
 
     await waitFor(() => {
       expect(screen.getByLabelText("Destination Address")).toBeInTheDocument();
