@@ -69,6 +69,7 @@ export function TransactionPanel({
     isLoadingAccount,
     isConnected,
     balances = [],
+    refreshAccount,
   } = useSorokit();
   const [dest, setDest] = useState(defaultDestination);
   const [destDirty, setDestDirty] = useState(false);
@@ -84,7 +85,26 @@ export function TransactionPanel({
   const [isBuildingPreview, setIsBuildingPreview] = useState(false);
   const [estimatedFeeXlm, setEstimatedFeeXlm] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const prevAddressRef = useRef<string | null | undefined>(address);
   const formId = useId();
+
+  // Reset active transaction draft form and abort in-flight operations when switching accounts or disconnecting (#967)
+  useEffect(() => {
+    if (prevAddressRef.current !== undefined && prevAddressRef.current !== address) {
+      abortControllerRef.current?.abort();
+      setDest(defaultDestination);
+      setDestDirty(false);
+      setAmount(defaultAmount);
+      setAmountDirty(false);
+      setMemo(defaultMemo);
+      setState("idle");
+      setResult(null);
+      setError(null);
+      setPreview(null);
+      setIsBuildingPreview(false);
+    }
+    prevAddressRef.current = address;
+  }, [address, defaultDestination, defaultAmount, defaultMemo]);
 
   // Fetch the current network fee estimate once a wallet is connected so the
   // balance check below can warn the user before they submit, rather than
@@ -110,6 +130,7 @@ export function TransactionPanel({
       active = false;
     };
   }, [client, isConnected]);
+
 
   const assetOptions = balances ?? [];
 
@@ -186,6 +207,9 @@ export function TransactionPanel({
       });
       if (signal.aborted) return;
       if (err) {
+        if (err.toLowerCase().includes("tx_bad_seq") || err.toLowerCase().includes("bad sequence")) {
+          void refreshAccount?.();
+        }
         const message = friendlyError(err);
         setError(message);
         setState("error");
@@ -203,12 +227,16 @@ export function TransactionPanel({
     } catch (e) {
       if (!signal.aborted) {
         const msg = e instanceof Error ? e.message : "Unknown error";
+        if (msg.toLowerCase().includes("tx_bad_seq") || msg.toLowerCase().includes("bad sequence")) {
+          void refreshAccount?.();
+        }
         const message = friendlyError(msg);
         setError(message);
         setState("error");
         onError?.(message);
       }
     } finally {
+
       setPreview(null);
     }
   }
