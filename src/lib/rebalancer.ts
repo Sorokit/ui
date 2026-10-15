@@ -85,6 +85,43 @@ export const DEFAULT_SWAP_FEE_PCT = 0.3;
  */
 export const MIN_TRADE_USD = 1.0;
 
+/**
+ * Minimum asset trade amount (100 stroops = 0.00001 XLM) to prevent DEX dust
+ * orders that fail minimum trade thresholds.
+ */
+export const MIN_ASSET_TRADE_AMOUNT = 0.00001;
+
+/** Default Stellar asset decimal places (7 decimals = 10^7 stroops). */
+export const DEFAULT_ASSET_DECIMALS = 7;
+
+const USD_PRECISION_DECIMALS = 18;
+const USD_SCALE = 10n ** BigInt(USD_PRECISION_DECIMALS);
+
+/** Parse a decimal string or number into scaled BigInt base units without float drift. */
+export function parseDecimalToBigInt(value: string | number, decimals = USD_PRECISION_DECIMALS): bigint {
+  const raw = typeof value === "number" ? value.toFixed(Math.min(decimals, 18)) : String(value).trim();
+  if (!raw || raw === "NaN" || raw === "Infinity" || raw === "-Infinity") return 0n;
+  const negative = raw.startsWith("-");
+  const unsigned = negative ? raw.slice(1) : raw;
+  const [intPartRaw = "0", fracPartRaw = ""] = unsigned.split(".");
+  const intPart = intPartRaw.replace(/\D/g, "") || "0";
+  const cleanFrac = fracPartRaw.replace(/\D/g, "");
+  const paddedFrac = cleanFrac.padEnd(decimals + 1, "0");
+  const mainFrac = paddedFrac.slice(0, decimals);
+  const roundingDigit = Number(paddedFrac[decimals] ?? "0");
+  let units = BigInt(intPart) * 10n ** BigInt(decimals) + BigInt(mainFrac || "0");
+  if (roundingDigit >= 5) units += 1n;
+  return negative ? -units : units;
+}
+
+/** Round a numeric token amount to the asset's decimal precision using BigInt half-up rounding. */
+export function roundToAssetDecimals(amount: number, decimals = DEFAULT_ASSET_DECIMALS): number {
+  if (!Number.isFinite(amount) || amount === 0) return 0;
+  const clampedDecimals = Math.max(0, Math.min(18, Math.trunc(decimals)));
+  const scaled = parseDecimalToBigInt(amount, clampedDecimals);
+  return Number(scaled) / 10 ** clampedDecimals;
+}
+
 /** Slippage model: 0.1% base + 0.05% per $1 000 of trade size */
 export const SLIPPAGE_BASE_PCT = 0.1;
 export const SLIPPAGE_MARKET_IMPACT_PER_1K = 0.05;
@@ -94,27 +131,48 @@ export const SLIPPAGE_MARKET_IMPACT_PER_1K = 0.05;
 /**
  * Compute the current allocation percentages for each asset given USD prices.
  *
- * Assets without a known price are assigned a `usdValue` of 0 and therefore
- * 0% weight.  This keeps the portfolio display sensible even when price feeds
- * are incomplete.
+ * Uses 18-decimal BigInt fixed-point math so portfolios mixing 7-decimal
+ * native Stellar assets and 18-decimal wrapped tokens compute USD weights
+ * without floating-point precision drift.
  *
  * @returns a new array with `currentPct` populated on every entry.
  */
 export function computeCurrentAllocations(
   assets: Omit<PortfolioAsset, "currentPct">[],
   prices: Record<string, number>,
+  assetDecimals: Record<string, number> = {},
 ): PortfolioAsset[] {
-  const withValues = assets.map((a) => ({
-    ...a,
-    usdValue: prices[a.assetCode] != null ? parseFloat(a.balance) * prices[a.assetCode] : null,
-  }));
+  const scaledValues = assets.map((a) => {
+    const price = prices[a.assetCode];
+    if (price == null || !Number.isFinite(price) || price < 0) {
+      return { asset: a, usdScaled: null as bigint | null, usdValue: null as number | null };
+    }
+    const dec = assetDecimals[a.assetCode] ?? DEFAULT_ASSET_DECIMALS;
+    const balUnits = parseDecimalToBigInt(a.balance, dec);
+    const priceUnits = parseDecimalToBigInt(price, USD_PRECISION_DECIMALS);
+    const usdScaled = (balUnits * priceUnits) / 10n ** BigInt(dec);
+    const usdValue = Number(usdScaled) / Number(USD_SCALE);
+    return { asset: a, usdScaled: usdScaled > 0n ? usdScaled : 0n, usdValue };
+  });
 
-  const totalUsd = withValues.reduce((sum, a) => sum + (a.usdValue ?? 0), 0);
+  const totalUsdScaled = scaledValues.reduce((sum, item) => sum + (item.usdScaled ?? 0n), 0n);
 
-  return withValues.map((a) => ({
-    ...a,
-    currentPct: totalUsd > 0 ? ((a.usdValue ?? 0) / totalUsd) * 100 : 0,
-  }));
+  if (totalUsdScaled <= 0n) {
+    return scaledValues.map(({ asset, usdValue }) => ({
+      ...asset,
+      usdValue,
+      currentPct: 0,
+    }));
+  }
+
+  return scaledValues.map(({ asset, usdScaled, usdValue }) => {
+    const pctBasis = ((usdScaled ?? 0n) * 100n * USD_SCALE) / totalUsdScaled;
+    return {
+      ...asset,
+      usdValue,
+      currentPct: Number(pctBasis) / Number(USD_SCALE),
+    };
+  });
 }
 
 /**
@@ -169,12 +227,19 @@ export function computeAllocationDiffs(
     ...Object.keys(targets),
   ]);
 
+  const safeTotalUsd = Number.isFinite(totalUsd) && totalUsd > 0 ? totalUsd : 0;
+  const totalUsdScaled = parseDecimalToBigInt(safeTotalUsd, USD_PRECISION_DECIMALS);
+
   return Array.from(allAssets).map((code) => {
     const cur = current.find((a) => a.assetCode === code);
     const currentPct = cur?.currentPct ?? 0;
     const targetPct = targets[code] ?? 0;
-    const diffPct = targetPct - currentPct;
-    const diffUsd = (diffPct / 100) * totalUsd;
+    const curPctScaled = parseDecimalToBigInt(currentPct, USD_PRECISION_DECIMALS);
+    const tgtPctScaled = parseDecimalToBigInt(targetPct, USD_PRECISION_DECIMALS);
+    const diffPctScaled = tgtPctScaled - curPctScaled;
+    const diffPct = Number(diffPctScaled) / Number(USD_SCALE);
+    const diffUsdScaled = (diffPctScaled * totalUsdScaled) / (100n * USD_SCALE);
+    const diffUsd = safeTotalUsd === 0 ? 0 : Number(diffUsdScaled) / Number(USD_SCALE);
     return {
       asset: cur?.asset ?? code,
       assetCode: code,
@@ -217,44 +282,71 @@ export function estimateSwapCostUsd(tradeUsd: number, swapFeePct = DEFAULT_SWAP_
  * 1. Identify "sell" assets (current > target) and "buy" assets (current < target).
  * 2. Sort sellers by largest surplus first, buyers by largest deficit first.
  * 3. Greedily match each seller to buyers until the surplus is consumed.
- * 4. Skip any individual swap whose trade size is below MIN_TRADE_USD to avoid
- *    dust trades.
+ * 4. Skip any individual swap whose trade size is below MIN_TRADE_USD or
+ *    MIN_ASSET_TRADE_AMOUNT to avoid dust trades.
  *
- * @param diffs       - from `computeAllocationDiffs`
- * @param prices      - map of assetCode → USD price
- * @param baseFeeUsd  - estimated network fee per transaction in USD
+ * @param diffs          - from `computeAllocationDiffs`
+ * @param prices         - map of assetCode → USD price
+ * @param baseFeeUsd     - estimated network fee per transaction in USD
+ * @param assetDecimals  - optional map of assetCode → decimal places (default 7)
  */
 export function generateSwapSuggestions(
   diffs: AllocationDiff[],
   prices: Record<string, number>,
   baseFeeUsd = 0.01,
+  assetDecimals: Record<string, number> = {},
 ): SwapSuggestion[] {
+  if (!Array.isArray(diffs) || diffs.length === 0) return [];
+
   // Split into sellers (need to reduce) and buyers (need to increase)
   const sellers = diffs
-    .filter((d) => d.diffPct < 0)
-    .map((d) => ({ ...d, remaining: Math.abs(d.diffUsd) }))
-    .sort((a, b) => b.remaining - a.remaining);
+    .filter((d) => d.diffPct < 0 && Math.abs(d.diffUsd) >= MIN_TRADE_USD)
+    .map((d) => ({ ...d, remainingScaled: parseDecimalToBigInt(Math.abs(d.diffUsd), USD_PRECISION_DECIMALS) }))
+    .sort((a, b) => (b.remainingScaled > a.remainingScaled ? 1 : b.remainingScaled < a.remainingScaled ? -1 : 0));
 
   const buyers = diffs
-    .filter((d) => d.diffPct > 0)
-    .map((d) => ({ ...d, remaining: d.diffUsd }))
-    .sort((a, b) => b.remaining - a.remaining);
+    .filter((d) => d.diffPct > 0 && d.diffUsd >= MIN_TRADE_USD)
+    .map((d) => ({ ...d, remainingScaled: parseDecimalToBigInt(d.diffUsd, USD_PRECISION_DECIMALS) }))
+    .sort((a, b) => (b.remainingScaled > a.remainingScaled ? 1 : b.remainingScaled < a.remainingScaled ? -1 : 0));
 
+  if (sellers.length === 0 || buyers.length === 0) return [];
+
+  const minTradeScaled = parseDecimalToBigInt(MIN_TRADE_USD, USD_PRECISION_DECIMALS);
   const suggestions: SwapSuggestion[] = [];
 
   for (const seller of sellers) {
     for (const buyer of buyers) {
-      if (seller.remaining < MIN_TRADE_USD) break;
-      if (buyer.remaining < MIN_TRADE_USD) continue;
+      if (seller.remainingScaled < minTradeScaled) break;
+      if (buyer.remainingScaled < minTradeScaled) continue;
 
-      const tradeUsd = Math.min(seller.remaining, buyer.remaining);
-      if (tradeUsd < MIN_TRADE_USD) continue;
+      const tradeScaled =
+        seller.remainingScaled < buyer.remainingScaled
+          ? seller.remainingScaled
+          : buyer.remainingScaled;
+      if (tradeScaled < minTradeScaled) continue;
 
+      const tradeUsd = Number(tradeScaled) / Number(USD_SCALE);
       const fromPrice = prices[seller.assetCode] ?? 1;
       const toPrice = prices[buyer.assetCode] ?? 1;
-      const fromAmount = tradeUsd / fromPrice;
+      if (!Number.isFinite(fromPrice) || fromPrice <= 0 || !Number.isFinite(toPrice) || toPrice <= 0) {
+        continue;
+      }
+
+      const fromDecimals = assetDecimals[seller.assetCode] ?? DEFAULT_ASSET_DECIMALS;
+      const toDecimals = assetDecimals[buyer.assetCode] ?? DEFAULT_ASSET_DECIMALS;
+
+      const fromAmount = roundToAssetDecimals(tradeUsd / fromPrice, fromDecimals);
       const slippagePct = estimateSlippagePct(tradeUsd);
-      const toAmountExpected = (tradeUsd * (1 - slippagePct / 100)) / toPrice;
+      const toAmountExpected = roundToAssetDecimals(
+        (tradeUsd * (1 - slippagePct / 100)) / toPrice,
+        toDecimals,
+      );
+
+      // Prune dust orders below minimum DEX trade thresholds (< 0.00001 units)
+      if (fromAmount < MIN_ASSET_TRADE_AMOUNT || toAmountExpected < MIN_ASSET_TRADE_AMOUNT) {
+        continue;
+      }
+
       const totalCostUsd = estimateSwapCostUsd(tradeUsd) + baseFeeUsd;
 
       suggestions.push({
@@ -268,8 +360,8 @@ export function generateSwapSuggestions(
         totalCostUsd,
       });
 
-      seller.remaining -= tradeUsd;
-      buyer.remaining -= tradeUsd;
+      seller.remainingScaled -= tradeScaled;
+      buyer.remainingScaled -= tradeScaled;
     }
   }
 
