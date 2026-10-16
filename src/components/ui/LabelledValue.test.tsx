@@ -3,9 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LabelledValue } from "./LabelledValue";
 
+const successToast = vi.fn();
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({ success: successToast }),
+}));
+
 describe("LabelledValue", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    successToast.mockReset();
   });
 
   afterEach(() => {
@@ -114,6 +120,26 @@ describe("LabelledValue", () => {
       expect(screen.getByTitle("Copy Secret Key")).toBeInTheDocument();
     });
 
+    it("shows a success toast confirmation after copying", async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: writeTextMock },
+        writable: true,
+        configurable: true,
+      });
+
+      render(<LabelledValue label="Secret Key" value="SABC123456789" copyable />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy Secret Key" }));
+      });
+
+      expect(successToast).toHaveBeenCalledWith(
+        "Secret Key Copied",
+        expect.objectContaining({ message: expect.stringContaining("clipboard") }),
+      );
+    });
+
     it("copies empty string when value is undefined", async () => {
       const writeTextMock = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, "clipboard", {
@@ -151,6 +177,46 @@ describe("LabelledValue", () => {
 
       expect(writeTextMock).toHaveBeenCalledWith("GBRP...");
       expect(screen.getByRole("button", { name: "Copy Address" })).toBeInTheDocument();
+      expect(successToast).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("responsive wrapping (#964)", () => {
+    it("allows the label to wrap instead of overflowing its container", () => {
+      render(
+        <LabelledValue
+          label="A Very Long Label That Should Wrap On Narrow Screens"
+          value="some value"
+        />,
+      );
+
+      const label = screen.getByText(
+        "A Very Long Label That Should Wrap On Narrow Screens",
+      );
+      expect(label.className).toContain("break-words");
+    });
+
+    it("constrains the root container so it can shrink below its content's intrinsic width", () => {
+      const { container } = render(
+        <LabelledValue label="Reserve Impact" value="12.50 XLM" />,
+      );
+
+      expect(container.firstChild).toHaveClass("min-w-0");
+    });
+
+    it("constrains the value row so the copy button never gets squeezed out", () => {
+      render(
+        <LabelledValue
+          label="Address"
+          value="GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ"
+          copyable
+        />,
+      );
+
+      const value = screen.getByText(
+        "GABCDEFGHIJKLMNOPQRSTUVWXYZABCDEFGHIJKLMNOPQRSTUVWXYZ",
+      );
+      expect(value.className).toContain("min-w-0");
     });
   });
 });
