@@ -13,7 +13,7 @@ export interface TransactionParams {
   asset: string;
   /** Issuer account for a non-native asset. Omitted (or undefined) for XLM. */
   assetIssuer?: string;
-  memoType: "none" | "text" | "id";
+  memoType: "none" | "text" | "id" | "hash" | "return";
   memo?: string;
 }
 

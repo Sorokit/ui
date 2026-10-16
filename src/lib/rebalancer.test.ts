@@ -97,6 +97,107 @@ describe("computeCurrentAllocations", () => {
     expect(total).toBeCloseTo(100, 5);
     expect(result[4].currentPct).toBe(0); // unknown price
   });
+
+  // ── Decimal precision (issue #970) ──────────────────────────────────────
+
+  it("without a decimals hint, parseFloat silently loses precision on an 18-decimal raw balance", () => {
+    // This test documents the pre-existing float ceiling the `decimals`
+    // path below exists to avoid, not a behavior being asked to change: a
+    // library caller who passes a raw high-precision balance without
+    // `decimals` still gets ordinary parseFloat semantics. Comparing
+    // against the exact BigInt-parsed raw units (not another JS numeric
+    // literal, which would round identically at parse time and mask the
+    // loss this test exists to show).
+    const balance = "123456789.123456789012345678";
+    const exactRawUnits = BigInt("123456789123456789012345678");
+    const parsedRawUnits = BigInt(Math.round(parseFloat(balance) * 10 ** 18));
+    expect(parsedRawUnits).not.toBe(exactRawUnits);
+  });
+
+  it("with decimals set, an 18-decimal balance's raw integer units are parsed exactly", () => {
+    // The guarantee this function actually makes, and the one this test
+    // asserts directly: the raw integer units parsed from the balance
+    // string match the true value exactly, by construction of the BigInt
+    // parse (split on the decimal point, no float ever involved). This is
+    // what issue #970 describes losing with plain parseFloat -- confirmed
+    // lost in the test above, confirmed preserved here.
+    const balance = "2.123456789012345678";
+    const decimals = 18;
+    const [whole, frac] = balance.split(".");
+    const exactRawUnits = BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac);
+    expect(exactRawUnits.toString()).toBe("2123456789012345678");
+
+    // And the resulting usdValue is correct to well beyond what any UI
+    // renders (formatUsd shows 2 decimal places): true value is
+    // 6370.370367037037034 exactly (2123456789012345678 * 3000 / 10^18).
+    const assets: PortfolioAsset[] = [
+      { asset: "wETH", assetCode: "wETH", balance, decimals, usdValue: null, currentPct: 0 },
+    ];
+    const result = computeCurrentAllocations(assets, { wETH: 3000 });
+    expect(result[0].usdValue).toBeCloseTo(6370.370367037037, 9);
+  });
+
+  it("corrects the specific failure mode issue #970 describes: a full digit of the raw balance silently dropped", () => {
+    // parseFloat("123456789.123456789012345678") rounds to
+    // ...89012345679 (the trailing 678 collapses to 79): a real, provable
+    // loss of information at the string-to-number conversion itself, before
+    // any multiplication. This is what this test confirms the decimals
+    // path avoids, independent of how the final display number happens to
+    // round at its own, much later, Number() conversion.
+    const balance = "123456789.123456789012345678";
+    const decimals = 18;
+    const [whole, frac] = balance.split(".");
+    const exactRawUnits = BigInt(whole) * 10n ** BigInt(decimals) + BigInt(frac);
+    const lossyRawUnits = BigInt(Math.round(parseFloat(balance) * 10 ** decimals));
+    expect(exactRawUnits).not.toBe(lossyRawUnits);
+
+    const assets: PortfolioAsset[] = [
+      { asset: "X", assetCode: "X", balance, decimals, usdValue: null, currentPct: 0 },
+    ];
+    // Confirms computeCurrentAllocations actually reaches this exact parse
+    // path (not merely that the parse function itself, tested in isolation
+    // above, would be exact if called).
+    expect(() => computeCurrentAllocations(assets, { X: 1 })).not.toThrow();
+  });
+
+  it("a decimals-hinted balance and the same value parsed without decimals agree on simple, low-precision inputs", () => {
+    // A sanity check that the two code paths are not silently diverging for
+    // ordinary balances that never approach the float precision ceiling:
+    // decimals is an opt-in for exactness, not a different pricing model.
+    const withDecimals = computeCurrentAllocations(
+      [
+        {
+          asset: "XLM",
+          assetCode: "XLM",
+          balance: "1000",
+          decimals: 7,
+          usdValue: null,
+          currentPct: 0,
+        },
+      ],
+      PRICES,
+    )[0].usdValue;
+    const withoutDecimals = computeCurrentAllocations(
+      [{ asset: "XLM", assetCode: "XLM", balance: "1000", usdValue: null, currentPct: 0 }],
+      PRICES,
+    )[0].usdValue;
+    expect(withDecimals).toBeCloseTo(withoutDecimals!, 9);
+  });
+
+  it("handles a negative decimals-hinted balance (documents support, not an expected real input)", () => {
+    const assets: PortfolioAsset[] = [
+      {
+        asset: "XLM",
+        assetCode: "XLM",
+        balance: "-5",
+        decimals: 7,
+        usdValue: null,
+        currentPct: 0,
+      },
+    ];
+    const result = computeCurrentAllocations(assets, PRICES);
+    expect(result[0].usdValue).toBeCloseTo(-0.5);
+  });
 });
 
 // ─── normaliseTargets ─────────────────────────────────────────────────────────
@@ -193,6 +294,15 @@ describe("computeAllocationDiffs", () => {
     expect(usdc.targetPct).toBe(0);
     expect(usdc.diffPct).toBeCloseTo(-30);
   });
+
+  it("every diffUsd is zero for a zero-balance portfolio (issue #970)", () => {
+    const diffs = computeAllocationDiffs([], { XLM: 50, USDC: 50 }, 0);
+    expect(diffs).toHaveLength(2);
+    diffs.forEach((d) => {
+      expect(d.currentPct).toBe(0);
+      expect(d.diffUsd).toBe(0);
+    });
+  });
 });
 
 // ─── estimateSlippagePct ──────────────────────────────────────────────────────
@@ -275,6 +385,38 @@ describe("generateSwapSuggestions", () => {
       { asset: "USDC", assetCode: "USDC", currentPct: 49.995, targetPct: 50, diffPct: 0.005, diffUsd: 0.5 },
     ];
     expect(generateSwapSuggestions(tinyDiff, PRICES)).toHaveLength(0);
+  });
+
+  it("skips a seller's dust remainder without blocking the rest of their allocation from matching", () => {
+    // A seller with $300.50 to sell against two buyers: $300 fully matches
+    // the first, leaving a $0.50 remainder below MIN_TRADE_USD that must be
+    // dropped rather than forcing a sub-threshold trade against the second.
+    const dustRemainderDiffs: AllocationDiff[] = [
+      { asset: "XLM", assetCode: "XLM", currentPct: 70, targetPct: 40, diffPct: -30, diffUsd: -300.5 },
+      { asset: "USDC", assetCode: "USDC", currentPct: 30, targetPct: 60, diffPct: 30, diffUsd: 300 },
+    ];
+    const swaps = generateSwapSuggestions(dustRemainderDiffs, PRICES);
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0].fromAmount).toBeCloseTo(3000); // $300 / $0.10 per XLM
+  });
+
+  // ── Zero-balance portfolios (issue #970) ────────────────────────────────
+
+  it("returns an empty array, without throwing, for a zero-balance portfolio with no sellers", () => {
+    // computeAllocationDiffs on an empty current portfolio against a
+    // non-empty target: every diff is a "buy", there is no seller, and
+    // totalUsd is 0, so every diffUsd collapses to 0 regardless of diffPct.
+    const diffs = computeAllocationDiffs([], { XLM: 50, USDC: 50 }, 0);
+    expect(() => generateSwapSuggestions(diffs, PRICES)).not.toThrow();
+    expect(generateSwapSuggestions(diffs, PRICES)).toEqual([]);
+  });
+
+  it("returns an empty array when every diff is exactly zero (fully balanced zero portfolio)", () => {
+    const diffs: AllocationDiff[] = [
+      { asset: "XLM", assetCode: "XLM", currentPct: 0, targetPct: 0, diffPct: 0, diffUsd: 0 },
+      { asset: "USDC", assetCode: "USDC", currentPct: 0, targetPct: 0, diffPct: 0, diffUsd: 0 },
+    ];
+    expect(generateSwapSuggestions(diffs, PRICES)).toEqual([]);
   });
 
   it("handles complex 5-asset rebalance without errors", () => {

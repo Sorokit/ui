@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TransactionPanel } from "@/components/TransactionPanel";
 import { SorokitProvider } from "@/context/SorokitProvider";
@@ -40,42 +40,38 @@ describe("Payment Flow Integration", () => {
           data: { baseFee: "100", recommended: "100" },
           error: null,
         }),
-      }
+      },
     } as unknown as ReturnType<typeof getClient>;
     // TransactionPanel calls the module-level getClient(); wire it to the mock.
     initClient(mockClient);
   });
 
-  it("submits payment with correct destination, amount, and source", async () => {
-    // We render SorokitProvider, but we must "connect" it first to have an active address.
-    // We can simulate this by calling client.wallet.connect() inside a wrapper, or we can just 
-    // click a connect button if we add one.
-    // Alternatively, SorokitProvider might just rely on the client.
-    // Let's create a small component to trigger connection.
-    const Wrapper = () => {
-      return (
-        <SorokitProvider client={mockClient}>
-          <TransactionPanel />
-          <ConnectTrigger />
-        </SorokitProvider>
-      );
-    };
-
+  const Wrapper = () => {
     const ConnectTrigger = () => {
       const { connectWallet } = useSorokit();
       return <button onClick={() => connectWallet()}>Test Connect</button>;
     };
+    return (
+      <SorokitProvider client={mockClient}>
+        <TransactionPanel />
+        <ConnectTrigger />
+      </SorokitProvider>
+    );
+  };
 
+  /** Renders the panel, connects the mock wallet, and waits for balances to load. */
+  async function connectAndWait() {
     render(<Wrapper />);
-
-    // Connect the wallet first so TransactionPanel doesn't show "Wallet not connected"
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Test Connect" }));
     });
-
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /XLM/ })).toHaveTextContent("100.5");
     });
+  }
+
+  it("submits payment with correct destination, amount, and source", async () => {
+    await connectAndWait();
 
     const destInput = screen.getByLabelText("Destination Address");
     const amountInput = screen.getByLabelText("Amount (XLM)");
@@ -108,8 +104,196 @@ describe("Payment Flow Integration", () => {
       expect.objectContaining({
         destination: validDest,
         amount: validAmount,
-        source: mockAddress
-      })
+        source: mockAddress,
+      }),
     );
+  });
+
+  // ── Muxed account payments (issue #968) ───────────────────────────────────
+
+  describe("muxed account (M...) destinations", () => {
+    // SEP-23 official test vector: the same base account, multiplexed with
+    // ID 0.
+    const MUXED_DEST =
+      "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAACJUQ";
+
+    it("accepts a 69-character muxed address as the destination and enables submit", async () => {
+      await connectAndWait();
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: MUXED_DEST },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      expect(screen.getByTestId("submit-transaction")).not.toBeDisabled();
+      // No validation error should be shown for a well-formed muxed address.
+      expect(
+        screen.queryByText(/stellar address must (start with|be)/i),
+      ).not.toBeInTheDocument();
+    });
+
+    it("submits a payment to a muxed destination with the full M-address intact", async () => {
+      await connectAndWait();
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: MUXED_DEST },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+
+      await waitFor(() => screen.getByRole("dialog", { name: /confirm transaction/i }));
+      fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Transaction submitted")).toBeInTheDocument();
+      });
+
+      // The muxed address is passed through to submission verbatim: nothing
+      // strips the embedded sub-account ID down to the base G-address.
+      expect(mockClient.transaction.submit).toHaveBeenCalledWith(
+        expect.objectContaining({ destination: MUXED_DEST }),
+      );
+    });
+
+    it("rejects a muxed address with a corrupted checksum", async () => {
+      await connectAndWait();
+
+      const corrupted = `${MUXED_DEST.slice(0, -1)}X`;
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: corrupted },
+      });
+
+      expect(screen.getByTestId("submit-transaction")).toBeDisabled();
+    });
+  });
+
+  // ── MEMO_HASH / MEMO_RETURN validation (issue #968) ───────────────────────
+
+  describe("MEMO_HASH and MEMO_RETURN memo types", () => {
+    const VALID_HEX = "a".repeat(64);
+
+    async function setUpValidPayment() {
+      await connectAndWait();
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ" },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "5" },
+      });
+    }
+
+    it("accepts a well-formed 64-character hex MEMO_HASH and enables submit", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "hash" } });
+      fireEvent.change(screen.getByLabelText("Memo hash"), { target: { value: VALID_HEX } });
+
+      expect(screen.getByTestId("submit-transaction")).not.toBeDisabled();
+      expect(screen.queryByText(/must be a 64-character hex string/i)).not.toBeInTheDocument();
+    });
+
+    it("accepts a well-formed 64-character hex MEMO_RETURN and enables submit", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "return" } });
+      fireEvent.change(screen.getByLabelText("Memo return"), { target: { value: VALID_HEX } });
+
+      expect(screen.getByTestId("submit-transaction")).not.toBeDisabled();
+    });
+
+    it("rejects a MEMO_HASH shorter than 64 characters and disables submit", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "hash" } });
+      fireEvent.change(screen.getByLabelText("Memo hash"), {
+        target: { value: VALID_HEX.slice(0, 63) },
+      });
+
+      expect(screen.getByText(/must be a 64-character hex string/i)).toBeInTheDocument();
+      expect(screen.getByTestId("submit-transaction")).toBeDisabled();
+    });
+
+    it("rejects a MEMO_HASH containing non-hex characters and disables submit", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "hash" } });
+      fireEvent.change(screen.getByLabelText("Memo hash"), {
+        target: { value: `${"a".repeat(63)}g` }, // 'g' is not a hex digit
+      });
+
+      expect(screen.getByText(/must be a 64-character hex string/i)).toBeInTheDocument();
+      expect(screen.getByTestId("submit-transaction")).toBeDisabled();
+    });
+
+    it("rejects an empty MEMO_HASH and disables submit", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "hash" } });
+
+      expect(screen.getByTestId("submit-transaction")).toBeDisabled();
+    });
+
+    it("submits with the exact hex memo and hash memo type", async () => {
+      await setUpValidPayment();
+      fireEvent.change(screen.getByLabelText("Memo type"), { target: { value: "hash" } });
+      fireEvent.change(screen.getByLabelText("Memo hash"), { target: { value: VALID_HEX } });
+
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+      await waitFor(() => screen.getByRole("dialog", { name: /confirm transaction/i }));
+      fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Transaction submitted")).toBeInTheDocument();
+      });
+
+      expect(mockClient.transaction.submit).toHaveBeenCalledWith(
+        expect.objectContaining({ memoType: "hash", memo: VALID_HEX }),
+      );
+    });
+  });
+
+  // ── Underfunded (op_underfunded) recovery (issue #968) ────────────────────
+
+  describe("underfunded payment recovery", () => {
+    async function submitAndFailWithUnderfunded() {
+      mockClient.transaction.submit = vi
+        .fn()
+        .mockResolvedValue({ data: null, error: "tx_failed: op_underfunded" });
+
+      await connectAndWait();
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ" },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "5" },
+      });
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+
+      await waitFor(() => screen.getByRole("dialog", { name: /confirm transaction/i }));
+      fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Transaction failed")).toBeInTheDocument();
+      });
+    }
+
+    it("shows actionable guidance when submission fails with op_underfunded", async () => {
+      await submitAndFailWithUnderfunded();
+
+      // The actionable guidance friendlyError maps op_underfunded to, not
+      // the raw Horizon error string.
+      expect(
+        screen.getByText(/insufficient balance to submit this transaction/i),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/add more xlm and try again/i)).toBeInTheDocument();
+    });
+
+    it("lets the user retry after an underfunded failure via New Transaction", async () => {
+      await submitAndFailWithUnderfunded();
+
+      fireEvent.click(screen.getByRole("button", { name: "New Transaction" }));
+
+      expect(screen.getByLabelText("Destination Address")).toBeInTheDocument();
+      expect(screen.queryByText("Transaction failed")).not.toBeInTheDocument();
+    });
   });
 });

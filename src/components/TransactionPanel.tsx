@@ -32,13 +32,19 @@ const MEMO_TEXT_MAX_BYTES = 28;
 
 const STROOPS_PER_XLM = 10_000_000;
 
-export type MemoType = "none" | "text" | "id";
+export type MemoType = "none" | "text" | "id" | "hash" | "return";
 
 export const MEMO_TYPES: { value: MemoType; label: string }[] = [
   { value: "none", label: "No memo" },
   { value: "text", label: "Text memo" },
   { value: "id", label: "Memo ID" },
+  { value: "hash", label: "Memo hash" },
+  { value: "return", label: "Memo return" },
 ];
+
+/** MEMO_HASH and MEMO_RETURN are both a raw 32-byte value, hex-encoded. */
+const MEMO_HASH_HEX_LENGTH = 64;
+const MEMO_HASH_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 
 export interface TransactionPanelProps {
   defaultDestination?: string;
@@ -129,6 +135,9 @@ export function TransactionPanel({
   const isAmountValid = !isNaN(parsedAmount) && parsedAmount >= 0.0000001 && !exceedsDecimals;
   const isMemoIdValid =
     memoType !== "id" || (memo.trim() !== "" && /^\d+$/.test(memo.trim()));
+  const isMemoHashType = memoType === "hash" || memoType === "return";
+  const isMemoHashValid =
+    !isMemoHashType || (memo.trim() !== "" && MEMO_HASH_HEX_PATTERN.test(memo.trim()));
 
   // Get XLM balance from balances array
   const xlmBalance = balances.find((b) => b.asset === "XLM")?.balance || "0";
@@ -154,7 +163,9 @@ export function TransactionPanel({
     isDestValid &&
     amount.trim() !== "" &&
     isAmountValid &&
-    hasSufficientBalance;
+    hasSufficientBalance &&
+    isMemoIdValid &&
+    isMemoHashValid;
 
   /** The actual submission — only ever called from the confirm modal. */
   async function submitTransaction() {
@@ -466,8 +477,22 @@ export function TransactionPanel({
             {memoType !== "none" && (
               <div className="flex flex-col gap-1.5">
                 <Input
-                  label={memoType === "id" ? "Memo ID" : "Memo (optional)"}
-                  placeholder={memoType === "id" ? "1234567890" : "Text memo"}
+                  label={
+                    memoType === "id"
+                      ? "Memo ID"
+                      : memoType === "hash"
+                        ? "Memo hash"
+                        : memoType === "return"
+                          ? "Memo return"
+                          : "Memo (optional)"
+                  }
+                  placeholder={
+                    memoType === "id"
+                      ? "1234567890"
+                      : isMemoHashType
+                        ? "64-character hex string"
+                        : "Text memo"
+                  }
                   inputMode={memoType === "id" ? "numeric" : undefined}
                   value={memo}
                   onChange={(e) => {
@@ -484,7 +509,9 @@ export function TransactionPanel({
                   error={
                     memoType === "id" && memo.trim() !== "" && !isMemoIdValid
                       ? "Memo ID must be an unsigned integer"
-                      : undefined
+                      : isMemoHashType && memo.trim() !== "" && !isMemoHashValid
+                        ? `Memo must be a ${MEMO_HASH_HEX_LENGTH}-character hex string`
+                        : undefined
                   }
                   disabled={state === "loading"}
                 />
