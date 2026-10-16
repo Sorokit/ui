@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NavSection } from "@/components/Sidebar";
 import { useSorokit } from "@/context/useSorokit";
@@ -101,5 +101,149 @@ describe("App routing", () => {
     fireEvent.popState(window);
 
     expect(screen.getByTestId("active-section")).toHaveTextContent("network");
+  });
+
+  describe("offline banner (#966)", () => {
+    afterEach(() => {
+      Object.defineProperty(window.navigator, "onLine", {
+        configurable: true,
+        value: true,
+      });
+    });
+
+    it("does not render the offline banner while online", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument();
+    });
+
+    it("shows a persistent offline notification when the browser loses connectivity", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      act(() => {
+        window.dispatchEvent(new Event("offline"));
+      });
+
+      const banner = screen.getByTestId("offline-banner");
+      expect(banner).toBeInTheDocument();
+      expect(banner).toHaveAttribute("role", "status");
+      expect(banner).toHaveTextContent(/offline/i);
+    });
+
+    it("hides the offline banner again once connectivity is restored", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      act(() => {
+        window.dispatchEvent(new Event("offline"));
+      });
+      expect(screen.getByTestId("offline-banner")).toBeInTheDocument();
+
+      act(() => {
+        window.dispatchEvent(new Event("online"));
+      });
+      expect(screen.queryByTestId("offline-banner")).not.toBeInTheDocument();
+    });
+
+    it("renders the banner immediately on mount if the browser is already offline", () => {
+      Object.defineProperty(window.navigator, "onLine", {
+        configurable: true,
+        value: false,
+      });
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(screen.getByTestId("offline-banner")).toBeInTheDocument();
+    });
+  });
+
+  describe("skip-to-content link (#966)", () => {
+    it("renders a skip link targeting the main content region", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      const skipLink = screen.getByText("Skip to main content");
+      expect(skipLink.tagName).toBe("A");
+      expect(skipLink).toHaveAttribute("href", "#main-content");
+    });
+
+    it("is the first focusable element so Tab on initial load reaches it first", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      const { container } = render(<App client={createMockClient() as SorokitClient} />);
+
+      const focusable = container.querySelectorAll("a, button, [href]");
+      expect(focusable[0]).toHaveTextContent("Skip to main content");
+    });
+
+    it("points to an element with a matching id", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      const { container } = render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(container.querySelector("#main-content")).toBeInTheDocument();
+    });
+  });
+
+  describe("404 fallback for unknown routes (#966)", () => {
+    it("shows a 404 card instead of a blank layout for an unmapped path", () => {
+      setPath("/this-route-does-not-exist");
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(screen.getByText("Page not found")).toBeInTheDocument();
+      expect(screen.queryByTestId("dashboard")).not.toBeInTheDocument();
+    });
+
+    it("shows the 404 card for an unmapped path even when signed out", () => {
+      setPath("/also-not-a-real-route");
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: false,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(screen.getByText("Page not found")).toBeInTheDocument();
+      expect(screen.queryByTestId("connect-screen")).not.toBeInTheDocument();
+    });
+
+    it("returns to the dashboard section when clicking Back to Dashboard", () => {
+      setPath("/nonexistent");
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      fireEvent.click(screen.getByText("Back to Dashboard"));
+
+      expect(screen.getByTestId("dashboard")).toBeInTheDocument();
+      expect(window.location.pathname).toBe("/");
+    });
+
+    it("does not show the 404 card for a known dashboard path", () => {
+      setPath("/transactions");
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+      } as ReturnType<typeof useSorokit>);
+      render(<App client={createMockClient() as SorokitClient} />);
+
+      expect(screen.queryByText("Page not found")).not.toBeInTheDocument();
+      expect(screen.getByTestId("dashboard")).toBeInTheDocument();
+    });
   });
 });
