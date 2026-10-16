@@ -2,6 +2,7 @@ import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { type ReactNode,useState } from "react";
 
+import { useToast } from "@/context/ToastContext";
 import { cn } from "@/lib/utils";
 
 interface LabelledValueProps {
@@ -24,11 +25,15 @@ export function LabelledValue({
   labelId,
 }: LabelledValueProps) {
   const [copied, setCopied] = useState(false);
+  const { success } = useToast();
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(value ?? "");
       setCopied(true);
+      success(`${label} Copied`, {
+        message: "The value has been copied to your clipboard.",
+      });
       setTimeout(() => setCopied(false), 2000);
     } catch {
       /* fallback */
@@ -36,20 +41,20 @@ export function LabelledValue({
   }
 
   return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
+    <div className={cn("flex flex-col gap-1.5 min-w-0", className)}>
       <span
         id={labelId}
-        className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+        className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 break-words"
       >
         {label}
       </span>
       {children ? (
         children
       ) : (
-        <div className="flex items-start gap-2 group">
+        <div className="flex items-start gap-2 group min-w-0">
           <span
             className={cn(
-              "text-[13px] text-ink-2 break-all flex-1",
+              "text-[13px] text-ink-2 break-all flex-1 min-w-0",
               mono && "font-mono text-[12px]",
             )}
           >
