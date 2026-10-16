@@ -3,6 +3,8 @@ import React from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { AccountCard } from "@/components/AccountCard";
+import { SorobanPanel } from "@/components/SorobanPanel";
+import { TransactionPanel } from "@/components/TransactionPanel";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { SorokitProvider } from "@/context/SorokitProvider";
 import { ToastProvider } from "@/context/ToastContext";
@@ -38,6 +40,18 @@ describe("Wallet Connect Flow Integration", () => {
       network: {
         getNetwork: vi.fn().mockResolvedValue({ data: { name: "mainnet" }, error: null }),
         switchNetwork: vi.fn().mockResolvedValue({ data: { name: "testnet" }, error: null }),
+      },
+      transaction: {
+        submit: vi.fn().mockResolvedValue({ data: { hash: "abc" }, error: null, status: "success" }),
+        estimateFee: vi.fn().mockResolvedValue({
+          data: { baseFee: "100", recommended: "100" },
+          error: null,
+        }),
+      },
+      soroban: {
+        invokeContract: vi.fn(),
+        simulateContract: vi.fn(),
+        getEvents: vi.fn().mockResolvedValue({ data: [], error: null }),
       },
     } as unknown as ReturnType<typeof getClient>;
   });
@@ -91,5 +105,194 @@ describe("Wallet Connect Flow Integration", () => {
     expect(mockClient.wallet.disconnect).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     expect(screen.queryByText(/^Sequence$/i)).not.toBeInTheDocument();
+  });
+
+  // ── Wallet disconnect during an in-flight simulation (#967) ─────────────
+  it("aborts a pending contract simulation and shows a reconnect prompt if the wallet disconnects mid-flight", async () => {
+    let resolveSimulate: (v: { data: unknown; error: string | null; status: string }) => void =
+      () => {};
+    mockClient.soroban = {
+      invokeContract: vi.fn(),
+      simulateContract: vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          resolveSimulate = resolve;
+        }),
+      ),
+      getEvents: vi.fn().mockResolvedValue({ data: [], error: null }),
+    } as unknown as ReturnType<typeof getClient>["soroban"];
+
+    render(
+      <ToastProvider>
+        <SorokitProvider client={mockClient}>
+          <WalletConnectButton />
+          <DisconnectTrigger />
+          <SorobanPanel
+            contractId="CCONTRACT123"
+            onContractIdChange={() => {}}
+            mode="simulate"
+          />
+        </SorokitProvider>
+      </ToastProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+    });
+    await waitFor(() => screen.getByRole("dialog", { name: /connect a wallet/i }));
+    await act(async () => {
+      fireEvent.click(getWalletButton(/Freighter/i));
+    });
+    await waitFor(() => expect(mockClient.wallet.connect).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText("Method"), {
+      target: { value: "balance" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /simulate/i }));
+
+    // The simulate call is now in flight (deliberately never resolved yet).
+    expect(screen.getByRole("status", { name: /simulating contract/i })).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
+    });
+
+    // Disconnecting while the simulate call is pending aborts it and shows a
+    // reconnect prompt instead of the loading spinner or a generic error.
+    expect(screen.queryByRole("status", { name: /simulating contract/i })).not.toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/disconnected/i);
+    expect(screen.getByRole("button", { name: /reconnect wallet/i })).toBeInTheDocument();
+
+    // Resolving the stale promise afterwards must not resurrect a result —
+    // the panel already moved past this request.
+    await act(async () => {
+      resolveSimulate({ data: { ok: true }, error: null, status: "success" });
+    });
+    expect(screen.queryByText("Simulation Result")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /reconnect wallet/i })).toBeInTheDocument();
+  });
+
+  // ── Sequence desync auto-refetch (#967) ─────────────────────────────────
+  it("refetches the account sequence automatically after a tx_bad_seq submission error", async () => {
+    mockClient.transaction = {
+      submit: vi.fn().mockResolvedValue({
+        data: null,
+        error: "tx_bad_seq",
+        status: "error",
+      }),
+      estimateFee: vi.fn().mockResolvedValue({
+        data: { baseFee: "100", recommended: "100" },
+        error: null,
+      }),
+    } as unknown as ReturnType<typeof getClient>["transaction"];
+
+    const getAccountMock = mockClient.account.getAccount as ReturnType<typeof vi.fn>;
+
+    render(
+      <ToastProvider>
+        <SorokitProvider client={mockClient}>
+          <WalletConnectButton />
+          <TransactionPanel previewMode={false} />
+        </SorokitProvider>
+      </ToastProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+    });
+    await waitFor(() => screen.getByRole("dialog", { name: /connect a wallet/i }));
+    await act(async () => {
+      fireEvent.click(getWalletButton(/Freighter/i));
+    });
+    await waitFor(() => expect(mockClient.wallet.connect).toHaveBeenCalled());
+    // Wait for the connected account/balances to finish loading so the
+    // amount field's balance check doesn't disable the Send button.
+    await waitFor(() => expect(getAccountMock).toHaveBeenCalled());
+
+    // getAccount was already called once on connect; isolate the post-submit call.
+    getAccountMock.mockClear();
+
+    fireEvent.change(screen.getByLabelText(/destination/i), {
+      target: { value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ" },
+    });
+    fireEvent.change(screen.getByLabelText(/^amount/i), {
+      target: { value: "5" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("submit-transaction")).not.toBeDisabled();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/sequence is out of date/i)).toBeInTheDocument();
+    });
+    // A stale sequence is auto-recoverable: the panel refetches the account
+    // instead of leaving the user to manually refresh elsewhere.
+    expect(getAccountMock).toHaveBeenCalled();
+  });
+
+  // ── Account switch resets the draft transaction form (#967) ────────────
+  it("clears the draft payment form when the connected account changes", async () => {
+    const connectMock = mockClient.wallet.connect as ReturnType<typeof vi.fn>;
+    connectMock
+      .mockResolvedValueOnce({
+        data: { address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJEKDI" },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB4U5H" },
+        error: null,
+      });
+
+    render(
+      <ToastProvider>
+        <SorokitProvider client={mockClient}>
+          <WalletConnectButton />
+          <DisconnectTrigger />
+          <TransactionPanel previewMode={false} />
+        </SorokitProvider>
+      </ToastProvider>,
+    );
+
+    // Connect as the first account and fill in a draft.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+    });
+    await waitFor(() => screen.getByRole("dialog", { name: /connect a wallet/i }));
+    await act(async () => {
+      fireEvent.click(getWalletButton(/Freighter/i));
+    });
+    await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(screen.getByLabelText(/destination/i), {
+      target: { value: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ" },
+    });
+    fireEvent.change(screen.getByLabelText(/^amount/i), {
+      target: { value: "42" },
+    });
+    expect(screen.getByLabelText(/destination/i)).toHaveValue(
+      "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ",
+    );
+    expect(screen.getByLabelText(/^amount/i)).toHaveValue(42);
+
+    // Switch accounts: disconnect, then reconnect as a different address.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /connect/i }));
+    });
+    await waitFor(() => screen.getByRole("dialog", { name: /connect a wallet/i }));
+    await act(async () => {
+      fireEvent.click(getWalletButton(/Freighter/i));
+    });
+    await waitFor(() => expect(connectMock).toHaveBeenCalledTimes(2));
+
+    // The draft from the previous account must not survive the switch.
+    expect(screen.getByLabelText(/destination/i)).toHaveValue("");
+    expect(screen.getByLabelText(/^amount/i)).toHaveValue(null);
   });
 });

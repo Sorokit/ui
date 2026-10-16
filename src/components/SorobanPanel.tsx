@@ -7,7 +7,7 @@ import { useSorokit } from "@/context/useSorokit";
 
 import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry, type DebuggerEntry, readDebugHistory } from "./ContractInteractionDebugger";
 
-type State = "idle" | "loading" | "success" | "error";
+type State = "idle" | "loading" | "success" | "error" | "disconnected";
 
 interface SorobanPanelProps {
   contractId: string;
@@ -93,7 +93,7 @@ export function SorobanPanel({
   mode = "invoke",
   maxHistory = DEFAULT_MAX_HISTORY,
 }: SorobanPanelProps) {
-  const { isConnected, address, client } = useSorokit();
+  const { isConnected, address, client, connectWallet } = useSorokit();
   const [method, setMethod] = useState("");
   const [args, setArgs] = useState("");
   const [state, setState] = useState<State>("idle");
@@ -128,6 +128,20 @@ export function SorobanPanel({
       setState("idle");
     }
   }, [contractId]);
+
+  // If the wallet disconnects while a simulate/invoke call is in flight,
+  // abort it and surface a reconnect prompt instead of letting a stale
+  // response land (or an error message implying the call itself failed).
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+  useEffect(() => {
+    if (!isConnected && stateRef.current === "loading") {
+      abortControllerRef.current?.abort();
+      setState("disconnected");
+    }
+  }, [isConnected]);
 
   const isArgsJsonValid = useMemo(() => {
     if (!args.trim()) return true;
@@ -280,7 +294,7 @@ export function SorobanPanel({
       </div>
 
       <div className="px-6 py-6">
-        {!isConnected ? (
+        {!isConnected && state !== "disconnected" ? (
           <p className="text-[13px] text-ink-3 text-center py-8">
             Connect your wallet to {mode === "simulate" ? "simulate" : "invoke"} contracts
           </p>
@@ -371,6 +385,26 @@ export function SorobanPanel({
 
             {state !== "idle" && (
               <div className="relative min-h-32" aria-live="polite">
+                {state === "disconnected" && (
+                  <div
+                    role="alert"
+                    className="flex flex-col items-start gap-3 rounded-lg border border-error-dim bg-error-dim-muted px-5 py-4"
+                  >
+                    <p className="text-[13px] text-red">
+                      Wallet disconnected while{" "}
+                      {mode === "simulate" ? "simulating" : "invoking"} the
+                      contract. The request was cancelled.
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => connectWallet()}
+                    >
+                      Reconnect wallet
+                    </Button>
+                  </div>
+                )}
+
                 {state === "loading" && (
                   <div
                     role="status"
