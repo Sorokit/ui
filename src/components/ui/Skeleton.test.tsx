@@ -6,6 +6,7 @@ import {
   Skeleton,
   SkeletonCard,
   SkeletonRow,
+  SkeletonTable,
 } from "./Skeleton";
 
 describe("Skeleton", () => {
@@ -38,22 +39,44 @@ describe("Skeleton", () => {
     expect(c2.firstElementChild).toHaveClass("rounded-lg");
   });
 
-  it("uses animate-pulse by default (no variant prop)", () => {
+  it("uses the motion-safe pulse variant by default (no variant prop)", () => {
     const { container } = render(<Skeleton />);
-    expect(container.firstElementChild).toHaveClass("animate-pulse");
+    expect(container.firstElementChild).toHaveClass("motion-safe:animate-pulse");
   });
 
-  it("applies skeleton-shimmer class when variant='shimmer'", () => {
+  it("applies the motion-safe shimmer variant when variant='shimmer'", () => {
     const { container } = render(<Skeleton variant="shimmer" />);
     const el = container.firstElementChild as HTMLElement;
-    expect(el).toHaveClass("skeleton-shimmer");
-    expect(el).not.toHaveClass("animate-pulse");
+    expect(el).toHaveClass("motion-safe:skeleton-shimmer");
+    expect(el).not.toHaveClass("motion-safe:animate-pulse");
   });
 
-  it("applies animate-pulse when variant='pulse' is explicit", () => {
+  it("applies the motion-safe pulse variant when variant='pulse' is explicit", () => {
     const { container } = render(<Skeleton variant="pulse" />);
-    expect(container.firstElementChild).toHaveClass("animate-pulse");
-    expect(container.firstElementChild).not.toHaveClass("skeleton-shimmer");
+    expect(container.firstElementChild).toHaveClass("motion-safe:animate-pulse");
+    expect(container.firstElementChild).not.toHaveClass("motion-safe:skeleton-shimmer");
+  });
+
+  // ── prefers-reduced-motion (issue #962) ──────────────────────────────────
+
+  describe("reduced motion", () => {
+    it("gates the pulse animation on motion-safe and provides a motion-reduce fallback", () => {
+      const { container } = render(<Skeleton variant="pulse" />);
+      const classes = (container.firstElementChild as HTMLElement).className.split(/\s+/);
+      // The bare utility would keep animating even under
+      // prefers-reduced-motion: reduce.
+      expect(classes).toContain("motion-safe:animate-pulse");
+      expect(classes).not.toContain("animate-pulse");
+      expect(classes).toContain("motion-reduce:opacity-60");
+    });
+
+    it("gates the shimmer animation on motion-safe and swaps in a static class under motion-reduce", () => {
+      const { container } = render(<Skeleton variant="shimmer" />);
+      const classes = (container.firstElementChild as HTMLElement).className.split(/\s+/);
+      expect(classes).toContain("motion-safe:skeleton-shimmer");
+      expect(classes).not.toContain("skeleton-shimmer");
+      expect(classes).toContain("motion-reduce:skeleton-shimmer-static");
+    });
   });
 });
 
@@ -132,6 +155,39 @@ describe("SkeletonCard", () => {
       </SkeletonCard>,
     );
     expect(screen.getByTestId("custom-child")).toHaveTextContent("Child slot content");
+  });
+});
+
+describe("SkeletonTable", () => {
+  it("announces a busy/loading state via aria-busy", () => {
+    const { container } = render(<SkeletonTable />);
+    expect(container.firstElementChild).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("renders the default 4 header columns and 4 body rows", () => {
+    render(<SkeletonTable />);
+    const header = screen.getByTestId("skeleton-table-header");
+    expect(header.children.length).toBe(4);
+    expect(screen.getAllByTestId("skeleton-table-row")).toHaveLength(4);
+  });
+
+  it("renders the requested number of rows and columns", () => {
+    render(<SkeletonTable rows={2} columns={6} />);
+    const header = screen.getByTestId("skeleton-table-header");
+    expect(header.children.length).toBe(6);
+
+    const rows = screen.getAllByTestId("skeleton-table-row");
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.children.length).toBe(6);
+    }
+  });
+
+  it("lines up each row's columns with a matching grid-template-columns", () => {
+    render(<SkeletonTable rows={1} columns={3} />);
+    const header = screen.getByTestId("skeleton-table-header");
+    const row = screen.getByTestId("skeleton-table-row");
+    expect(header.style.gridTemplateColumns).toBe(row.style.gridTemplateColumns);
   });
 });
 

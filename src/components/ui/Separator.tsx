@@ -3,6 +3,14 @@ export interface SeparatorProps {
   label?: string;
   orientation?: "horizontal" | "vertical";
   spacing?: "sm" | "md" | "lg";
+  /**
+   * Purely visual separators (no semantic meaning in the layout) should be
+   * hidden from the accessibility tree rather than announced as a
+   * `separator` landmark on every render (issue #963). When true, the root
+   * gets `role="none"` and `aria-hidden="true"` instead of
+   * `role="separator"`/`aria-orientation`.
+   */
+  decorative?: boolean;
 }
 
 const spacingMap = {
@@ -16,13 +24,21 @@ export function Separator({
   label,
   orientation = "horizontal",
   spacing = "md",
+  decorative = false,
 }: SeparatorProps) {
+  const a11yProps = decorative
+    ? { role: "none" as const, "aria-hidden": true as const }
+    : { role: "separator" as const, "aria-orientation": orientation };
+
   if (orientation === "vertical") {
     return (
       <div
-        role="separator"
-        aria-orientation="vertical"
-        className={`w-px h-full bg-line ${className ?? ""}`}
+        {...a11yProps}
+        // self-stretch + min-h-full keep the divider's height tied to its
+        // flex container even when that container uses align-items:
+        // stretch, where an unconstrained h-full alone collapses to 0px
+        // (issue #963).
+        className={`w-px h-full self-stretch min-h-full bg-line ${className ?? ""}`}
       />
     );
   }
@@ -30,8 +46,7 @@ export function Separator({
   if (label) {
     return (
       <div
-        role="separator"
-        aria-orientation="horizontal"
+        {...a11yProps}
         className={`flex items-center gap-3 ${spacingMap[spacing]} ${className ?? ""}`}
       >
         <div className="flex-1 h-px bg-line" />
@@ -43,8 +58,7 @@ export function Separator({
 
   return (
     <div
-      role="separator"
-      aria-orientation="horizontal"
+      {...a11yProps}
       className={`h-px bg-line w-full ${spacingMap[spacing]} ${className ?? ""}`}
     />
   );

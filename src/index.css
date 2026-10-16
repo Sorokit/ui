@@ -317,6 +317,15 @@ html[data-theme="light"] {
     background-size: 200% 100%;
     animation: shimmer 1.6s ease-in-out infinite;
   }
+
+  /* Static fallback for prefers-reduced-motion (issue #962): swapped in for
+     .skeleton-shimmer via a motion-reduce: variant at the call site (see
+     Skeleton.tsx), matching the convention already used for animate-pulse
+     in WalletStatusBadge. */
+  .skeleton-shimmer-static {
+    background-color: var(--color-surface-2);
+    opacity: 0.6;
+  }
 }
 
 /* ─────────────────────────────────────────────────────────

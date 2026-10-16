@@ -41,7 +41,13 @@ export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";
 export { Separator } from "./ui/Separator";
-export { AssetRowSkeleton, Skeleton, SkeletonCard, SkeletonRow } from "./ui/Skeleton";
+export {
+  AssetRowSkeleton,
+  Skeleton,
+  SkeletonCard,
+  SkeletonRow,
+  SkeletonTable,
+} from "./ui/Skeleton";
 
 // Error handling
 export { ErrorBoundary } from "./ErrorBoundary";
