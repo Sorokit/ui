@@ -97,6 +97,25 @@
   --color-qr-canvas-bg: #ffffff;
   --color-qr-canvas-fg: #0d0d0d;
 
+  /* ── State diff rows (≥4.5:1 text contrast against their tint) ── */
+  --color-diff-added-fg: #86efac;
+  --color-diff-added-bg: rgba(34, 197, 94, 0.14);
+  --color-diff-added-border: rgba(34, 197, 94, 0.45);
+  --color-diff-removed-fg: #fca5a5;
+  --color-diff-removed-bg: rgba(239, 68, 68, 0.14);
+  --color-diff-removed-border: rgba(239, 68, 68, 0.45);
+  --color-diff-changed-fg: #fcd34d;
+  --color-diff-changed-bg: rgba(250, 204, 21, 0.12);
+  --color-diff-changed-border: rgba(250, 204, 21, 0.4);
+
+  /* ── JSON viewer (react-json-view-lite) ── */
+  --color-json-label: #ebebeb;
+  --color-json-string: #86efac;
+  --color-json-number: #93c5fd;
+  --color-json-boolean: #fcd34d;
+  --color-json-null: #a3a3a3;
+  --color-json-punctuation: #999999;
+
   /* ── Layout ── */
   --sorokit-nav-height: 60px; /* top bar / sidebar header height */
 }
@@ -139,6 +158,24 @@ html[data-theme="light"] {
   --color-chart-3: #b45309;
   --color-chart-4: #be185d;
   --color-chart-5: #6d28d9;
+
+  /* Diff and JSON tokens darkened for ≥4.5:1 against light surfaces. */
+  --color-diff-added-fg: #14532d;
+  --color-diff-added-bg: #dcfce7;
+  --color-diff-added-border: #86efac;
+  --color-diff-removed-fg: #7f1d1d;
+  --color-diff-removed-bg: #fee2e2;
+  --color-diff-removed-border: #fca5a5;
+  --color-diff-changed-fg: #78350f;
+  --color-diff-changed-bg: #fef3c7;
+  --color-diff-changed-border: #fcd34d;
+
+  --color-json-label: #16181b;
+  --color-json-string: #166534;
+  --color-json-number: #1e40af;
+  --color-json-boolean: #92400e;
+  --color-json-null: #4b4b52;
+  --color-json-punctuation: #4b4b52;
 }
 
 html[data-theme="light"] {
@@ -383,4 +420,61 @@ html[data-theme="light"] {
     -moz-appearance: textfield;
     appearance: textfield;
   }
+}
+
+/* ─────────────────────────────────────────────────────────
+   CONTRACT DEBUGGER — JSON viewer and state diff rows
+   Theme-aware overrides for react-json-view-lite, whose bundled
+   palette targets light backgrounds only.
+───────────────────────────────────────────────────────── */
+div.sorokit-json-view {
+  background-color: transparent;
+  color: var(--color-json-label);
+  font-size: 12px;
+}
+.sorokit-json-view .sorokit-json-label {
+  color: var(--color-json-label);
+}
+.sorokit-json-view .sorokit-json-string {
+  color: var(--color-json-string);
+}
+.sorokit-json-view .sorokit-json-number {
+  color: var(--color-json-number);
+}
+.sorokit-json-view .sorokit-json-boolean {
+  color: var(--color-json-boolean);
+}
+.sorokit-json-view .sorokit-json-null,
+.sorokit-json-view .sorokit-json-other {
+  color: var(--color-json-null);
+}
+.sorokit-json-view .sorokit-json-punctuation {
+  color: var(--color-json-punctuation);
+}
+
+.sorokit-diff-row[data-diff-kind="added"] {
+  --diff-fg: var(--color-diff-added-fg);
+  --diff-bg: var(--color-diff-added-bg);
+  --diff-border: var(--color-diff-added-border);
+}
+.sorokit-diff-row[data-diff-kind="removed"] {
+  --diff-fg: var(--color-diff-removed-fg);
+  --diff-bg: var(--color-diff-removed-bg);
+  --diff-border: var(--color-diff-removed-border);
+}
+.sorokit-diff-row[data-diff-kind="changed"] {
+  --diff-fg: var(--color-diff-changed-fg);
+  --diff-bg: var(--color-diff-changed-bg);
+  --diff-border: var(--color-diff-changed-border);
+}
+.sorokit-diff-row {
+  background-color: var(--diff-bg);
+  border-color: var(--diff-border);
+}
+.sorokit-diff-row > summary {
+  color: var(--diff-fg);
+}
+.sorokit-diff-row .sorokit-diff-badge {
+  color: var(--diff-fg);
+  border: 1px solid var(--diff-border);
 }

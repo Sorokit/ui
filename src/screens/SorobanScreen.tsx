@@ -1,3 +1,5 @@
+import { Cancel01Icon, Delete01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 
 import { ContractEventFeed } from "@/components/ContractEventFeed";
@@ -66,6 +68,27 @@ export function SorobanScreen() {
   const [removed, setRemoved] = useState<Set<string>>(() => new Set());
   const { title, sub } = SCREEN_LABELS.soroban;
 
+  // Issue #909: a Soroban contract ID is derived from the network passphrase,
+  // so a contract loaded on one network can never exist on another. When the
+  // active network changes, drop the contract (which unmounts its event feed
+  // and resets the panel) instead of firing cross-network RPC requests, and
+  // tell the user why it disappeared. Synced during render, mirroring the
+  // prev-value pattern used in ContractEventFeed.
+  const networkName = network?.name;
+  const [prevNetworkName, setPrevNetworkName] = useState(networkName);
+  const [networkNotice, setNetworkNotice] = useState<string | null>(null);
+  if (prevNetworkName !== networkName) {
+    setPrevNetworkName(networkName);
+    // Only a real switch counts — not the network resolving on first load.
+    if (prevNetworkName && networkName && contractId.trim() !== "") {
+      const cleared = contractId.trim();
+      setContractId("");
+      setNetworkNotice(
+        `Switched from ${prevNetworkName} to ${networkName}. Contract ${cleared.slice(0, 6)}…${cleared.slice(-4)} is not deployed on ${networkName}, so it was cleared.`,
+      );
+    }
+  }
+
   const savedContracts = savedContractsBase.filter((id) => !removed.has(id));
 
   const validContractId = isValidContractId(contractId);
@@ -73,6 +96,7 @@ export function SorobanScreen() {
 
   function handleSelectContract(id: string) {
     setContractId(id);
+    setNetworkNotice(null);
   }
 
   function handleRemoveContract(id: string) {
@@ -108,6 +132,22 @@ export function SorobanScreen() {
           </a>
         )}
       </div>
+      {networkNotice && (
+        <div
+          role="status"
+          className="flex items-start justify-between gap-3 rounded-lg border border-warning-dim bg-warning-dim px-4 py-3"
+        >
+          <p className="text-[12px] text-warning">{networkNotice}</p>
+          <button
+            type="button"
+            onClick={() => setNetworkNotice(null)}
+            aria-label="Dismiss network notice"
+            className="shrink-0 text-warning hover:opacity-80"
+          >
+            <HugeiconsIcon icon={Cancel01Icon} size={12} color="currentColor" strokeWidth={1.5} />
+          </button>
+        </div>
+      )}
       {savedContracts.length > 0 && (
         <div className="rounded-lg border border-line bg-surface px-4 py-3">
           <div className="flex items-center justify-between mb-2">
@@ -145,9 +185,9 @@ export function SorobanScreen() {
                   onClick={() => handleRemoveContract(id)}
                   aria-label={`Remove ${id.slice(0, 6)}…${id.slice(-4)} from saved contracts`}
                   title={`Remove ${id}`}
-                  className="pr-2 pl-0 text-[11px] leading-none text-ink-4 hover:text-red"
+                  className="pr-2 pl-0 py-1 leading-none text-ink-4 hover:text-red"
                 >
-                  ×
+                  <HugeiconsIcon icon={Delete01Icon} size={12} color="currentColor" strokeWidth={1.5} />
                 </button>
               </span>
             ))}
