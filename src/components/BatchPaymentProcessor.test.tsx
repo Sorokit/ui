@@ -5,7 +5,7 @@ import { useSorokit } from "@/context/useSorokit";
 import type { SorokitClient } from "@/lib/client";
 import { createMockClient } from "@/lib/mock-client";
 
-import { BatchPaymentProcessor, parseCSV, validateEntries } from "./BatchPaymentProcessor";
+import { BatchPaymentProcessor, parseCSV, sumAmountsStroops, validateEntries } from "./BatchPaymentProcessor";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -45,6 +45,46 @@ describe("parseCSV — field parsing", () => {
 
   it("returns empty array for a header-only CSV", () => {
     expect(parseCSV("address,amount\n")).toHaveLength(0);
+  });
+
+  it("parses a row with an empty trailing memo column (trailing comma)", () => {
+    const csv = `address,amount,memo\n${VALID_ADDR},100,\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].memo).toBe("");
+    expect(entries[0].amount).toBe("100");
+  });
+
+  it("parses a row that omits the memo value entirely (no trailing comma)", () => {
+    const csv = `address,amount,memo\n${VALID_ADDR},100\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].memo).toBe("");
+  });
+
+  it("does not produce a phantom extra column for rows without trailing commas", () => {
+    const csv = `address,amount\n${VALID_ADDR},100\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].amount).toBe("100");
+  });
+});
+
+describe("sumAmountsStroops — BigInt precision", () => {
+  it("returns exact sum avoiding IEEE-754 drift (0.1 + 0.2 = 0.3)", () => {
+    expect(sumAmountsStroops(["0.1", "0.2"])).toBe("0.3");
+  });
+
+  it("handles whole-number amounts", () => {
+    expect(sumAmountsStroops(["100", "200"])).toBe("300");
+  });
+
+  it("handles mixed whole and decimal amounts", () => {
+    expect(sumAmountsStroops(["1.5", "2.25", "0.25"])).toBe("4");
+  });
+
+  it("returns '0' for an empty array", () => {
+    expect(sumAmountsStroops([])).toBe("0");
   });
 });
 
