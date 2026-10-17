@@ -5,12 +5,14 @@
  * Features:
  * - Numeric input per asset clamped to 0–100
  * - Live sum indicator with colour feedback (red when ≠ 100, green when exact)
- * - "Equalise" button distributes 100% evenly across all assets
+ * - Every row is highlighted as invalid while the total is not exactly 100%
+ * - Arrow Up / Arrow Down nudge a target by 0.1%
+ * - "Distribute Evenly" button divides 100% evenly across all assets
  * - "Reset" button restores the current-allocation percentages
  * - Per-asset diff pill showing how much each target deviates from current
  */
 
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { SLICE_COLORS } from "@/components/ui/PieChart";
 import type { PortfolioAsset } from "@/lib/rebalancer";
@@ -33,6 +35,9 @@ function sumTargets(targets: Record<string, number>): number {
   return Object.values(targets).reduce((s, v) => s + (isNaN(v) ? 0 : v), 0);
 }
 
+/** Arrow-key increment, in percentage points. */
+const ARROW_STEP = 0.1;
+
 function diffLabel(diff: number): string {
   if (Math.abs(diff) < 0.01) return "";
   return diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`;
@@ -51,6 +56,11 @@ export function AllocationInput({
   const remaining = parseFloat((100 - sum).toFixed(4));
   const isExact = Math.abs(remaining) < 0.01;
   const isOver = remaining < -0.01;
+  // Highlight every row once the user has entered something and the total is
+  // off, so it's clear the rows together — not one field — are invalid. An
+  // untouched (all-zero) form isn't flagged.
+  const isInvalid = !isExact && sum > 0;
+  const totalErrorId = useId();
   // Issue #655: keep the raw text the user typed so clearing the field does not
   // immediately collapse to 0. The parsed value is only committed on blur.
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -74,6 +84,27 @@ export function AllocationInput({
     if (raw === undefined) return;
     const parsed = parseFloat(raw);
     const value = isNaN(parsed) ? 0 : Math.min(100, Math.max(0, parsed));
+    onChange({ ...targets, [assetCode]: value });
+  }
+
+  function handleKeyDown(
+    e: React.KeyboardEvent<HTMLInputElement>,
+    assetCode: string,
+  ) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    // Step in tenths ourselves rather than relying on the native spinner, so
+    // repeated presses don't accumulate float drift (0.1 + 0.2 ≠ 0.3).
+    e.preventDefault();
+    const raw = draft[assetCode];
+    const parsed = raw !== undefined ? parseFloat(raw) : targets[assetCode] ?? 0;
+    const current = isNaN(parsed) ? 0 : parsed;
+    const delta = e.key === "ArrowUp" ? ARROW_STEP : -ARROW_STEP;
+    const value = Math.min(100, Math.max(0, Math.round((current + delta) * 10) / 10));
+    setDraft((prev) => {
+      const next = { ...prev };
+      delete next[assetCode];
+      return next;
+    });
     onChange({ ...targets, [assetCode]: value });
   }
 
@@ -122,7 +153,7 @@ export function AllocationInput({
             onClick={handleEqualise}
             className="text-[11px] text-brand hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Equalise
+            Distribute Evenly
           </button>
           <span className="text-ink-4 text-[11px]">·</span>
           <button
@@ -192,18 +223,23 @@ export function AllocationInput({
                   type="number"
                   min={0}
                   max={100}
-                  step={0.1}
+                  step={ARROW_STEP}
                   value={draft[asset.assetCode] ?? (target === 0 ? "" : target)}
                   placeholder="0"
                   disabled={disabled}
                   aria-label={`Target allocation for ${asset.assetCode}`}
+                  aria-invalid={isInvalid || undefined}
+                  aria-describedby={isInvalid ? totalErrorId : undefined}
                   onChange={(e) => handleChange(asset.assetCode, e.target.value)}
                   onBlur={() => handleBlur(asset.assetCode)}
+                  onKeyDown={(e) => handleKeyDown(e, asset.assetCode)}
                   className={cn(
                     "h-8 w-20 rounded-lg border bg-surface-2 pl-3 pr-6",
                     "text-[12px] text-ink tabular-nums",
                     "outline-none transition-colors",
-                    "border-line focus:border-line-2 focus:ring-1 focus:ring-brand-dim",
+                    isInvalid
+                      ? "border-red focus:border-red focus:ring-1 focus:ring-error-dim"
+                      : "border-line focus:border-line-2 focus:ring-1 focus:ring-brand-dim",
                     "disabled:opacity-40 disabled:cursor-not-allowed",
                     "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
                   )}
@@ -215,6 +251,18 @@ export function AllocationInput({
                   %
                 </span>
               </div>
+
+              {/* Per-row invalid-total indicator */}
+              <span
+                aria-hidden="true"
+                data-testid={`allocation-row-error-${asset.assetCode}`}
+                className={cn(
+                  "w-3 text-center text-[11px] font-semibold text-red shrink-0",
+                  !isInvalid && "invisible",
+                )}
+              >
+                {isInvalid ? "!" : ""}
+              </span>
             </div>
           );
         })}
@@ -247,10 +295,16 @@ export function AllocationInput({
         </span>
       </div>
 
-      {isOver && (
-        <p role="alert" className="text-[11px] text-red">
+      {isOver ? (
+        <p id={totalErrorId} role="alert" className="text-[11px] text-red">
           Total allocation exceeds 100%. Reduce one or more targets.
         </p>
+      ) : (
+        isInvalid && (
+          <p id={totalErrorId} className="text-[11px] text-red">
+            Total allocation must equal 100%. Increase one or more targets.
+          </p>
+        )
       )}
     </div>
   );

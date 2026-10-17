@@ -574,9 +574,23 @@ describe("SorobanPanel", () => {
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
       fireEvent.click(screen.getByRole("button", { name: /invoke/i }));
       await screen.findByText("Result", { selector: "span" });
-      const curlButtons = screen.getAllByRole("button", { name: /copy as cURL/i });
-      fireEvent.click(curlButtons[0]);
-      expect(writeText).toHaveBeenCalled();
+
+      // Issue #912: drive the 1.6s "Copied" reset with fake timers instead of
+      // relying on wall-clock time, so the assertion can't race on slow CI.
+      vi.useFakeTimers();
+      try {
+        fireEvent.click(screen.getByTestId("soroban-copy-curl-success"));
+        expect(writeText).toHaveBeenCalled();
+        expect(screen.getByTestId("soroban-copy-curl-success")).toHaveTextContent("Copied");
+
+        act(() => { vi.advanceTimersByTime(1599); });
+        expect(screen.getByTestId("soroban-copy-curl-success")).toHaveTextContent("Copied");
+
+        act(() => { vi.advanceTimersByTime(1); });
+        expect(screen.getByTestId("soroban-copy-curl-success")).toHaveTextContent("Copy as cURL");
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("renders Copy as cURL in footbar for invoke mode success", async () => {
@@ -673,6 +687,143 @@ describe("SorobanPanel", () => {
       });
 
       expect(mockInvokeContract).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Issue #912: missing contracts, ABI method switching ──────────────────
+  describe("missing contract error banner (#912)", () => {
+    it("renders an error banner when invokeContract reports the contract is not found", async () => {
+      mockInvokeContract.mockResolvedValueOnce({
+        data: null,
+        error: "Contract not found: CMISSING (404)",
+      });
+      render(<SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />);
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+
+      const banner = await screen.findByTestId("soroban-error");
+      expect(banner).toHaveAttribute("role", "alert");
+      expect(banner).toHaveTextContent("Contract not found: CMISSING (404)");
+      expect(screen.queryByText("Result", { selector: "span" })).not.toBeInTheDocument();
+    });
+
+    it("renders an error banner when the RPC call rejects with a 404", async () => {
+      mockInvokeContract.mockRejectedValueOnce(
+        new Error("Request failed with status 404: contract code not found"),
+      );
+      render(<SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />);
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /status 404: contract code not found/i,
+      );
+    });
+
+    it("renders the error banner in simulate mode when the contract is missing", async () => {
+      mockSimulateContract.mockResolvedValueOnce({
+        data: null,
+        error: "Contract not found: CMISSING (404)",
+      });
+      render(
+        <SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} mode="simulate" />,
+      );
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+
+      expect(await screen.findByTestId("soroban-error")).toHaveTextContent(
+        /contract not found/i,
+      );
+      expect(screen.queryByText("Simulation Result")).not.toBeInTheDocument();
+    });
+
+    it("clears the banner when the contract ID changes", async () => {
+      mockInvokeContract.mockResolvedValueOnce({
+        data: null,
+        error: "Contract not found: CMISSING (404)",
+      });
+      const { rerender } = render(
+        <SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />,
+      );
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+      await screen.findByTestId("soroban-error");
+
+      rerender(<SorobanPanel contractId="CFOUND" onContractIdChange={() => {}} />);
+      await waitFor(() =>
+        expect(screen.queryByTestId("soroban-error")).not.toBeInTheDocument(),
+      );
+    });
+  });
+
+  describe("ABI method switching (#912)", () => {
+    async function loadAbi(names: string[]) {
+      fireEvent.click(screen.getByTestId("soroban-toggle-abi"));
+      const textarea = await screen.findByPlaceholderText(/paste contract abi/i);
+      fireEvent.change(textarea, {
+        target: { value: JSON.stringify(names.map((name) => ({ name }))) },
+      });
+      fireEvent.click(screen.getByTestId("soroban-load-abi"));
+      await screen.findByText(new RegExp(`${names.length} methods? loaded`, "i"));
+    }
+
+    it("resets the argument input when switching to a different ABI method", async () => {
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      await loadAbi(["transfer", "balance"]);
+
+      const methodInput = screen.getByLabelText("Method");
+      const argsInput = screen.getByLabelText("Arguments (JSON array)");
+      fireEvent.change(methodInput, { target: { value: "transfer" } });
+      fireEvent.change(argsInput, { target: { value: '["GFROM", "GTO", 100]' } });
+      expect(argsInput).toHaveValue('["GFROM", "GTO", 100]');
+
+      fireEvent.change(methodInput, { target: { value: "balance" } });
+      expect(methodInput).toHaveValue("balance");
+      expect(argsInput).toHaveValue("");
+    });
+
+    it("invokes the new method without the previous method's arguments", async () => {
+      mockInvokeContract.mockResolvedValueOnce({ data: { ok: true }, error: null });
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      await loadAbi(["transfer", "balance"]);
+
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "transfer" } });
+      fireEvent.change(screen.getByLabelText("Arguments (JSON array)"), {
+        target: { value: '["GFROM", "GTO", 100]' },
+      });
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+
+      await screen.findByText("Result", { selector: "span" });
+      expect(mockInvokeContract).toHaveBeenCalledWith(
+        expect.objectContaining({ method: "balance", args: [] }),
+      );
+    });
+
+    it("keeps the arguments when the same method is re-selected", async () => {
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      await loadAbi(["transfer", "balance"]);
+
+      const methodInput = screen.getByLabelText("Method");
+      const argsInput = screen.getByLabelText("Arguments (JSON array)");
+      fireEvent.change(methodInput, { target: { value: "transfer" } });
+      fireEvent.change(argsInput, { target: { value: '["GFROM"]' } });
+      fireEvent.change(methodInput, { target: { value: "transfer " } });
+      fireEvent.change(methodInput, { target: { value: "transfer" } });
+
+      expect(argsInput).toHaveValue('["GFROM"]');
+    });
+
+    it("keeps the arguments while typing a method name by hand without an ABI", () => {
+      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+
+      const methodInput = screen.getByLabelText("Method");
+      const argsInput = screen.getByLabelText("Arguments (JSON array)");
+      fireEvent.change(methodInput, { target: { value: "transfer" } });
+      fireEvent.change(argsInput, { target: { value: '["GFROM"]' } });
+      fireEvent.change(methodInput, { target: { value: "balance" } });
+
+      expect(argsInput).toHaveValue('["GFROM"]');
     });
   });
 });
