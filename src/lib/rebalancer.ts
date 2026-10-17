@@ -21,6 +21,28 @@ export interface PortfolioAsset {
   currentPct: number;
 }
 
+/** A single intermediate hop in a multi-hop swap route */
+export interface RouteHop {
+  /** Intermediate asset ticker code (e.g. "USDC") */
+  asset?: string;
+  /** Hop source asset (e.g. "XLM") */
+  from?: string;
+  /** Hop destination asset (e.g. "USDC") */
+  to?: string;
+  /** Pool fee tier (e.g. 0.3, "0.3%", 3000) */
+  feeTier?: number | string;
+  /** Pool fee tier percentage (e.g. 0.3) */
+  feeTierPct?: number;
+  /** Pool liquidity depth formatted or numeric (e.g. "$1.2M", 1200000, "$500k") */
+  liquidityDepth?: number | string;
+  /** Alias for pool liquidity depth */
+  poolDepth?: number | string;
+  /** Alias for pool liquidity depth */
+  poolLiquidityDepth?: number | string;
+  /** Numeric USD pool depth */
+  poolDepthUsd?: number;
+}
+
 /** A single suggested swap to move toward the target allocation */
 export interface SwapSuggestion {
   /** Asset being sold */
@@ -39,6 +61,10 @@ export interface SwapSuggestion {
   swapFeePct: number;
   /** Total cost of this swap in USD (fee + slippage impact) */
   totalCostUsd: number;
+  /** Optional intermediate hops for multi-hop routes */
+  hops?: RouteHop[];
+  /** Optional full asset route path, e.g. ["XLM", "USDC", "BTC"] */
+  path?: string[];
 }
 
 /** The result of a completed rebalance operation */
