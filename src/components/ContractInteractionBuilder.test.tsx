@@ -330,4 +330,147 @@ describe("ContractInteractionBuilder", () => {
     fireEvent.change(textarea, { target: { value: "[1, 2, 3]" } });
     expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
   });
+
+  // ── Issue #910: boundary values, bool and Option<T> coverage ──────────────
+
+  type ArgType = ContractSpec["methods"][number]["args"][number]["type"];
+
+  /** Renders a single-arg method, selects it, and returns the arg input. */
+  function renderSingleArg(type: ArgType, onParamsReady = vi.fn()) {
+    const spec: ContractSpec = {
+      contractId: MOCK_SPEC.contractId,
+      methods: [{ name: "call", args: [{ name: "value", type }] }],
+    };
+    render(
+      <ContractInteractionBuilder contractSpec={spec} onParamsReady={onParamsReady} />,
+    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+      target: { value: "call" },
+    });
+    return onParamsReady;
+  }
+
+  /** Decodes the base64 call preview and returns the single argument's value. */
+  function previewArgValue(): unknown {
+    const encoded = screen.getByText("Generated Call Preview").closest("div")!
+      .parentElement!.querySelector("pre")!.textContent ?? "";
+    const decoded = JSON.parse(atob(encoded)) as {
+      args: Array<{ value: unknown }>;
+    };
+    return decoded.args[0]?.value;
+  }
+
+  describe("integer boundary values (#910)", () => {
+    it.each([
+      ["u32", "spinbutton", "0"],
+      ["u32", "spinbutton", "4294967295"],
+      ["i32", "spinbutton", "-2147483648"],
+      ["i32", "spinbutton", "2147483647"],
+      ["u64", "spinbutton", "0"],
+      ["u64", "spinbutton", "18446744073709551615"],
+      ["i64", "spinbutton", "-9223372036854775808"],
+      ["i64", "spinbutton", "9223372036854775807"],
+      ["u128", "textbox", "0"],
+      ["u128", "textbox", "340282366920938463463374607431768211455"],
+      ["i128", "textbox", "-170141183460469231731687303715884105728"],
+      ["i128", "textbox", "170141183460469231731687303715884105727"],
+    ] as const)(
+      "preserves %s boundary value %s exactly",
+      (type, role, value) => {
+        const onParamsReady = renderSingleArg(type);
+        const input = screen.getByRole(role, { name: "value" });
+        fireEvent.change(input, { target: { value } });
+
+        // No precision loss in the preview or the generated params, even for
+        // values far beyond Number.MAX_SAFE_INTEGER.
+        expect(previewArgValue()).toBe(value);
+        fireEvent.click(screen.getByText("Generate Contract Call"));
+        expect(onParamsReady).toHaveBeenCalledWith(
+          expect.objectContaining({ method: "call", args: [value] }),
+        );
+      },
+    );
+
+    it.each(["i32", "u32", "i64", "u64"] as const)(
+      "renders %s as a numeric input",
+      (type) => {
+        renderSingleArg(type);
+        expect(screen.getByRole("spinbutton", { name: "value" })).toHaveAttribute(
+          "type",
+          "number",
+        );
+      },
+    );
+
+    it.each(["i128", "u128"] as const)(
+      "renders %s as a text input so 128-bit values are not rounded",
+      (type) => {
+        renderSingleArg(type);
+        const input = screen.getByRole("textbox", { name: "value" });
+        expect(input).toHaveAttribute("type", "text");
+        expect(input).toHaveAttribute("placeholder", `Enter ${type} (e.g. 1000000)`);
+      },
+    );
+  });
+
+  describe("bool arguments (#910)", () => {
+    it("offers an empty placeholder plus true and false options", () => {
+      renderSingleArg("bool");
+      const select = screen.getByRole("combobox", { name: "value" });
+      const options = Array.from(select.querySelectorAll("option")).map(
+        (option) => option.getAttribute("value"),
+      );
+      expect(options).toEqual(["", "true", "false"]);
+      expect(select).toHaveValue("");
+    });
+
+    it("keeps Generate disabled until a bool is chosen", () => {
+      renderSingleArg("bool");
+      expect(screen.getByText("Generate Contract Call")).toBeDisabled();
+    });
+
+    it.each(["true", "false"])("passes the %s selection through", (value) => {
+      const onParamsReady = renderSingleArg("bool");
+      fireEvent.change(screen.getByRole("combobox", { name: "value" }), {
+        target: { value },
+      });
+
+      expect(screen.getByRole("combobox", { name: "value" })).toHaveValue(value);
+      expect(previewArgValue()).toBe(value);
+      fireEvent.click(screen.getByText("Generate Contract Call"));
+      expect(onParamsReady).toHaveBeenCalledWith(
+        expect.objectContaining({ args: [value] }),
+      );
+    });
+  });
+
+  describe("Option<T> arguments (#910)", () => {
+    it("renders an option argument as a text input with its type label", () => {
+      renderSingleArg("option");
+      expect(screen.getByText("option")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "value" })).toHaveAttribute(
+        "placeholder",
+        "Enter option value",
+      );
+    });
+
+    it("previews an unset option as empty and keeps Generate disabled", () => {
+      renderSingleArg("option");
+      expect(previewArgValue()).toBe("");
+      expect(screen.getByText("Generate Contract Call")).toBeDisabled();
+    });
+
+    it("passes a provided option value through", () => {
+      const onParamsReady = renderSingleArg("option");
+      fireEvent.change(screen.getByRole("textbox", { name: "value" }), {
+        target: { value: "42" },
+      });
+
+      expect(previewArgValue()).toBe("42");
+      fireEvent.click(screen.getByText("Generate Contract Call"));
+      expect(onParamsReady).toHaveBeenCalledWith(
+        expect.objectContaining({ args: ["42"] }),
+      );
+    });
+  });
 });

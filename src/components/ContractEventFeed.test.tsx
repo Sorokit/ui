@@ -1014,3 +1014,248 @@ describe("ContractEventFeed — issue #442", () => {
     expect(screen.getByText("NEW-EVT")).toBeInTheDocument();
   });
 });
+
+describe("ContractEventFeed — issue #908", () => {
+  // base64 XDR ScVals: Symbol("transfer"), U32(42), Address(account), Address(contract)
+  const SYMBOL_TOPIC = "AAAADwAAAAh0cmFuc2Zlcg==";
+  const U32_TOPIC = "AAAAAwAAACo=";
+  const ACCOUNT_TOPIC = "AAAAEgAAAAAAAAAAAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+  const ACCOUNT_ADDRESS = "GAAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB7JZX";
+  const CONTRACT_TOPIC = "AAAAEgAAAAEAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHw==";
+  const CONTRACT_ADDRESS = "CAAACAQDAQCQMBYIBEFAWDANBYHRAEISCMKBKFQXDAMRUGY4DUPB6N4O";
+
+  function mockEvents(getEvents: ReturnType<typeof vi.fn>) {
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+  }
+
+  function evt(id: string, ledger = 1): ContractEvent {
+    return { ...MOCK_EVENT, id, ledger, topics: [] };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("topic decoding", () => {
+    it("decodes Symbol, U32 and Address topics into readable strings", async () => {
+      mockEvents(
+        vi.fn().mockResolvedValue({
+          data: [
+            {
+              ...MOCK_EVENT,
+              topics: [SYMBOL_TOPIC, U32_TOPIC, ACCOUNT_TOPIC],
+            },
+          ],
+          error: null,
+        }),
+      );
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      // "transfer" also appears as the event-type badge.
+      await waitFor(() =>
+        expect(screen.getAllByText("transfer").length).toBeGreaterThanOrEqual(2),
+      );
+      expect(screen.getByText("42")).toBeInTheDocument();
+      expect(screen.getByTitle(ACCOUNT_TOPIC)).toHaveTextContent(
+        ACCOUNT_ADDRESS.slice(0, 8),
+      );
+      expect(screen.queryByText(SYMBOL_TOPIC)).not.toBeInTheDocument();
+      expect(screen.queryByText(U32_TOPIC)).not.toBeInTheDocument();
+    });
+
+    it("copies the decoded topic value", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+      });
+      mockEvents(
+        vi.fn().mockResolvedValue({
+          data: [{ ...MOCK_EVENT, topics: [CONTRACT_TOPIC] }],
+          error: null,
+        }),
+      );
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      const copyButton = await screen.findByRole("button", { name: "Copy topic" });
+      await act(async () => {
+        fireEvent.click(copyButton);
+      });
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(CONTRACT_ADDRESS);
+    });
+
+    it("leaves non-XDR topics untouched", async () => {
+      const hexTopic = "ab".repeat(32);
+      mockEvents(
+        vi.fn().mockResolvedValue({
+          data: [{ ...MOCK_EVENT, topics: ["plain-topic", hexTopic] }],
+          error: null,
+        }),
+      );
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+
+      expect(await screen.findByText("plain-topic")).toBeInTheDocument();
+      expect(screen.getByText(`${hexTopic.slice(0, 8)}...${hexTopic.slice(-4)}`)).toBeInTheDocument();
+    });
+  });
+
+  describe("unmount cleanup", () => {
+    it("clears polling, clock and highlight timers on unmount", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [evt("a")], error: null })
+        .mockResolvedValue({ data: [evt("a"), evt("b", 2)], error: null });
+      mockEvents(getEvents);
+
+      const { unmount } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />,
+      );
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+      // Second poll brings a new event, which schedules a highlight timer.
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(document.querySelector(".animate-highlight")).not.toBeNull(),
+      );
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(getEvents).toHaveBeenCalledTimes(2);
+    });
+
+    it("drops a response that resolves after unmount", async () => {
+      let resolvePending!: (value: { data: ContractEvent[]; error: null }) => void;
+      const getEvents = vi.fn().mockReturnValue(
+        new Promise((resolve) => {
+          resolvePending = resolve;
+        }),
+      );
+      mockEvents(getEvents);
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+      unmount();
+      await act(async () => {
+        resolvePending({ data: [evt("late")], error: null });
+      });
+
+      expect(consoleError).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+      consoleError.mockRestore();
+    });
+  });
+
+  describe("auto-scroll", () => {
+    function setScrollMetrics(
+      el: HTMLElement,
+      metrics: { scrollHeight: number; clientHeight: number },
+    ) {
+      Object.defineProperty(el, "scrollHeight", {
+        configurable: true,
+        get: () => metrics.scrollHeight,
+      });
+      Object.defineProperty(el, "clientHeight", {
+        configurable: true,
+        get: () => metrics.clientHeight,
+      });
+      // jsdom doesn't lay out, so give scrollTop real read/write storage.
+      Object.defineProperty(el, "scrollTop", {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
+    }
+
+    it("follows new events while pinned to the bottom", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [evt("a")], error: null })
+        .mockResolvedValue({ data: [evt("a"), evt("b", 2)], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      const list = await screen.findByTestId("contract-event-list");
+      const metrics = { scrollHeight: 500, clientHeight: 200 };
+      setScrollMetrics(list, metrics);
+
+      metrics.scrollHeight = 800;
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(list.children).toHaveLength(2));
+      expect(list.scrollTop).toBe(800);
+      expect(screen.queryByText(/auto-scroll paused/i)).not.toBeInTheDocument();
+    });
+
+    it("pauses auto-scroll while the user reads older events and resumes on demand", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [evt("a")], error: null })
+        .mockResolvedValue({ data: [evt("a"), evt("b", 2)], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />);
+      act(() => {
+        vi.advanceTimersByTime(0);
+      });
+      const list = await screen.findByTestId("contract-event-list");
+      const metrics = { scrollHeight: 1000, clientHeight: 200 };
+      setScrollMetrics(list, metrics);
+
+      // User scrolls far up from the bottom.
+      list.scrollTop = 100;
+      fireEvent.scroll(list);
+      expect(await screen.findByText(/auto-scroll paused/i)).toBeInTheDocument();
+
+      metrics.scrollHeight = 1400;
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(list.children).toHaveLength(2));
+      expect(list.scrollTop).toBe(100);
+
+      fireEvent.click(screen.getByRole("button", { name: /jump to latest/i }));
+      expect(list.scrollTop).toBe(1400);
+      expect(screen.queryByText(/auto-scroll paused/i)).not.toBeInTheDocument();
+    });
+  });
+});

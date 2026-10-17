@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry } from "./ContractInteractionDebugger";
+import {
+  addDebugHistory,
+  compactForStorage,
+  ContractInteractionDebugger,
+  createDebuggerEntry,
+  type DebuggerEntry,
+} from "./ContractInteractionDebugger";
 
 describe("ContractInteractionDebugger", () => {
   beforeEach(() => {
@@ -164,5 +170,122 @@ describe("ContractInteractionDebugger", () => {
     expect(parsed).toHaveLength(1);
     expect(parsed[0].contractId).toBe("C-NEW");
     expect(parsed[0].method).toBe("mint");
+  });
+
+  it("tags diff rows as added, removed or changed for themed contrast (#907)", () => {
+    const { container } = render(
+      <ContractInteractionDebugger
+        contractId="C123"
+        method="update"
+        args={[]}
+        stateBefore={{ kept: 1, gone: "x" }}
+        stateAfter={{ kept: 2, fresh: true }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+
+    const kinds = Array.from(
+      container.querySelectorAll<HTMLElement>(".sorokit-diff-row"),
+    ).map((row) => row.dataset.diffKind);
+    expect(kinds).toEqual(["changed", "removed", "added"]);
+    expect(screen.getByText("Added")).toBeInTheDocument();
+    expect(screen.getByText("Removed")).toBeInTheDocument();
+    expect(screen.getByText("Changed")).toBeInTheDocument();
+  });
+
+  it("applies theme-aware classes to the JSON viewer (#907)", () => {
+    const { container } = render(
+      <ContractInteractionDebugger contractId="C123" method="transfer" args={["GA"]} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+
+    expect(container.querySelector(".sorokit-json-view")).not.toBeNull();
+    expect(container.querySelector(".sorokit-json-string")).not.toBeNull();
+  });
+
+  it("truncates large byte buffers and strings before persisting (#907)", () => {
+    const bytes = new Uint8Array(1024 * 1024);
+    const compacted = compactForStorage({
+      wasm: bytes,
+      blob: "a".repeat(10_000),
+      list: Array.from({ length: 500 }, (_, i) => i),
+    }) as { wasm: string; blob: string; list: unknown[] };
+
+    expect(compacted.wasm).toBe(`[bytes: ${bytes.byteLength}]`);
+    expect(compacted.blob.length).toBeLessThan(400);
+    expect(compacted.list.length).toBeLessThanOrEqual(33);
+
+    const entry = createDebuggerEntry({
+      contractId: "C-BIG",
+      method: "upload",
+      args: [Array.from({ length: 5000 }, () => 255)],
+      state: "success",
+      result: { data: "f".repeat(100_000) },
+    });
+    addDebugHistory(entry, []);
+
+    const stored = window.sessionStorage.getItem("sorokit-soroban-debug-history") ?? "";
+    expect(stored.length).toBeLessThan(5_000);
+  });
+
+  it("clamps history to 10 entries", () => {
+    let history: DebuggerEntry[] = [];
+    for (let i = 0; i < 15; i += 1) {
+      history = addDebugHistory(
+        { ...createDebuggerEntry({ contractId: `C${i}`, method: "m" }), timestamp: `t-${i}` },
+        history,
+      );
+    }
+    expect(history).toHaveLength(10);
+    expect(history[0].contractId).toBe("C14");
+    expect(JSON.parse(window.sessionStorage.getItem("sorokit-soroban-debug-history") ?? "[]")).toHaveLength(10);
+  });
+
+  it("does not throw when storage quota is exceeded", () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new DOMException("quota", "QuotaExceededError");
+      });
+    const entry = createDebuggerEntry({ contractId: "C1", method: "m" });
+
+    expect(() => addDebugHistory(entry, [])).not.toThrow();
+    expect(addDebugHistory(entry, [])).toHaveLength(1);
+    setItem.mockRestore();
+  });
+
+  it("replays a history entry with the same arguments", () => {
+    const onReplay = vi.fn();
+    const entry = {
+      ...createDebuggerEntry({ contractId: "C-OLD", method: "mint", args: ["user1", 100] }),
+      timestamp: "2026-01-01T00:00:00.000Z",
+    };
+
+    render(
+      <ContractInteractionDebugger
+        contractId="C123"
+        method="transfer"
+        history={[entry]}
+        onReplay={onReplay}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+    fireEvent.click(screen.getByRole("button", { name: /replay mint with same arguments/i }));
+
+    expect(onReplay).toHaveBeenCalledTimes(1);
+    expect(onReplay).toHaveBeenCalledWith(
+      expect.objectContaining({ contractId: "C-OLD", method: "mint", args: ["user1", 100] }),
+    );
+  });
+
+  it("hides the replay button when no onReplay handler is provided", () => {
+    const entry = createDebuggerEntry({ contractId: "C-OLD", method: "mint" });
+    render(<ContractInteractionDebugger contractId="C123" method="transfer" history={[entry]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+    expect(screen.queryByRole("button", { name: /replay/i })).not.toBeInTheDocument();
   });
 });
