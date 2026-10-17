@@ -141,6 +141,92 @@ export interface ValidatorFilter {
   sortDirection: SortDirection;
 }
 
+// ─── Protocol Epoch & Yield Types ───────────────────────────────────────────
+
+/** Protocol epoch configuration */
+export interface ProtocolEpochConfig {
+  /** Epoch duration in milliseconds (default: 24h = 86,400,000 ms) */
+  epochDurationMs?: number;
+  /** Epoch duration in hours (convenience shorthand) */
+  epochDurationHours?: number;
+  /** Epoch duration in days (convenience shorthand) */
+  epochDurationDays?: number;
+  /** Reference timestamp / genesis for epoch cycle alignment (default: 0 / UTC epoch boundary) */
+  epochReferenceTime?: Date | string | number;
+  /** Current epoch index if known */
+  currentEpoch?: number;
+}
+
+/** Options for estimating unbonding completion timestamp */
+export interface UnbondingEstimateOptions extends ProtocolEpochConfig {
+  /** Base unbonding period in days (default: 21) */
+  unbondingDays?: number;
+  /** Base unbonding period in epochs (overrides unbondingDays if provided) */
+  unbondingEpochs?: number;
+  /** Desired return format: "date" (returns Date) or "iso" (returns ISO string). Default is "date" */
+  format?: "date" | "iso";
+}
+
+/** Parameters for reward yield calculation */
+export interface EstimatedRewardsOptions {
+  /** Delegated principal amount in XLM */
+  amount?: number | string;
+  /** Gross annual yield percentage (0–100) or reward rate */
+  grossReward?: number;
+  /** Alias for grossReward */
+  grossApy?: number;
+  /** Alias for grossReward */
+  apyPct?: number;
+  /** Validator commission rate (0–100) */
+  validatorCommission?: number;
+  /** Alias for validatorCommission */
+  commissionPct?: number;
+  /** Staking period in days (defaults to 365 for annual reward calculation) */
+  days?: number;
+  /** Whether to calculate compounding returns */
+  compound?: boolean;
+  /** Number of compounding periods per year (defaults to 365 for daily compounding) */
+  compoundingPeriodsPerYear?: number;
+}
+
+/** Parameters for partial redelegation yield calculation */
+export interface PartialRedelegationInput {
+  /** Total or current delegation amount with the source validator */
+  currentDelegationAmount: number | string;
+  /** Amount to redelegate to the new target validator */
+  redelegationAmount: number | string;
+  /** Source validator or rates */
+  sourceValidator: Pick<Validator, "apyPct" | "commissionPct">;
+  /** Target validator or rates */
+  targetValidator: Pick<Validator, "apyPct" | "commissionPct">;
+  /** Staking duration in days (default: 365) */
+  days?: number;
+  /** Compounding frequency per year (default: 365 for daily) */
+  compoundingPeriodsPerYear?: number;
+  /** Whether to compound rewards (default: true) */
+  compound?: boolean;
+}
+
+/** Result of a partial redelegation yield calculation */
+export interface PartialRedelegationYieldResult {
+  /** Amount remaining with the source validator */
+  remainingAmount: number;
+  /** Amount redelegated to the target validator */
+  redelegatedAmount: number;
+  /** Net APY of source validator after commission deduction */
+  sourceNetApy: number;
+  /** Net APY of target validator after commission deduction */
+  targetNetApy: number;
+  /** Yield earned on remaining stake */
+  remainingYield: number;
+  /** Yield earned on redelegated stake */
+  redelegatedYield: number;
+  /** Combined total yield across both validators */
+  totalYield: number;
+  /** Blended / effective net APY across the split position */
+  blendedNetApy: number;
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 /** Delegation change fee estimate in stroops (100 = 0.00001 XLM base fee) */
@@ -154,6 +240,12 @@ export const MIN_DELEGATION_XLM = 1;
 
 /** Number of days shown in the reward history */
 export const REWARD_HISTORY_DAYS = 30;
+
+/** Default unbonding period in days when not checking custom epoch config */
+export const DEFAULT_UNBONDING_DAYS = 21;
+
+/** Default protocol epoch duration in milliseconds (24 hours = 1 day) */
+export const DEFAULT_EPOCH_DURATION_MS = 24 * 60 * 60 * 1000;
 
 // ─── Pure utility functions ───────────────────────────────────────────────────
 
@@ -222,6 +314,346 @@ export function computeUptimePct(
 
 export function formatPct(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+/**
+ * Compute the net reward rate after deducting validator commission:
+ *   grossReward * (1 - validatorCommission / 100)
+ *
+ * Clamps commission to [0, 100] to prevent negative or inverted yields.
+ */
+export function calculateNetRewardRate(
+  grossReward: number,
+  validatorCommission = 0,
+): number {
+  if (!Number.isFinite(grossReward) || grossReward <= 0) return 0;
+  const commission = Math.min(
+    100,
+    Math.max(0, Number.isFinite(validatorCommission) ? validatorCommission : 0),
+  );
+  return grossReward * (1 - commission / 100);
+}
+
+/** Alias for calculateNetRewardRate */
+export const calculateNetApy = calculateNetRewardRate;
+
+/**
+ * Calculate compounded yield on an amount over `days` days at `grossReward` APY
+ * after deducting `validatorCommission`.
+ *
+ * Formula: P * ((1 + r / n)^(n * t) - 1)
+ * where r = netRewardRate / 100, t = days / 365, n = compoundingPeriodsPerYear.
+ */
+export function calculateCompoundingYield(
+  principal: number | string,
+  grossReward: number,
+  validatorCommission = 0,
+  days = 365,
+  compoundingPeriodsPerYear = 365,
+): number {
+  const p = typeof principal === "string" ? parseFloat(principal) : principal;
+  if (!Number.isFinite(p) || p <= 0) return 0;
+  const netRate = calculateNetRewardRate(grossReward, validatorCommission);
+  if (netRate <= 0) return 0;
+
+  const r = netRate / 100;
+  const t = days / 365;
+  const n = compoundingPeriodsPerYear > 0 ? compoundingPeriodsPerYear : 365;
+
+  return p * (Math.pow(1 + r / n, n * t) - 1);
+}
+
+export function calculateEstimatedRewards(
+  options: EstimatedRewardsOptions,
+): number;
+export function calculateEstimatedRewards(
+  grossReward: number,
+  validatorCommission: number,
+): number;
+export function calculateEstimatedRewards(
+  amount: number | string,
+  validator: Pick<Validator, "apyPct" | "commissionPct">,
+  days?: number,
+  compound?: boolean,
+  compoundingPeriodsPerYear?: number,
+): number;
+export function calculateEstimatedRewards(
+  amount: number | string,
+  grossReward: number,
+  validatorCommission?: number,
+  days?: number,
+  compound?: boolean,
+  compoundingPeriodsPerYear?: number,
+): number;
+export function calculateEstimatedRewards(
+  amountOrGrossOrOptions: number | string | EstimatedRewardsOptions,
+  grossRewardOrValidatorOrCommission?: number | Pick<Validator, "apyPct" | "commissionPct">,
+  validatorCommissionOrDays?: number,
+  daysOrCompound?: number | boolean,
+  compound?: boolean | number,
+  compoundingPeriodsPerYear = 365,
+): number {
+  // Case A: Options object
+  if (typeof amountOrGrossOrOptions === "object" && amountOrGrossOrOptions !== null) {
+    const opts = amountOrGrossOrOptions;
+    const gross = opts.grossReward ?? opts.grossApy ?? opts.apyPct ?? 0;
+    const comm = opts.validatorCommission ?? opts.commissionPct ?? 0;
+    const netRate = calculateNetRewardRate(gross, comm);
+
+    if (opts.amount === undefined || opts.amount === null || opts.amount === "") {
+      return netRate;
+    }
+
+    const p = typeof opts.amount === "string" ? parseFloat(opts.amount) : opts.amount;
+    if (!Number.isFinite(p) || p <= 0) return 0;
+
+    const d = opts.days ?? 365;
+    if (opts.compound) {
+      const n = opts.compoundingPeriodsPerYear ?? 365;
+      return calculateCompoundingYield(p, gross, comm, d, n);
+    }
+    return p * (netRate / 100) * (d / 365);
+  }
+
+  // Case B: amount + validator object
+  if (
+    typeof grossRewardOrValidatorOrCommission === "object" &&
+    grossRewardOrValidatorOrCommission !== null
+  ) {
+    const p =
+      typeof amountOrGrossOrOptions === "string"
+        ? parseFloat(amountOrGrossOrOptions)
+        : amountOrGrossOrOptions;
+    const gross = grossRewardOrValidatorOrCommission.apyPct ?? 0;
+    const comm = grossRewardOrValidatorOrCommission.commissionPct ?? 0;
+    const d = typeof validatorCommissionOrDays === "number" ? validatorCommissionOrDays : 365;
+    const isComp = typeof daysOrCompound === "boolean" ? daysOrCompound : false;
+    const periods =
+      typeof compound === "number" ? compound : (compoundingPeriodsPerYear ?? 365);
+
+    if (isComp) {
+      return calculateCompoundingYield(p, gross, comm, d, periods);
+    }
+    const netRate = calculateNetRewardRate(gross, comm);
+    return p * (netRate / 100) * (d / 365);
+  }
+
+  // Case C: two number arguments (grossReward, validatorCommission)
+  if (
+    typeof amountOrGrossOrOptions === "number" &&
+    typeof grossRewardOrValidatorOrCommission === "number" &&
+    validatorCommissionOrDays === undefined
+  ) {
+    return calculateNetRewardRate(amountOrGrossOrOptions, grossRewardOrValidatorOrCommission);
+  }
+
+  // Case D: (amount, grossReward, validatorCommission, days, compound, compoundingPeriodsPerYear)
+  const p =
+    typeof amountOrGrossOrOptions === "string"
+      ? parseFloat(amountOrGrossOrOptions)
+      : amountOrGrossOrOptions;
+  const gross =
+    typeof grossRewardOrValidatorOrCommission === "number"
+      ? grossRewardOrValidatorOrCommission
+      : 0;
+  const comm = typeof validatorCommissionOrDays === "number" ? validatorCommissionOrDays : 0;
+  const d = typeof daysOrCompound === "number" ? daysOrCompound : 365;
+  const isComp = typeof compound === "boolean" ? compound : false;
+  const periods = compoundingPeriodsPerYear ?? 365;
+
+  if (isComp) {
+    return calculateCompoundingYield(p, gross, comm, d, periods);
+  }
+  const netRate = calculateNetRewardRate(gross, comm);
+  return p * (netRate / 100) * (d / 365);
+}
+
+/**
+ * Helper to resolve epoch duration in milliseconds.
+ */
+function resolveEpochDurationMs(config?: ProtocolEpochConfig): number {
+  if (config?.epochDurationDays && config.epochDurationDays > 0) {
+    return config.epochDurationDays * 24 * 60 * 60 * 1000;
+  }
+  if (config?.epochDurationHours && config.epochDurationHours > 0) {
+    return config.epochDurationHours * 60 * 60 * 1000;
+  }
+  if (config?.epochDurationMs && config.epochDurationMs > 0) {
+    return config.epochDurationMs;
+  }
+  return DEFAULT_EPOCH_DURATION_MS;
+}
+
+/**
+ * Calculate current epoch boundaries (start, close, index) for a given timestamp.
+ */
+export function getEpochBoundaries(
+  timestamp: Date | string | number = new Date(),
+  config?: ProtocolEpochConfig,
+): {
+  currentEpoch: number;
+  epochStart: Date;
+  epochClose: Date;
+  epochDurationMs: number;
+} {
+  const time = new Date(timestamp).getTime();
+  const durationMs = resolveEpochDurationMs(config);
+  const refTime = config?.epochReferenceTime
+    ? new Date(config.epochReferenceTime).getTime()
+    : 0;
+
+  const elapsed = time - refTime;
+  const epochIndex = Math.floor(elapsed / durationMs);
+  const epochStartMs = refTime + epochIndex * durationMs;
+  const epochCloseMs = epochStartMs + durationMs;
+
+  return {
+    currentEpoch: config?.currentEpoch ?? epochIndex,
+    epochStart: new Date(epochStartMs),
+    epochClose: new Date(epochCloseMs),
+    epochDurationMs: durationMs,
+  };
+}
+
+/**
+ * Estimate unbonding completion time accounting for protocol epoch close cycles.
+ *
+ * Instead of assuming a static 21-day period from the exact moment of request,
+ * unbonding begins at the close of the current protocol epoch and releases
+ * on the epoch close cycle following the unbonding duration.
+ */
+export function estimateUnbondingCompletion(
+  requestDate: Date | string | number = new Date(),
+  options?: UnbondingEstimateOptions,
+): Date {
+  const reqTime = new Date(requestDate).getTime();
+  const epochDurationMs = resolveEpochDurationMs(options);
+  const refTime = options?.epochReferenceTime
+    ? new Date(options.epochReferenceTime).getTime()
+    : 0;
+
+  // Unbonding takes effect at the close of the current epoch
+  const elapsed = reqTime - refTime;
+  const currentEpochIndex = Math.floor(elapsed / epochDurationMs);
+  const currentEpochCloseTime =
+    elapsed % epochDurationMs === 0
+      ? reqTime
+      : refTime + (currentEpochIndex + 1) * epochDurationMs;
+
+  // Base unbonding duration in ms
+  let unbondingDurationMs: number;
+  if (options?.unbondingEpochs !== undefined && options.unbondingEpochs > 0) {
+    unbondingDurationMs = options.unbondingEpochs * epochDurationMs;
+  } else {
+    const unbondingDays = options?.unbondingDays ?? DEFAULT_UNBONDING_DAYS;
+    unbondingDurationMs = unbondingDays * 24 * 60 * 60 * 1000;
+  }
+
+  const targetEndTime = currentEpochCloseTime + unbondingDurationMs;
+  const elapsedAtEnd = targetEndTime - refTime;
+  const remainder = elapsedAtEnd % epochDurationMs;
+  const finalCompletionTime =
+    remainder === 0 ? targetEndTime : targetEndTime + (epochDurationMs - remainder);
+
+  return new Date(finalCompletionTime);
+}
+
+/** Alias for estimateUnbondingCompletion */
+export const calculateUnbondingCompletion = estimateUnbondingCompletion;
+
+/**
+ * Format the unbonding completion estimate as an ISO-8601 string.
+ */
+export function estimateUnbondingCompletionIso(
+  requestDate: Date | string | number = new Date(),
+  options?: UnbondingEstimateOptions,
+): string {
+  return estimateUnbondingCompletion(requestDate, options).toISOString();
+}
+
+/** Alias for estimateUnbondingCompletionIso */
+export const calculateUnbondingCompletionIso = estimateUnbondingCompletionIso;
+
+/**
+ * Calculate compounding and simple yields when partially redelegating from one validator to another.
+ *
+ * Divides the initial stake between remaining stake at source validator and
+ * redelegated stake at target validator, computing net yield on both positions
+ * after deducting each validator's commission.
+ */
+export function calculatePartialRedelegationYield(
+  input: PartialRedelegationInput,
+): PartialRedelegationYieldResult {
+  const currentTotal =
+    typeof input.currentDelegationAmount === "string"
+      ? parseFloat(input.currentDelegationAmount)
+      : input.currentDelegationAmount;
+
+  const redelegated =
+    typeof input.redelegationAmount === "string"
+      ? parseFloat(input.redelegationAmount)
+      : input.redelegationAmount;
+
+  if (!Number.isFinite(currentTotal) || currentTotal <= 0) {
+    throw new Error("Invalid current delegation amount");
+  }
+  if (!Number.isFinite(redelegated) || redelegated < 0) {
+    throw new Error("Redelegation amount cannot be negative");
+  }
+  if (redelegated > currentTotal) {
+    throw new Error("Redelegation amount exceeds current delegation");
+  }
+
+  const remaining = currentTotal - redelegated;
+  const days = input.days ?? 365;
+  const compound = input.compound ?? true;
+  const periods = input.compoundingPeriodsPerYear ?? 365;
+
+  const sourceNetApy = calculateNetRewardRate(
+    input.sourceValidator.apyPct,
+    input.sourceValidator.commissionPct,
+  );
+  const targetNetApy = calculateNetRewardRate(
+    input.targetValidator.apyPct,
+    input.targetValidator.commissionPct,
+  );
+
+  const remainingYield = compound
+    ? calculateCompoundingYield(
+        remaining,
+        input.sourceValidator.apyPct,
+        input.sourceValidator.commissionPct,
+        days,
+        periods,
+      )
+    : remaining * (sourceNetApy / 100) * (days / 365);
+
+  const redelegatedYield = compound
+    ? calculateCompoundingYield(
+        redelegated,
+        input.targetValidator.apyPct,
+        input.targetValidator.commissionPct,
+        days,
+        periods,
+      )
+    : redelegated * (targetNetApy / 100) * (days / 365);
+
+  const totalYield = remainingYield + redelegatedYield;
+  const blendedNetApy =
+    currentTotal > 0
+      ? (remaining * sourceNetApy + redelegated * targetNetApy) / currentTotal
+      : 0;
+
+  return {
+    remainingAmount: remaining,
+    redelegatedAmount: redelegated,
+    sourceNetApy,
+    targetNetApy,
+    remainingYield,
+    redelegatedYield,
+    totalYield,
+    blendedNetApy,
+  };
 }
 
 /**

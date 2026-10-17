@@ -154,15 +154,17 @@ export async function checkRpcHealth(
     if (timedOut) {
       throw new Error(
         `RPC endpoint did not respond within ${Math.round(timeoutMs / 1000)}s.`,
+        { cause: err },
       );
     }
     if (isAbortError(err)) throw err;
     if (err instanceof TypeError) {
       throw new Error(
         "Could not reach the RPC endpoint. It may be offline or may not allow requests from this origin (CORS).",
+        { cause: err },
       );
     }
-    throw err instanceof Error ? err : new Error("RPC health check failed.");
+    throw err instanceof Error ? err : new Error("RPC health check failed.", { cause: err });
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);

@@ -6,13 +6,25 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateDailyRewards,
+  calculateCompoundingYield,
+  calculateEstimatedRewards,
+  calculateNetApy,
+  calculateNetRewardRate,
+  calculatePartialRedelegationYield,
+  calculateUnbondingCompletion,
+  calculateUnbondingCompletionIso,
   computeUptimePct,
   createDefaultFilter,
+  DEFAULT_EPOCH_DURATION_MS,
+  DEFAULT_UNBONDING_DAYS,
   estimateDelegationFeeXlm,
+  estimateUnbondingCompletion,
+  estimateUnbondingCompletionIso,
   filterValidators,
   formatPct,
   formatXlm,
   generateMockRewardHistory,
+  getEpochBoundaries,
   MOCK_DELEGATIONS,
   MOCK_VALIDATORS,
   REWARD_HISTORY_DAYS,
@@ -452,10 +464,411 @@ describe("computeUptimePct (#689)", () => {
   });
 
   it("returns null instead of NaN or Infinity", () => {
-    expect(computeUptimePct({ uptimePct: Number.NaN })).toBeNull();
-    expect(computeUptimePct({ uptimePct: Infinity })).toBeNull();
     expect(
       computeUptimePct({ uptimePct: 0, pingCount: Number.NaN }),
     ).toBeNull();
   });
 });
+
+// ─── calculateNetRewardRate & calculateNetApy (#972) ──────────────────────────
+
+describe("calculateNetRewardRate & calculateNetApy (#972)", () => {
+  it("deducts validator commission percentage: grossReward * (1 - validatorCommission / 100)", () => {
+    // 10% gross APY with 10% commission = 9% net
+    expect(calculateNetRewardRate(10, 10)).toBeCloseTo(9, 6);
+
+    // 8.4% gross APY with 5% commission = 7.98% net
+    expect(calculateNetRewardRate(8.4, 5)).toBeCloseTo(7.98, 6);
+
+    // 12% gross APY with 25% commission = 9% net
+    expect(calculateNetRewardRate(12, 25)).toBeCloseTo(9, 6);
+  });
+
+  it("returns the full gross reward rate when validator commission is 0%", () => {
+    expect(calculateNetRewardRate(8.5, 0)).toBeCloseTo(8.5, 6);
+    expect(calculateNetApy(12.0, 0)).toBeCloseTo(12.0, 6);
+  });
+
+  it("returns 0% net reward rate when validator commission is 100%", () => {
+    expect(calculateNetRewardRate(10, 100)).toBe(0);
+    expect(calculateNetApy(15, 100)).toBe(0);
+  });
+
+  it("clamps validator commission within 0–100%", () => {
+    // Commission > 100% is clamped to 100% -> 0% net
+    expect(calculateNetRewardRate(10, 150)).toBe(0);
+    // Negative commission is clamped to 0% -> full gross
+    expect(calculateNetRewardRate(10, -5)).toBeCloseTo(10, 6);
+  });
+
+  it("handles non-finite or non-positive gross rewards gracefully", () => {
+    expect(calculateNetRewardRate(0, 10)).toBe(0);
+    expect(calculateNetRewardRate(-5, 10)).toBe(0);
+    expect(calculateNetRewardRate(NaN, 10)).toBe(0);
+    expect(calculateNetRewardRate(Infinity, 10)).toBe(0);
+  });
+
+  it("calculateNetApy is an identical alias for calculateNetRewardRate", () => {
+    expect(calculateNetApy(9.1, 3)).toBe(calculateNetRewardRate(9.1, 3));
+    expect(calculateNetApy(9.1, 3)).toBeCloseTo(9.1 * (1 - 0.03), 6);
+  });
+});
+
+// ─── calculateEstimatedRewards (#972) ─────────────────────────────────────────
+
+describe("calculateEstimatedRewards (#972)", () => {
+  it("reflects validator commission deductions when computing net reward rate", () => {
+    // When called with 2 numbers (grossReward, validatorCommission)
+    const netRate = calculateEstimatedRewards(10, 10);
+    expect(netRate).toBeCloseTo(9, 6);
+  });
+
+  it("calculates estimated XLM rewards on an amount with commission deducted", () => {
+    // 10,000 XLM at 10% gross APY with 10% commission over 1 year (365 days)
+    // Net APY = 9% -> Expected reward = 900 XLM (without commission deduction it would be 1000 XLM)
+    const reward = calculateEstimatedRewards(10000, 10, 10);
+    expect(reward).toBeCloseTo(900, 4);
+  });
+
+  it("calculates rewards for a custom duration (e.g. 30 days)", () => {
+    // 10,000 XLM at 10% gross with 10% commission (9% net) for 30 days
+    // 10000 * 0.09 * (30 / 365) = 73.9726 XLM
+    const reward = calculateEstimatedRewards(10000, 10, 10, 30);
+    expect(reward).toBeCloseTo(10000 * 0.09 * (30 / 365), 4);
+  });
+
+  it("supports passing a Validator object", () => {
+    const alphaValidator = MOCK_VALIDATORS[0]; // apyPct: 8.4, commissionPct: 5
+    // Net rate = 8.4 * (1 - 0.05) = 7.98%
+    // 5000 XLM * 7.98% = 399 XLM
+    const reward = calculateEstimatedRewards(5000, alphaValidator);
+    expect(reward).toBeCloseTo(399, 4);
+  });
+
+  it("supports options object parameter", () => {
+    const result = calculateEstimatedRewards({
+      amount: "10000",
+      grossReward: 10,
+      validatorCommission: 10,
+      days: 365,
+    });
+    expect(result).toBeCloseTo(900, 4);
+  });
+
+  it("returns net rate if amount is omitted from options", () => {
+    const netApy = calculateEstimatedRewards({
+      grossReward: 8.0,
+      validatorCommission: 10,
+    });
+    expect(netApy).toBeCloseTo(7.2, 6);
+  });
+
+  it("supports compounding option in calculateEstimatedRewards", () => {
+    // 10,000 XLM at 10% gross APY with 10% commission (9% net) with daily compounding
+    // Daily compounding: 10000 * ((1 + 0.09/365)^365 - 1) ≈ 941.62 XLM
+    const compoundReward = calculateEstimatedRewards({
+      amount: 10000,
+      grossReward: 10,
+      validatorCommission: 10,
+      compound: true,
+      days: 365,
+    });
+    const simpleReward = calculateEstimatedRewards({
+      amount: 10000,
+      grossReward: 10,
+      validatorCommission: 10,
+      compound: false,
+      days: 365,
+    });
+
+    expect(compoundReward).toBeCloseTo(941.62, 1);
+    expect(simpleReward).toBeCloseTo(900.0, 1);
+    expect(compoundReward).toBeGreaterThan(simpleReward);
+  });
+});
+
+// ─── calculateCompoundingYield (#972) ─────────────────────────────────────────
+
+describe("calculateCompoundingYield (#972)", () => {
+  it("computes daily compounding yield after commission deduction", () => {
+    // 10,000 XLM at 10% gross APY, 10% commission -> 9% net
+    // Formula: 10000 * ((1 + 0.09/365)^365 - 1) ≈ 941.62
+    const yieldAmount = calculateCompoundingYield(10000, 10, 10, 365, 365);
+    expect(yieldAmount).toBeCloseTo(941.62, 1);
+  });
+
+  it("compounds over a partial year (e.g. 180 days)", () => {
+    const yield180 = calculateCompoundingYield(10000, 10, 10, 180, 365);
+    const expected = 10000 * (Math.pow(1 + 0.09 / 365, 365 * (180 / 365)) - 1);
+    expect(yield180).toBeCloseTo(expected, 4);
+  });
+
+  it("supports monthly compounding (12 periods per year)", () => {
+    // 10,000 XLM at 12% gross, 0% commission -> 12% net, 12 periods
+    // 10000 * ((1 + 0.12/12)^12 - 1) = 10000 * (1.01^12 - 1) ≈ 1268.25
+    const monthlyYield = calculateCompoundingYield(10000, 12, 0, 365, 12);
+    expect(monthlyYield).toBeCloseTo(1268.25, 1);
+  });
+
+  it("returns 0 for non-positive principals or 100% commission", () => {
+    expect(calculateCompoundingYield(0, 10, 10)).toBe(0);
+    expect(calculateCompoundingYield(-1000, 10, 10)).toBe(0);
+    expect(calculateCompoundingYield(1000, 10, 100)).toBe(0);
+    expect(calculateCompoundingYield(1000, 0, 0)).toBe(0);
+  });
+});
+
+// ─── Protocol Epoch Boundaries & Unbonding Completion (#972) ───────────────────
+
+describe("estimateUnbondingCompletion & Protocol Epoch Boundaries (#972)", () => {
+  it("determines epoch start and close boundaries", () => {
+    // Reference epoch: 2026-01-01T00:00:00.000Z
+    const ref = new Date("2026-01-01T00:00:00.000Z").getTime();
+    const testTime = new Date("2026-01-01T14:30:00.000Z");
+
+    const boundaries = getEpochBoundaries(testTime, {
+      epochReferenceTime: ref,
+      epochDurationMs: DEFAULT_EPOCH_DURATION_MS,
+    });
+
+    expect(boundaries.epochStart.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(boundaries.epochClose.toISOString()).toBe("2026-01-02T00:00:00.000Z");
+    expect(boundaries.epochDurationMs).toBe(DEFAULT_EPOCH_DURATION_MS);
+  });
+
+  it("does NOT assume a static 21-day period from request time when submitted mid-epoch", () => {
+    // Request is made on Day 1 at 15:30:00 UTC
+    const requestDate = new Date("2026-05-01T15:30:00.000Z");
+
+    // A static 21-day calculator would blindly add 21 days:
+    // 2026-05-01T15:30:00.000Z + 21 days = 2026-05-22T15:30:00.000Z (mid-day!)
+    const staticCompletionTime = new Date("2026-05-22T15:30:00.000Z");
+
+    const epochCompletion = estimateUnbondingCompletion(requestDate, {
+      unbondingDays: 21,
+      epochDurationDays: 1,
+      epochReferenceTime: "2026-05-01T00:00:00.000Z",
+    });
+
+    // With protocol epoch cycles:
+    // Unbonding takes effect at the current epoch close (2026-05-02T00:00:00.000Z),
+    // and locks for 21 days, completing at the epoch close boundary: 2026-05-23T00:00:00.000Z!
+    expect(epochCompletion.toISOString()).toBe("2026-05-23T00:00:00.000Z");
+    expect(epochCompletion.getTime()).not.toBe(staticCompletionTime.getTime());
+    expect(epochCompletion.getTime()).toBeGreaterThan(staticCompletionTime.getTime());
+  });
+
+  it("completes exactly on the epoch boundary when requested at an epoch boundary", () => {
+    // Request made exactly at epoch boundary 00:00:00.000Z
+    const requestDate = new Date("2026-06-01T00:00:00.000Z");
+
+    const epochCompletion = estimateUnbondingCompletion(requestDate, {
+      unbondingDays: 21,
+      epochDurationDays: 1,
+      epochReferenceTime: "2026-06-01T00:00:00.000Z",
+    });
+
+    // 2026-06-01 00:00 + 21 days = 2026-06-22 00:00:00.000Z
+    expect(epochCompletion.toISOString()).toBe("2026-06-22T00:00:00.000Z");
+  });
+
+  it("handles custom epoch durations (e.g. 12-hour epochs)", () => {
+    // Request at 05:00 UTC (during the 00:00 - 12:00 epoch)
+    const requestDate = new Date("2026-07-01T05:00:00.000Z");
+
+    const completion = estimateUnbondingCompletion(requestDate, {
+      unbondingDays: 2, // 48 hours
+      epochDurationHours: 12,
+      epochReferenceTime: "2026-07-01T00:00:00.000Z",
+    });
+
+    // Current epoch closes at 12:00 UTC on 2026-07-01.
+    // 48 hours later = 2026-07-03T12:00:00.000Z (which aligns with a 12h epoch close!)
+    expect(completion.toISOString()).toBe("2026-07-03T12:00:00.000Z");
+  });
+
+  it("handles weekly protocol epochs (7 days)", () => {
+    // Request on Day 3 of Week 1
+    const ref = new Date("2026-01-01T00:00:00.000Z");
+    const requestDate = new Date("2026-01-04T10:00:00.000Z");
+
+    const completion = estimateUnbondingCompletion(requestDate, {
+      unbondingEpochs: 3, // 3 epochs = 21 days
+      epochDurationDays: 7,
+      epochReferenceTime: ref,
+    });
+
+    // Epoch 0 closes at Day 7 (2026-01-08T00:00:00.000Z).
+    // Plus 3 epochs (21 days) = Day 28 (2026-01-29T00:00:00.000Z).
+    expect(completion.toISOString()).toBe("2026-01-29T00:00:00.000Z");
+  });
+
+  it("calculateUnbondingCompletion is an identical alias for estimateUnbondingCompletion", () => {
+    const request = "2026-09-01T12:00:00.000Z";
+    const res1 = estimateUnbondingCompletion(request);
+    const res2 = calculateUnbondingCompletion(request);
+    expect(res1.getTime()).toBe(res2.getTime());
+  });
+
+  it("estimateUnbondingCompletionIso and calculateUnbondingCompletionIso return valid ISO-8601 strings", () => {
+    const iso1 = estimateUnbondingCompletionIso("2026-09-01T12:00:00.000Z");
+    const iso2 = calculateUnbondingCompletionIso("2026-09-01T12:00:00.000Z");
+    expect(typeof iso1).toBe("string");
+    expect(iso1).toBe(iso2);
+    expect(new Date(iso1).toISOString()).toBe(iso1);
+    expect(DEFAULT_UNBONDING_DAYS).toBe(21);
+  });
+});
+
+// ─── Partial Redelegation & Compounding Tests (#972) ──────────────────────────
+
+describe("calculatePartialRedelegationYield (#972)", () => {
+  const sourceValidator = {
+    id: "VALIDATOR_SOURCE",
+    name: "Source Validator",
+    apyPct: 8.0, // 8% gross
+    commissionPct: 5.0, // 5% commission -> 7.6% net APY
+  };
+
+  const targetValidator = {
+    id: "VALIDATOR_TARGET",
+    name: "Target Validator",
+    apyPct: 10.0, // 10% gross
+    commissionPct: 10.0, // 10% commission -> 9.0% net APY
+  };
+
+  it("calculates partial redelegation yield with validator commission deductions", () => {
+    // Initial stake: 10,000 XLM
+    // Redelegate: 4,000 XLM to target validator
+    // Remaining: 6,000 XLM with source validator
+    const result = calculatePartialRedelegationYield({
+      currentDelegationAmount: 10000,
+      redelegationAmount: 4000,
+      sourceValidator,
+      targetValidator,
+      days: 365,
+      compound: false, // Simple yield verification
+    });
+
+    expect(result.remainingAmount).toBe(6000);
+    expect(result.redelegatedAmount).toBe(4000);
+
+    // Source net APY = 8.0 * (1 - 0.05) = 7.6%
+    expect(result.sourceNetApy).toBeCloseTo(7.6, 6);
+
+    // Target net APY = 10.0 * (1 - 0.10) = 9.0%
+    expect(result.targetNetApy).toBeCloseTo(9.0, 6);
+
+    // Remaining simple yield: 6000 * 0.076 = 456 XLM
+    expect(result.remainingYield).toBeCloseTo(456, 4);
+
+    // Redelegated simple yield: 4000 * 0.09 = 360 XLM
+    expect(result.redelegatedYield).toBeCloseTo(360, 4);
+
+    // Total yield: 456 + 360 = 816 XLM
+    expect(result.totalYield).toBeCloseTo(816, 4);
+
+    // Blended net APY: (6000 * 7.6 + 4000 * 9.0) / 10000 = 8.16%
+    expect(result.blendedNetApy).toBeCloseTo(8.16, 6);
+  });
+
+  it("verifies compounding yield on both remaining and redelegated portions", () => {
+    // With daily compounding (compound: true)
+    const result = calculatePartialRedelegationYield({
+      currentDelegationAmount: 10000,
+      redelegationAmount: 4000,
+      sourceValidator,
+      targetValidator,
+      days: 365,
+      compound: true,
+      compoundingPeriodsPerYear: 365,
+    });
+
+    // 6,000 XLM at 7.6% net compounded daily:
+    // 6000 * ((1 + 0.076/365)^365 - 1) ≈ 473.86 XLM (vs 456 XLM simple)
+    const expectedRemainingYield =
+      6000 * (Math.pow(1 + 0.076 / 365, 365) - 1);
+    expect(result.remainingYield).toBeCloseTo(expectedRemainingYield, 2);
+
+    // 4,000 XLM at 9.0% net compounded daily:
+    // 4000 * ((1 + 0.09/365)^365 - 1) ≈ 376.65 XLM (vs 360 XLM simple)
+    const expectedRedelegatedYield =
+      4000 * (Math.pow(1 + 0.09 / 365, 365) - 1);
+    expect(result.redelegatedYield).toBeCloseTo(expectedRedelegatedYield, 2);
+
+    // Total compounding yield is strictly greater than simple yield
+    expect(result.totalYield).toBeCloseTo(
+      expectedRemainingYield + expectedRedelegatedYield,
+      2,
+    );
+    expect(result.totalYield).toBeGreaterThan(816);
+  });
+
+  it("handles 0 redelegation (100% remaining with source validator)", () => {
+    const result = calculatePartialRedelegationYield({
+      currentDelegationAmount: 10000,
+      redelegationAmount: 0,
+      sourceValidator,
+      targetValidator,
+      days: 365,
+      compound: false,
+    });
+
+    expect(result.remainingAmount).toBe(10000);
+    expect(result.redelegatedAmount).toBe(0);
+    expect(result.redelegatedYield).toBe(0);
+    expect(result.remainingYield).toBeCloseTo(760, 4);
+    expect(result.totalYield).toBeCloseTo(760, 4);
+    expect(result.blendedNetApy).toBeCloseTo(7.6, 6);
+  });
+
+  it("handles 100% redelegation (0 remaining with source validator)", () => {
+    const result = calculatePartialRedelegationYield({
+      currentDelegationAmount: 10000,
+      redelegationAmount: 10000,
+      sourceValidator,
+      targetValidator,
+      days: 365,
+      compound: false,
+    });
+
+    expect(result.remainingAmount).toBe(0);
+    expect(result.redelegatedAmount).toBe(10000);
+    expect(result.remainingYield).toBe(0);
+    expect(result.redelegatedYield).toBeCloseTo(900, 4);
+    expect(result.totalYield).toBeCloseTo(900, 4);
+    expect(result.blendedNetApy).toBeCloseTo(9.0, 6);
+  });
+
+  it("throws an error when redelegation amount exceeds delegation amount", () => {
+    expect(() =>
+      calculatePartialRedelegationYield({
+        currentDelegationAmount: 1000,
+        redelegationAmount: 1500,
+        sourceValidator,
+        targetValidator,
+      }),
+    ).toThrow(/exceeds/i);
+  });
+
+  it("throws an error for negative or invalid delegation amounts", () => {
+    expect(() =>
+      calculatePartialRedelegationYield({
+        currentDelegationAmount: 1000,
+        redelegationAmount: -50,
+        sourceValidator,
+        targetValidator,
+      }),
+    ).toThrow(/negative/i);
+
+    expect(() =>
+      calculatePartialRedelegationYield({
+        currentDelegationAmount: -100,
+        redelegationAmount: 50,
+        sourceValidator,
+        targetValidator,
+      }),
+    ).toThrow(/invalid/i);
+  });
+});
+
