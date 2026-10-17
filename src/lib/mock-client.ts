@@ -19,7 +19,12 @@ import type {
   TxResult,
   TxStatus,
 } from "./client";
-import { deterministicMock } from "./deterministic-mock";
+import {
+  DEFAULT_MOCK_TIMESTAMP,
+  deterministicMock,
+  DeterministicMockClock,
+  DeterministicMockData,
+} from "./deterministic-mock";
 
 // Valid Stellar testnet address (56 chars: G + 55 uppercase alphanumeric)
 export const MOCK_ADDRESS =
@@ -28,6 +33,59 @@ export const MOCK_ADDRESS =
 // Generate deterministic mock data (consistent across test runs)
 export const MOCK_HISTORY = deterministicMock.generateMockHistory(25);
 export const MOCK_EVENTS = deterministicMock.generateMockEvents(3);
+
+export type MockFailureStep = Error | "success";
+
+export interface MockClientOptions {
+  seed?: number;
+  initialTime?: number;
+}
+
+export type MockSorokitClient = SorokitClient & {
+  /** Inject outcomes for all operations, or a named operation such as `account.getAccount`. */
+  setFailureSequence: (
+    sequence: MockFailureStep[],
+    operation?: string,
+  ) => void;
+  /** Advance this client's mock timestamp without real timers. */
+  advanceTime: (milliseconds: number) => number;
+};
+
+function interceptMockOperations<T extends Record<string, unknown>>(
+  group: T,
+  groupName: string,
+  failureSequences: Map<string, MockFailureStep[]>,
+): T {
+  return new Proxy(group, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+
+      return (...args: unknown[]) => {
+        const operation = `${groupName}.${String(property)}`;
+        const sequenceKey = failureSequences.has(operation)
+          ? operation
+          : "*";
+        const sequence = failureSequences.get(sequenceKey);
+        const outcome = sequence?.shift();
+        if (sequence?.length === 0) failureSequences.delete(sequenceKey);
+        if (outcome instanceof Error) return Promise.reject(outcome);
+        return Reflect.apply(value, target, args);
+      };
+    },
+  });
+}
+
+function rebaseTimestamp<T extends { createdAt: string }>(
+  value: T,
+  currentTime: number,
+): T {
+  const offset = Date.parse(value.createdAt) - DEFAULT_MOCK_TIMESTAMP;
+  return {
+    ...value,
+    createdAt: new Date(currentTime + offset).toISOString(),
+  };
+}
 
 export const NETWORKS = {
   testnet: {
@@ -247,17 +305,38 @@ const MOCK_ALLOWANCES: AllowanceEntry[] = [
  * - Proper pagination support: getHistory slices deterministic transaction records by
  *   page and limit, providing distinct pages and accurate total count for TransactionHistory.
  */
-export function createMockClient(): SorokitClient;
+export function createMockClient(options?: MockClientOptions): MockSorokitClient;
 export function createMockClient(
   networkName: string,
-): SorokitClient | { data: null; error: string };
+  options?: MockClientOptions,
+): MockSorokitClient | { data: null; error: string };
 export function createMockClient(
-  networkName?: string,
-): SorokitClient | { data: null; error: string } {
+  networkNameOrOptions?: string | MockClientOptions,
+  options: MockClientOptions = {},
+): MockSorokitClient | { data: null; error: string } {
+  const networkName =
+    typeof networkNameOrOptions === "string"
+      ? networkNameOrOptions
+      : undefined;
+  const clientOptions =
+    typeof networkNameOrOptions === "object" && networkNameOrOptions !== null
+      ? networkNameOrOptions
+      : options;
   let activeNetwork =
     networkName && networkName in NETWORKS ? networkName : "testnet";
   const connectedAddress = MOCK_ADDRESS;
   const batchProgressState = new Map<string, number>();
+  const clock = new DeterministicMockClock(clientOptions.initialTime);
+  const mockData = new DeterministicMockData(clientOptions.seed, clock);
+  const clientHistory = new DeterministicMockData(
+    clientOptions.seed,
+    clock,
+  ).generateMockHistory(25);
+  const clientEvents = new DeterministicMockData(
+    clientOptions.seed,
+    clock,
+  ).generateMockEvents(3);
+  const failureSequences = new Map<string, MockFailureStep[]>();
 
   if (networkName && !(networkName in NETWORKS)) {
     const validNetworks = Object.keys(NETWORKS).join(", ");
@@ -267,7 +346,7 @@ export function createMockClient(
     };
   }
 
-  return {
+  const client = {
     wallet: {
       connect: async () => ({
         data: { address: connectedAddress },
@@ -293,7 +372,7 @@ export function createMockClient(
         }
         return {
           data: {
-            hash: deterministicMock.generateTransactionHash(),
+            hash: mockData.generateTransactionHash(),
             ledger: 12345,
             successful: true,
           },
@@ -304,7 +383,7 @@ export function createMockClient(
     transaction: {
       submit: async () => ({
         data: {
-          hash: deterministicMock.generateTransactionHash(),
+          hash: mockData.generateTransactionHash(),
           ledger: 12345,
           successful: true,
         },
@@ -319,11 +398,13 @@ export function createMockClient(
       ) => {
         const safePage = Math.max(1, page || 1);
         const pageSize =
-          limit !== undefined && limit > 0 ? limit : MOCK_HISTORY.length;
-        const total = MOCK_HISTORY.length;
+          limit !== undefined && limit > 0 ? limit : clientHistory.length;
+        const total = clientHistory.length;
         const start = (safePage - 1) * pageSize;
         const end = start + pageSize;
-        const history = MOCK_HISTORY.slice(start, end);
+        const history = clientHistory.slice(start, end).map((entry) =>
+          rebaseTimestamp(entry, mockData.now()),
+        );
         return { data: history, error: null, total };
       },
       estimateFee: async () => ({
@@ -437,7 +518,7 @@ export function createMockClient(
         data: {
           success: true,
           result: { status: "ok", output: "mock-invoke-output" },
-          txHash: deterministicMock.generateTransactionHash(),
+          txHash: mockData.generateTransactionHash(),
         },
         error: null,
         status: "success" as const,
@@ -452,10 +533,10 @@ export function createMockClient(
         _limit?: number,
         fromLedger?: number,
       ) => ({
-        data:
-          fromLedger !== undefined
-            ? MOCK_EVENTS.filter((e) => e.ledger >= fromLedger)
-            : MOCK_EVENTS,
+        data: (fromLedger !== undefined
+          ? clientEvents.filter((e) => e.ledger >= fromLedger)
+          : clientEvents
+        ).map((event) => rebaseTimestamp(event, mockData.now())),
         error: null,
       }),
     },
@@ -490,7 +571,7 @@ export function createMockClient(
       getNfts: async (_address: string) => ({ data: [], error: null }),
       sendNft: async () => ({
         data: {
-          hash: deterministicMock.generateTransactionHash(),
+          hash: mockData.generateTransactionHash(),
           ledger: 12345,
           successful: true,
         },
@@ -498,7 +579,7 @@ export function createMockClient(
       }),
       listNftForSale: async () => ({
         data: {
-          hash: deterministicMock.generateTransactionHash(),
+          hash: mockData.generateTransactionHash(),
           ledger: 12345,
           successful: true,
         },
@@ -574,7 +655,7 @@ export function createMockClient(
         amount: string;
       }) => ({
         data: {
-          hash: deterministicMock.generateTransactionHash(),
+          hash: mockData.generateTransactionHash(),
           ledger: 12345,
           successful: true,
         },
@@ -587,7 +668,7 @@ export function createMockClient(
         spender: string;
       }) => ({
         data: {
-          hash: deterministicMock.generateTransactionHash(),
+          hash: mockData.generateTransactionHash(),
           ledger: 12345,
           successful: true,
         },
@@ -625,12 +706,12 @@ export function createMockClient(
             batchId: "",
           };
         }
-        const batchId = `batch-mock-${deterministicMock.generateHex(8)}`;
+        const batchId = `batch-mock-${mockData.generateHex(8)}`;
         const entries: BatchEntryResult[] = params.entries.map((e) => ({
           address: e.address,
           amount: e.amount,
           status: "confirmed" as const,
-          txHash: deterministicMock.generateTransactionHash(),
+          txHash: mockData.generateTransactionHash(),
           retryCount: 0,
         }));
         const batchResult: BatchResult = {
@@ -685,5 +766,42 @@ export function createMockClient(
         error: null,
       }),
     },
-  } as SorokitClient;
+    setFailureSequence: (
+      sequence: MockFailureStep[],
+      operation = "*",
+    ) => {
+      failureSequences.set(operation, [...sequence]);
+    },
+    advanceTime: (milliseconds: number) =>
+      mockData.advanceTime(milliseconds),
+  };
+
+  return new Proxy(client as MockSorokitClient, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (
+        typeof property === "string" &&
+        [
+          "wallet",
+          "account",
+          "transaction",
+          "soroban",
+          "network",
+          "nft",
+          "operation",
+          "allowance",
+          "batch",
+        ].includes(property) &&
+        typeof value === "object" &&
+        value !== null
+      ) {
+        return interceptMockOperations(
+          value as Record<string, unknown>,
+          property,
+          failureSequences,
+        );
+      }
+      return value;
+    },
+  });
 }

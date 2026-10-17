@@ -9,14 +9,31 @@
  * them directly when you need a continuous sequence.
  */
 
+export const DEFAULT_MOCK_TIMESTAMP = 1700000000000;
+
 export class DeterministicMockData {
   private initialSeed: number;
   private seed: number;
+	private readonly clock: DeterministicMockClock;
 
-  constructor(seedValue: number = 12345) {
+	constructor(
+		seedValue: number = 12345,
+		clock: DeterministicMockClock = new DeterministicMockClock(),
+	) {
     this.initialSeed = seedValue;
     this.seed = seedValue;
+		this.clock = clock;
   }
+
+	/** Current deterministic time in milliseconds since the Unix epoch. */
+	now(): number {
+		return this.clock.now();
+	}
+
+	/** Advance this data generator's clock without waiting in real time. */
+	advanceTime(milliseconds: number): number {
+		return this.clock.advanceTime(milliseconds);
+	}
 
   /** Reset the seed back to its initial value. */
   reset(): void {
@@ -67,7 +84,7 @@ export class DeterministicMockData {
 			history.push({
 				hash: this.generateTransactionHash(),
 				ledger: 12345 - i,
-				createdAt: new Date(1700000000000 - i * 1000).toISOString(),
+				createdAt: new Date(this.clock.now() - i * 1000).toISOString(),
 				successful: true,
 				operationCount: 1,
 				feePaid: '100',
@@ -87,12 +104,36 @@ export class DeterministicMockData {
 				contractId: this.generateHex(56),
 				type: 'contract',
 				ledger: 12345 - i,
-				createdAt: new Date(1700000000000 - i * 500).toISOString(),
+				createdAt: new Date(this.clock.now() - i * 500).toISOString(),
 				topics: [this.generateHex(32), this.generateHex(32)],
 				value: this.generateHex(64),
 			});
 		}
 		return events;
+	}
+}
+
+/** Manual clock shared by deterministic mock data generators and clients. */
+export class DeterministicMockClock {
+	private currentTime: number;
+
+	constructor(initialTime: number = DEFAULT_MOCK_TIMESTAMP) {
+		if (!Number.isFinite(initialTime)) {
+			throw new RangeError("Mock clock time must be a finite number.");
+		}
+		this.currentTime = initialTime;
+	}
+
+	now(): number {
+		return this.currentTime;
+	}
+
+	advanceTime(milliseconds: number): number {
+		if (!Number.isFinite(milliseconds) || milliseconds < 0) {
+			throw new RangeError("Mock clock can only advance by a finite non-negative duration.");
+		}
+		this.currentTime += milliseconds;
+		return this.currentTime;
 	}
 }
 
