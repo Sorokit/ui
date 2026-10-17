@@ -30,7 +30,7 @@ function isPredicateExpired(predicate: unknown, _currentTime: number): boolean {
   return false;
 }
 
-interface BalanceRowProps {
+export interface BalanceRowProps {
   cb: ClaimableBalance;
   confirmThreshold?: string;
   currentTime?: number;
@@ -42,7 +42,8 @@ interface BalanceRowProps {
   onClaimed?: (id: string) => void;
 }
 
-function BalanceRow({
+/** A single claimable balance row. Exported for direct testing. */
+export function BalanceRow({
   cb,
   confirmThreshold,
   currentTime = Date.now(),

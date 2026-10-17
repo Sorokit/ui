@@ -155,7 +155,10 @@ export function AssetBadge({
         <span className={cn("font-medium text-ink leading-none", labelSize)}>
           {code}
           {issuerSuffix && (
-            <span className="text-ink-3 font-normal ml-1 text-[11px]">
+            <span
+              className="text-ink-3 font-normal ml-1 text-[11px]"
+              title={balance.assetIssuer}
+            >
               ({issuerSuffix})
             </span>
           )}
@@ -168,7 +171,9 @@ export function AssetBadge({
               Liquidity Pool Shares
             </span>
           ) : balance.assetIssuer ? (
-            <span data-address className={subSize}>
+            // The full issuer key is exposed as a tooltip since only a
+            // truncated form fits in the badge.
+            <span data-address className={subSize} title={balance.assetIssuer}>
               {truncateAddress(balance.assetIssuer, 6, 4)}
             </span>
           ) : null)}

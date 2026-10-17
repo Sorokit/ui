@@ -22,7 +22,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -69,6 +69,8 @@ export interface GovernanceProposal {
   votesAbstain: number;
   /** Optional ISO-8601 timestamp for when voting closes. */
   endsAt?: string;
+  /** The connected account's recorded vote on this proposal, if any. */
+  userVote?: VoteChoice;
 }
 
 export type VoteChoice = "yes" | "no" | "abstain";
@@ -107,6 +109,12 @@ function toStringField(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function toVoteChoice(value: unknown): VoteChoice | undefined {
+  return value === "yes" || value === "no" || value === "abstain"
+    ? value
+    : undefined;
+}
+
 function normalizeProposals(data: unknown): GovernanceProposal[] {
   if (!Array.isArray(data)) return [];
   return data.map((raw, i) => {
@@ -120,6 +128,7 @@ function normalizeProposals(data: unknown): GovernanceProposal[] {
       votesAgainst: toNumber(p.votesAgainst),
       votesAbstain: toNumber(p.votesAbstain),
       endsAt: typeof p.endsAt === "string" ? p.endsAt : undefined,
+      userVote: toVoteChoice(p.userVote),
     };
   });
 }
@@ -157,7 +166,13 @@ function statusVariant(
 function VoteBar({ proposal }: { proposal: GovernanceProposal }) {
   const total =
     proposal.votesFor + proposal.votesAgainst + proposal.votesAbstain;
-  const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+  // A proposal with no votes yet renders an empty (0%) bar instead of the
+  // NaN% widths `n / 0` would produce.
+  const pct = (n: number) => {
+    if (total <= 0) return 0;
+    const value = (n / total) * 100;
+    return Number.isFinite(value) ? value : 0;
+  };
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -174,6 +189,9 @@ function VoteBar({ proposal }: { proposal: GovernanceProposal }) {
         <span className="text-green">For {proposal.votesFor}</span>
         <span className="text-red">Against {proposal.votesAgainst}</span>
         <span className="text-ink-3">Abstain {proposal.votesAbstain}</span>
+        <span className="ml-auto text-ink-3" data-testid="vote-approval">
+          {total > 0 ? `${Math.round(pct(proposal.votesFor))}% for` : "No votes yet"}
+        </span>
       </div>
     </div>
   );
@@ -189,7 +207,8 @@ interface ProposalCardProps {
 
 function ProposalCard({ proposal, disabled: walletDisabled, onVote }: ProposalCardProps) {
   const votingClosed = isVotingClosed(proposal.status);
-  const disabled = walletDisabled || votingClosed;
+  const hasVoted = proposal.userVote !== undefined;
+  const disabled = walletDisabled || votingClosed || hasVoted;
   return (
     <div
       role="listitem"
@@ -234,6 +253,11 @@ function ProposalCard({ proposal, disabled: walletDisabled, onVote }: ProposalCa
         >
           Vote Abstain
         </Button>
+        {proposal.userVote && (
+          <span className="self-center text-[11px] text-ink-2" data-testid="user-vote-note">
+            You voted: {VOTE_LABELS[proposal.userVote]}
+          </span>
+        )}
         {votingClosed && (
           <span className="self-center text-[11px] text-ink-3" data-testid="voting-closed-note">
             Voting closed
@@ -264,6 +288,7 @@ function VoteDialog({
   onCancel,
 }: VoteDialogProps) {
   const open = proposal !== null && choice !== null;
+  const priorVote = proposal?.userVote;
 
   return (
     <Dialog.Root
@@ -309,6 +334,11 @@ function VoteDialog({
               <p className="mt-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-[13px] font-medium text-ink">
                 {proposal.title}
               </p>
+              {priorVote && (
+                <p className="mt-2 text-[12px] text-ink-2" data-testid="prior-vote-note">
+                  You voted: {VOTE_LABELS[priorVote]}. Each account can only vote once.
+                </p>
+              )}
             </div>
           )}
 
@@ -335,7 +365,7 @@ function VoteDialog({
               size="md"
               className="flex-1"
               loading={submitting}
-              disabled={submitting}
+              disabled={submitting || priorVote !== undefined}
               onClick={onConfirm}
             >
               {submitting ? "Submitting…" : "Confirm vote"}
@@ -367,8 +397,24 @@ function DelegationPanel({
   onRevoke,
 }: DelegationPanelProps) {
   const [value, setValue] = useState("");
+  // Set once the user has typed or tried to submit, so an empty field only
+  // shows an error after interaction rather than on first render.
+  const [touched, setTouched] = useState(false);
   const trimmed = value.trim();
-  const invalid = trimmed !== "" && !validateStellarAddress(trimmed);
+  const empty = trimmed === "";
+  const invalid = !empty && !validateStellarAddress(trimmed);
+  const validationError = invalid
+    ? "Enter a valid Stellar address."
+    : touched && empty
+      ? "Enter a delegate address."
+      : undefined;
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setTouched(true);
+    if (disabled || submitting || empty || invalid) return;
+    onDelegate(trimmed);
+  };
 
   return (
     <Card>
@@ -393,31 +439,41 @@ function DelegationPanel({
           )}
         </div>
 
-        <Input
-          label="Delegate to"
-          placeholder="G… account address"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          error={invalid ? "Enter a valid Stellar address." : undefined}
-          disabled={disabled || submitting}
-          aria-label="Delegate address"
-        />
-
-        {error && (
-          <p role="alert" className="text-[11px] text-red">
-            {error}
-          </p>
-        )}
-
-        <Button
-          size="sm"
-          className="self-start"
-          loading={submitting}
-          disabled={disabled || submitting || trimmed === "" || invalid}
-          onClick={() => onDelegate(trimmed)}
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={handleSubmit}
+          noValidate
+          aria-label="Delegate voting power"
         >
-          {submitting ? "Delegating…" : "Delegate votes"}
-        </Button>
+          <Input
+            label="Delegate to"
+            placeholder="G… account address"
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setTouched(true);
+            }}
+            error={validationError}
+            disabled={disabled || submitting}
+            aria-label="Delegate address"
+          />
+
+          {error && (
+            <p role="alert" className="text-[11px] text-red">
+              {error}
+            </p>
+          )}
+
+          <Button
+            type="submit"
+            size="sm"
+            className="self-start"
+            loading={submitting}
+            disabled={disabled || submitting || empty || invalid}
+          >
+            {submitting ? "Delegating…" : "Delegate votes"}
+          </Button>
+        </form>
         {currentDelegate && (
           <Button
             size="sm"
@@ -453,6 +509,11 @@ export function GovernanceDashboard({
   const [pendingChoice, setPendingChoice] = useState<VoteChoice | null>(null);
   const [voting, setVoting] = useState(false);
   const [voteError, setVoteError] = useState<string | null>(null);
+  // Votes cast in the current session, keyed by `${address}:${proposalId}` so
+  // records never leak across accounts. The contract may not report
+  // `userVote` (or may lag behind), so a successful vote is remembered locally
+  // to block duplicate submissions.
+  const [sessionVotes, setSessionVotes] = useState<Record<string, VoteChoice>>({});
 
   // Delegation state.
   const [delegate, setDelegate] = useState<string | null>(null);
@@ -529,6 +590,8 @@ export function GovernanceDashboard({
 
   const confirmVote = useCallback(async () => {
     if (!pendingProposal || !pendingChoice || !client) return;
+    // Never submit a second vote for a proposal this account already voted on.
+    if (pendingProposal.userVote) return;
     setVoting(true);
     setVoteError(null);
 
@@ -551,6 +614,9 @@ export function GovernanceDashboard({
       return;
     }
 
+    const voteKey = `${address ?? ""}:${pendingProposal.id}`;
+    const votedChoice = pendingChoice;
+    setSessionVotes((prev) => ({ ...prev, [voteKey]: votedChoice }));
     setNotice(
       `Vote recorded: ${VOTE_LABELS[pendingChoice]} on "${pendingProposal.title}".`,
     );
@@ -561,7 +627,7 @@ export function GovernanceDashboard({
 
   const submitDelegation = useCallback(
     async (target: string) => {
-      if (!target || !client) return;
+      if (!target || !client || !validateStellarAddress(target)) return;
       setDelegating(true);
       setDelegateError(null);
 
@@ -609,6 +675,16 @@ export function GovernanceDashboard({
     setNotice("Delegation revoked. You are voting for yourself again.");
     setReloadKey((k) => k + 1);
   }, [client, contractId, address]);
+
+  // Merge the contract's vote records with votes cast this session.
+  const proposalsWithVotes = useMemo(
+    () =>
+      proposals.map((p) => {
+        const sessionVote = sessionVotes[`${address ?? ""}:${p.id}`];
+        return p.userVote || !sessionVote ? p : { ...p, userVote: sessionVote };
+      }),
+    [proposals, sessionVotes, address],
+  );
 
   return (
     <div className={cn("flex flex-col gap-5", className)}>
@@ -670,7 +746,7 @@ export function GovernanceDashboard({
             </p>
           ) : (
             <div role="list" aria-label="Governance proposals" className="flex flex-col gap-3">
-              {proposals.map((proposal) => (
+              {proposalsWithVotes.map((proposal) => (
                 <ProposalCard
                   key={proposal.id}
                   proposal={proposal}

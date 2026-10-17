@@ -427,6 +427,213 @@ describe("GovernanceDashboard", () => {
     });
   });
 
+  // ─── Zero-vote progress bars (#935) ─────────────────────────────────────────
+  describe("zero-vote proposals", () => {
+    const ZERO_VOTES: GovernanceProposal = {
+      id: "z",
+      title: "Brand new proposal",
+      description: "Nobody has voted yet.",
+      status: "active",
+      votesFor: 0,
+      votesAgainst: 0,
+      votesAbstain: 0,
+    };
+
+    it("renders a clean 0% bar without NaN when total votes is zero", async () => {
+      const { client } = makeClient({ proposals: [ZERO_VOTES] });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      const card = (await screen.findByText("Brand new proposal")).closest(
+        '[role="listitem"]',
+      ) as HTMLElement;
+      const bar = within(card).getByRole("img");
+      const segments = Array.from(bar.children) as HTMLElement[];
+      expect(segments).toHaveLength(3);
+      for (const segment of segments) {
+        expect(segment.style.width).toBe("0%");
+      }
+      expect(card.innerHTML).not.toMatch(/NaN/);
+      expect(within(card).getByTestId("vote-approval")).toHaveTextContent("No votes yet");
+    });
+
+    it("treats malformed vote counts as zero instead of NaN", async () => {
+      const { client } = makeClient({
+        proposals: [{ ...ZERO_VOTES, votesFor: "abc", votesAgainst: null, votesAbstain: undefined }],
+      });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      const card = (await screen.findByText("Brand new proposal")).closest(
+        '[role="listitem"]',
+      ) as HTMLElement;
+      expect(card.innerHTML).not.toMatch(/NaN/);
+      expect(within(card).getByText("For 0")).toBeInTheDocument();
+    });
+
+    it("shows the approval percentage once votes exist", async () => {
+      const { client } = makeClient();
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByText("Increase validator rewards");
+      const [first] = screen.getAllByRole("listitem");
+      // 120 of 160 votes are "for".
+      expect(within(first).getByTestId("vote-approval")).toHaveTextContent("75% for");
+    });
+  });
+
+  // ─── Prior votes (#935) ───────────────────────────────────────────────────
+  describe("prior votes", () => {
+    it("indicates the account's recorded vote and disables repeat voting", async () => {
+      const { client, invokeContract } = makeClient({
+        proposals: [{ ...PROPOSALS[0], userVote: "no" }, PROPOSALS[1]],
+      });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByText("Increase validator rewards");
+      const [voted, notVoted] = screen.getAllByRole("listitem");
+
+      expect(within(voted).getByTestId("user-vote-note")).toHaveTextContent("You voted: No");
+      expect(within(voted).getByRole("button", { name: "Vote Yes" })).toBeDisabled();
+      expect(within(voted).getByRole("button", { name: "Vote No" })).toBeDisabled();
+      expect(within(voted).getByRole("button", { name: "Vote Abstain" })).toBeDisabled();
+
+      expect(within(notVoted).queryByTestId("user-vote-note")).not.toBeInTheDocument();
+      expect(within(notVoted).getByRole("button", { name: "Vote Yes" })).toBeEnabled();
+
+      fireEvent.click(within(voted).getByRole("button", { name: "Vote Yes" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(invokeContract).not.toHaveBeenCalledWith(expect.objectContaining({ method: "vote" }));
+    });
+
+    it("ignores an unrecognised userVote value from the contract", async () => {
+      const { client } = makeClient({
+        proposals: [{ ...PROPOSALS[0], userVote: "maybe" }],
+      });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByText("Increase validator rewards");
+      const [card] = screen.getAllByRole("listitem");
+      expect(within(card).queryByTestId("user-vote-note")).not.toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Vote Yes" })).toBeEnabled();
+    });
+
+    it("blocks a duplicate vote after a successful vote even if the contract does not report it", async () => {
+      const { client, invokeContract } = makeClient();
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByText("Increase validator rewards");
+      fireEvent.click(
+        within(screen.getAllByRole("listitem")[0]).getByRole("button", { name: "Vote Yes" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: /confirm vote/i }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(/vote recorded/i),
+      );
+      await waitFor(() =>
+        expect(
+          within(screen.getAllByRole("listitem")[0]).getByTestId("user-vote-note"),
+        ).toHaveTextContent("You voted: Yes"),
+      );
+
+      const first = screen.getAllByRole("listitem")[0];
+      expect(within(first).getByRole("button", { name: "Vote Yes" })).toBeDisabled();
+      expect(within(first).getByRole("button", { name: "Vote No" })).toBeDisabled();
+      fireEvent.click(within(first).getByRole("button", { name: "Vote No" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(invokeContract.mock.calls.filter(([p]) => p.method === "vote")).toHaveLength(1);
+    });
+  });
+
+  // ─── Delegate address validation (#935) ────────────────────────────────────
+  describe("delegate address validation", () => {
+    it("shows an inline error and does not call the contract when submitting an empty address", async () => {
+      const { client, invokeContract } = makeClient({ delegate: null });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+      await screen.findByTestId("current-delegate");
+
+      const input = screen.getByLabelText("Delegate address");
+      expect(input).not.toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("button", { name: /delegate votes/i })).toBeDisabled();
+
+      fireEvent.submit(screen.getByRole("form", { name: /delegate voting power/i }));
+
+      expect(screen.getByText(/enter a delegate address/i)).toBeInTheDocument();
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(invokeContract).not.toHaveBeenCalledWith(
+        expect.objectContaining({ method: "delegate" }),
+      );
+    });
+
+    it("shows an inline error when a typed address is cleared back to empty", async () => {
+      const user = userEvent.setup();
+      const { client } = makeClient({ delegate: null });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+      await screen.findByTestId("current-delegate");
+
+      const input = screen.getByLabelText("Delegate address");
+      await user.type(input, "G");
+      await user.clear(input);
+
+      expect(screen.getByText(/enter a delegate address/i)).toBeInTheDocument();
+      expect(input).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("does not call the contract when submitting a malformed address via Enter", async () => {
+      const user = userEvent.setup();
+      const { client, invokeContract } = makeClient({ delegate: null });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+      await screen.findByTestId("current-delegate");
+
+      const input = screen.getByLabelText("Delegate address");
+      // Right length and alphabet, but a broken checksum.
+      await user.type(input, `${VALID_ADDRESS.slice(0, -1)}A{Enter}`);
+
+      expect(screen.getByText(/enter a valid stellar address/i)).toBeInTheDocument();
+      expect(input).toHaveAttribute("aria-invalid", "true");
+      expect(invokeContract).not.toHaveBeenCalledWith(
+        expect.objectContaining({ method: "delegate" }),
+      );
+    });
+
+    it("submits a valid address via Enter and clears the validation state", async () => {
+      const user = userEvent.setup();
+      const { client, invokeContract } = makeClient({ delegate: null });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+      await screen.findByTestId("current-delegate");
+
+      const input = screen.getByLabelText("Delegate address");
+      await user.type(input, `${VALID_ADDRESS}{Enter}`);
+
+      expect(input).not.toHaveAttribute("aria-invalid", "true");
+      await waitFor(() =>
+        expect(invokeContract).toHaveBeenCalledWith(
+          expect.objectContaining({ method: "delegate", args: [VALID_ADDRESS] }),
+        ),
+      );
+    });
+  });
+
   // ─── Delegation revocation ─────────────────────────────────────────────────
   describe("delegation revocation", () => {
     it("hides the revoke button when there is no delegate", async () => {

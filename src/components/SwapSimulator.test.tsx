@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 
@@ -494,6 +494,196 @@ describe("SwapSimulator", () => {
       expect(btn).toBeDisabled();
       fireEvent.click(btn);
       expect(onSwap).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- Slippage enforcement, direction inversion & chart resizing (#921) ----
+
+  describe("minimum received (#921)", () => {
+    // Constant-product quote with the simulator's 0.3% fee.
+    const quote = (amountIn: number, reserveIn: number, reserveOut: number) => {
+      const net = amountIn * (1 - 0.003);
+      return (reserveOut * net) / (reserveIn + net);
+    };
+    const fmt = (n: number) =>
+      n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 });
+
+    it("displays amountOut * (1 - slippage / 100) as the minimum received", () => {
+      render(<SwapSimulator />);
+      const expectedOut = quote(100, 100000, 12000);
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(
+        `${fmt(expectedOut * (1 - 0.5 / 100))} USDC`,
+      );
+    });
+
+    it("recalculates the minimum received when the slippage tolerance changes", () => {
+      render(<SwapSimulator />);
+      fireEvent.change(screen.getByLabelText("Max Slippage Tolerance (%)"), {
+        target: { value: "3" },
+      });
+      const expectedOut = quote(100, 100000, 12000);
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(
+        `${fmt(expectedOut * (1 - 3 / 100))} USDC`,
+      );
+    });
+
+    it("shows a placeholder instead of a minimum when slippage is invalid", () => {
+      render(<SwapSimulator />);
+      fireEvent.change(screen.getByLabelText("Max Slippage Tolerance (%)"), {
+        target: { value: "abc" },
+      });
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent("—");
+    });
+
+    it("passes minAmountOut to onSwap when the executed output meets the minimum", async () => {
+      vi.useFakeTimers();
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      const onSwap = vi.fn();
+      render(<SwapSimulator onSwap={onSwap} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /swap assets/i }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      const expectedOut = quote(100, 100000, 12000);
+      expect(onSwap).toHaveBeenCalledTimes(1);
+      const params = onSwap.mock.calls[0][0];
+      expect(params.amountOut).toBeCloseTo(expectedOut, 10);
+      expect(params.minAmountOut).toBeCloseTo(expectedOut * (1 - 0.5 / 100), 10);
+      expect(params.amountOut).toBeGreaterThanOrEqual(params.minAmountOut);
+      vi.useRealTimers();
+    });
+
+    it("reverts the swap when the executed output falls below the minimum received", async () => {
+      vi.useFakeTimers();
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      const onSwap = vi.fn();
+      render(<SwapSimulator onSwap={onSwap} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /swap assets/i }));
+      // Liquidity drains while the swap is pending, so the pool now returns
+      // less than the minimum the user accepted.
+      fireEvent.click(screen.getByText(/low liq/i));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      expect(onSwap).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/swap reverted/i);
+      expect(screen.getByRole("alert")).toHaveTextContent(/minimum received/i);
+      expect(screen.queryByText(/swap completed successfully/i)).not.toBeInTheDocument();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("direction inversion (#921)", () => {
+    it("preserves the entered amount and re-quotes against the inverted reserves", () => {
+      render(<SwapSimulator />);
+      const input = screen.getByPlaceholderText("0.0") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "250" } });
+
+      fireEvent.click(screen.getByLabelText("Flip input and output assets"));
+
+      const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
+      expect(selects[0].value).toBe("USDC");
+      expect(selects[1].value).toBe("XLM");
+      expect(input.value).toBe("250");
+
+      // USDC -> XLM uses the inverted pool (12,000 USDC / 100,000 XLM).
+      const net = 250 * (1 - 0.003);
+      const expectedOut = (100000 * net) / (12000 + net);
+      expect(
+        screen.getByText(
+          expectedOut.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 }),
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/1 USDC = .* XLM/)).toBeInTheDocument();
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(/XLM$/);
+    });
+
+    it("restores the original quote when flipped twice", () => {
+      render(<SwapSimulator />);
+      const before = screen.getByTestId("swap-min-received").textContent;
+      const flip = screen.getByLabelText("Flip input and output assets");
+      fireEvent.click(flip);
+      expect(screen.getByTestId("swap-min-received").textContent).not.toBe(before);
+      fireEvent.click(flip);
+      expect(screen.getByTestId("swap-min-received").textContent).toBe(before);
+      expect((screen.getByPlaceholderText("0.0") as HTMLInputElement).value).toBe("100");
+    });
+  });
+
+  describe("price impact chart resizing (#921)", () => {
+    type ResizeCallback = (entries: Array<{ contentRect: { width: number; height: number } }>) => void;
+    let callbacks: ResizeCallback[];
+    let observe: ReturnType<typeof vi.fn>;
+    let disconnect: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      callbacks = [];
+      observe = vi.fn();
+      disconnect = vi.fn();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: ResizeCallback) {
+            callbacks.push(cb);
+          }
+          observe = observe;
+          unobserve = vi.fn();
+          disconnect = disconnect;
+        },
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const resizeTo = (width: number, height: number) => {
+      act(() => {
+        callbacks.forEach((cb) => cb([{ contentRect: { width, height } }]));
+      });
+    };
+
+    it("observes the chart container and updates the SVG viewport on resize", () => {
+      render(<SwapSimulator />);
+      const chart = screen.getByTestId("price-impact-chart");
+      expect(observe).toHaveBeenCalledWith(chart.parentElement);
+
+      resizeTo(320, 114);
+      expect(chart).toHaveAttribute("viewBox", "0 0 320 114");
+      expect(chart).toHaveAttribute("width", "320");
+      expect(chart).toHaveAttribute("height", "114");
+
+      // Orientation change.
+      resizeTo(180.4, 240.6);
+      expect(chart).toHaveAttribute("viewBox", "0 0 180 241");
+    });
+
+    it("ignores zero-size entries so a hidden chart does not collapse", () => {
+      render(<SwapSimulator />);
+      const chart = screen.getByTestId("price-impact-chart");
+      resizeTo(320, 114);
+      resizeTo(0, 0);
+      expect(chart).toHaveAttribute("viewBox", "0 0 320 114");
+    });
+
+    it("keeps the trade marker circular by plotting it in viewport coordinates", () => {
+      render(<SwapSimulator />);
+      resizeTo(400, 100);
+      const circles = screen.getByTestId("price-impact-chart").querySelectorAll("circle");
+      expect(circles.length).toBeGreaterThan(0);
+      // 100 of a 500 max size -> 20% across a 400px-wide viewport.
+      expect(Number(circles[0].getAttribute("cx"))).toBeCloseTo(80, 5);
+      expect(circles[0].closest("g[transform]")).toBeNull();
+    });
+
+    it("disconnects the observer on unmount", () => {
+      const { unmount } = render(<SwapSimulator />);
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
     });
   });
 });
