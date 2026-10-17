@@ -84,6 +84,7 @@ export function TransactionPanel({
   const [isBuildingPreview, setIsBuildingPreview] = useState(false);
   const [estimatedFeeXlm, setEstimatedFeeXlm] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isSubmittingRef = useRef(false);
   const formId = useId();
 
   // Fetch the current network fee estimate once a wallet is connected so the
@@ -158,12 +159,13 @@ export function TransactionPanel({
 
   /** The actual submission — only ever called from the confirm modal. */
   async function submitTransaction() {
-    if (state === "loading") return;
+    if (state === "loading" || isSubmittingRef.current) return;
     if (!address || !client) {
       setError("Wallet not connected");
       setState("error");
       return;
     }
+    isSubmittingRef.current = true;
 
     // Cancel previous requests
     abortControllerRef.current?.abort();
@@ -210,13 +212,15 @@ export function TransactionPanel({
       }
     } finally {
       setPreview(null);
+      isSubmittingRef.current = false;
     }
   }
 
   /** Builds a preview of the transaction and opens the confirmation modal. */
   async function buildPreview() {
     const sourceAddress = address;
-    if (!sourceAddress) return;
+    if (!sourceAddress || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setIsBuildingPreview(true);
     try {
       const { data: feeData } = client ? await client.transaction.estimateFee() : { data: null };
@@ -239,13 +243,15 @@ export function TransactionPanel({
       });
     } finally {
       setIsBuildingPreview(false);
+      isSubmittingRef.current = false;
     }
   }
 
   /** Form submit handler — fires on Send button click and Enter key press. */
   function handleFormSubmit(e: React.SyntheticEvent) {
     e.preventDefault();
-    if (state === "loading" || !address || !canSubmit) return;
+    if (state === "loading" || !address || !canSubmit || isSubmittingRef.current)
+      return;
     if (previewMode) {
       void buildPreview();
     } else {

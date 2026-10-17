@@ -17,7 +17,16 @@ type Signer = {
   signed: boolean;
 };
 
+/**
+ * Bumped whenever the shape of the persisted state changes in a way that
+ * isn't just adding an optional field (#900). `migrateBuilderState` below
+ * must grow a branch for every version bump so older saved state keeps
+ * loading instead of being treated as corrupt and wiped.
+ */
+const CURRENT_SCHEMA_VERSION = 1;
+
 interface BuilderState {
+  schemaVersion: number;
   signers: Signer[];
   threshold: number;
   xdr: string;
@@ -37,9 +46,9 @@ function isValidSigner(obj: unknown): obj is Signer {
   );
 }
 
-function isValidBuilderState(parsed: unknown): parsed is BuilderState {
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-  const s = parsed as Record<string, unknown>;
+/** Structural check shared by every schema version: the fields below never
+ *  change shape across a migration, only whether `schemaVersion` is present. */
+function hasValidBuilderFields(s: Record<string, unknown>): boolean {
   if ("signers" in s && s.signers !== undefined) {
     if (!Array.isArray(s.signers) || !s.signers.every(isValidSigner)) return false;
   }
@@ -50,6 +59,31 @@ function isValidBuilderState(parsed: unknown): parsed is BuilderState {
   if ("status" in s && s.status !== undefined && typeof s.status !== "string") return false;
   if ("notes" in s && s.notes !== undefined && typeof s.notes !== "string") return false;
   return true;
+}
+
+/**
+ * Validates (and migrates) a parsed `STORAGE_KEY` payload in one pass.
+ * Pre-#900 saves never wrote a `schemaVersion` field at all (version 0, the
+ * implicit starting point before versioning existed). Rather than rejecting
+ * that shape outright and silently clearing a user's real saved transaction,
+ * it's recognized here and stamped with the current version so it loads
+ * normally. Returns null when the state doesn't match any known shape,
+ * legacy or current, so the caller can fall back to treating it as corrupt.
+ */
+function migrateBuilderState(parsed: unknown): BuilderState | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const s = parsed as Record<string, unknown>;
+
+  if (s.schemaVersion === CURRENT_SCHEMA_VERSION) {
+    return hasValidBuilderFields(s) ? (s as unknown as BuilderState) : null;
+  }
+
+  // Legacy (pre-versioning) shape: no schemaVersion field at all.
+  if (s.schemaVersion === undefined && hasValidBuilderFields(s)) {
+    return { ...(s as Omit<BuilderState, "schemaVersion">), schemaVersion: CURRENT_SCHEMA_VERSION };
+  }
+
+  return null;
 }
 
 const STORAGE_KEY = "sorokit-multisig-builder-state";
@@ -119,6 +153,26 @@ function validateThreshold(signers: Signer[], threshold: number) {
   return { totalWeight, valid };
 }
 
+/** Indices of signers whose trimmed, non-empty address repeats an earlier
+ *  signer's address. A signer with a blank address is not yet a duplicate of
+ *  anything, so empty values are excluded. */
+function findDuplicateSignerIndices(signers: Signer[]): Set<number> {
+  const seen = new Map<string, number>();
+  const duplicates = new Set<number>();
+  signers.forEach((signer, index) => {
+    const address = signer.address.trim();
+    if (!address) return;
+    const firstIndex = seen.get(address);
+    if (firstIndex === undefined) {
+      seen.set(address, index);
+    } else {
+      duplicates.add(firstIndex);
+      duplicates.add(index);
+    }
+  });
+  return duplicates;
+}
+
 export function MultiSigTransactionBuilder() {
   const [step, setStep] = useState<Step>(0);
   const [signers, setSigners] = useState<Signer[]>([createSigner()]);
@@ -131,6 +185,8 @@ export function MultiSigTransactionBuilder() {
   const { success: showSuccessToast } = useToast();
 
   const { totalWeight, valid } = useMemo(() => validateThreshold(signers, threshold), [signers, threshold]);
+  const duplicateSignerIndices = useMemo(() => findDuplicateSignerIndices(signers), [signers]);
+  const hasDuplicateSigners = duplicateSignerIndices.size > 0;
 
   useEffect(() => {
     if (step === 0) return;
@@ -161,7 +217,7 @@ export function MultiSigTransactionBuilder() {
       return;
     }
 
-    const payload: BuilderState = { signers, threshold, xdr, status, notes };
+    const payload: BuilderState = { schemaVersion: CURRENT_SCHEMA_VERSION, signers, threshold, xdr, status, notes };
     storage.setItem(STORAGE_KEY, JSON.stringify(payload));
     setSavedMessage("Saved transaction JSON");
   }
@@ -180,7 +236,8 @@ export function MultiSigTransactionBuilder() {
     }
     try {
       const parsed = JSON.parse(raw);
-      if (!isValidBuilderState(parsed)) {
+      const migrated = migrateBuilderState(parsed);
+      if (!migrated) {
         storage.removeItem(STORAGE_KEY);
         setSigners([createSigner()]);
         setThreshold(1);
@@ -191,11 +248,11 @@ export function MultiSigTransactionBuilder() {
         setLoadedMessage("Saved state was corrupt or invalid and has been reset");
         return;
       }
-      setSigners(parsed.signers ?? [createSigner()]);
-      setThreshold(parsed.threshold ?? 1);
-      setXdr(parsed.xdr ?? "<tx:xdr:placeholder>");
-      setStatus(parsed.status ?? "Draft");
-      setNotes(parsed.notes ?? "");
+      setSigners(migrated.signers ?? [createSigner()]);
+      setThreshold(migrated.threshold ?? 1);
+      setXdr(migrated.xdr ?? "<tx:xdr:placeholder>");
+      setStatus(migrated.status ?? "Draft");
+      setNotes(migrated.notes ?? "");
       setStep(1);
       setLoadedMessage("Loaded saved transaction");
     } catch {
@@ -262,7 +319,12 @@ export function MultiSigTransactionBuilder() {
                       ) : null}
                     </div>
                     <div className="grid gap-3 md:grid-cols-2">
-                      <Input label={`Signer ${index + 1} address`} placeholder="G..." value={signer.address} onChange={(event) => updateSigner(index, { address: event.target.value })} />
+                      <div>
+                        <Input label={`Signer ${index + 1} address`} placeholder="G..." value={signer.address} onChange={(event) => updateSigner(index, { address: event.target.value })} />
+                        {duplicateSignerIndices.has(index) ? (
+                          <p className="mt-1 text-[11px] text-red">This address is already used by another signer</p>
+                        ) : null}
+                      </div>
                       <Input label={`Signer ${index + 1} weight`} type="number" min="1" value={signer.weight} onChange={(event) => updateSigner(index, { weight: Number(event.target.value) || 1 })} />
                     </div>
                   </div>
@@ -276,6 +338,9 @@ export function MultiSigTransactionBuilder() {
               <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-[12px] text-ink-2">
                 <p>Total weight: {totalWeight}</p>
                 <p className={cn("mt-1", valid ? "text-success" : "text-red")}>{valid ? "Threshold is valid" : "Threshold exceeds available weight"}</p>
+                {hasDuplicateSigners ? (
+                  <p className="mt-1 text-red">Duplicate signer addresses must be resolved before continuing</p>
+                ) : null}
               </div>
             </div>
           </div>
@@ -361,7 +426,7 @@ export function MultiSigTransactionBuilder() {
           <Button
             size="sm"
             onClick={nextStep}
-            disabled={step === 3 || (step === 0 && !valid)}
+            disabled={step === 3 || (step === 0 && (!valid || hasDuplicateSigners))}
           >
             Next
           </Button>

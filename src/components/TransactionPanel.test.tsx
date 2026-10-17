@@ -1216,4 +1216,88 @@ describe("TransactionPanel", () => {
       }
     });
   });
+
+  // ── double-submit protection (#895) ────────────────────────────────────────
+  // Rapid clicks on Send can both fire before React re-renders the button into
+  // its loading/disabled visual state, since that state update only takes
+  // effect on the next render. A synchronous ref guard (isSubmittingRef) must
+  // block the second click immediately, independent of any state update.
+  //
+  // Dispatching the two clicks via separate fireEvent.click() calls does NOT
+  // reproduce this race: each fireEvent.click() is individually wrapped in
+  // act(), which flushes React's state update (and the resulting `disabled`
+  // DOM attribute) before the call returns, so the second fireEvent.click()
+  // lands on an already-disabled native button and never reaches the handler
+  // regardless of isSubmittingRef. To faithfully simulate two physical clicks
+  // landing before React commits, both native click events are dispatched
+  // inside a single act() call so React only flushes once both handlers have
+  // already run synchronously.
+  describe("double-submit protection (#895)", () => {
+    function clickTwiceBeforeReactFlushes(button: HTMLElement) {
+      act(() => {
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+    }
+
+    it("only triggers one fee simulation when Send is clicked twice in rapid succession (previewMode)", async () => {
+      const feeImpl = vi.fn().mockResolvedValue({ data: DEFAULT_FEE, error: null });
+      mockGetClient(
+        vi.fn().mockResolvedValue({ data: { hash: "h1", ledger: 1 }, error: null }),
+        feeImpl,
+      );
+      render(<TransactionPanel />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      // Both clicks are dispatched before React has a chance to flush the
+      // first buildPreview() call's state update and re-render the button.
+      // Without the synchronous ref guard, both clicks would each call
+      // estimateFee() once (the initial on-mount call plus one per
+      // buildPreview), i.e. 3 total instead of 2.
+      const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      clickTwiceBeforeReactFlushes(sendButton);
+
+      await screen.findByRole("dialog", { name: /confirm transaction/i });
+
+      // One call on mount (balance-warning fee fetch) + exactly one from
+      // buildPreview(), never two, despite the double click.
+      expect(feeImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("only submits once when Send is double-clicked in rapid succession (previewMode=false)", async () => {
+      const mockSubmit = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve({ data: { hash: "txhash123", ledger: 100 }, error: null }),
+              20,
+            ),
+          ),
+      );
+      mockGetClient(mockSubmit);
+      vi.mocked(useSorokit).mockReturnValue({
+        address: "GABC",
+        isConnected: true,
+        network: { name: "testnet", passphrase: "x", rpcUrl: "x", horizonUrl: "x" },
+        balances: [{ asset: "XLM", balance: "100" }],
+        client: getClient(),
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<TransactionPanel previewMode={false} />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      // Both clicks dispatched before React has rendered the button into its
+      // disabled/loading state.
+      clickTwiceBeforeReactFlushes(sendButton);
+
+      await screen.findByText(/Transaction submitted/i);
+
+      expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+  });
 });
