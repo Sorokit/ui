@@ -1,7 +1,7 @@
 import "react-json-view-lite/dist/index.css";
 
 import { type ReactNode, useMemo, useState } from "react";
-import { JsonView } from "react-json-view-lite";
+import { defaultStyles, JsonView, type StyleProps } from "react-json-view-lite";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -46,7 +46,11 @@ export interface ContractInteractionDebuggerProps {
   stateAfter?: unknown;
   history?: DebuggerEntry[];
   onHistoryChange?: (history: DebuggerEntry[]) => void;
+  /** Re-run a previous invocation with the same contract, method and args. */
+  onReplay?: (entry: DebuggerEntry) => void;
 }
+
+type DiffKind = "added" | "removed" | "changed";
 
 interface DiffEntry {
   path: string;
@@ -54,10 +58,44 @@ interface DiffEntry {
   afterValue: unknown;
   beforeType: string;
   afterType: string;
+  kind: DiffKind;
 }
 
 const DEBUG_HISTORY_KEY = "sorokit-soroban-debug-history";
 const DEBUG_HISTORY_LIMIT = 10;
+
+/**
+ * Simulation results can carry large byte buffers (WASM, blobs, hashes).
+ * Persisting them verbatim can blow through the browser storage quota, so
+ * history entries are trimmed to lightweight previews before saving (#907).
+ */
+const MAX_STORED_STRING_LENGTH = 256;
+const MAX_STORED_ARRAY_LENGTH = 32;
+const MAX_STORED_DEPTH = 6;
+
+/**
+ * JsonView class names layered on top of the library defaults so labels and
+ * values pick up theme tokens with high contrast in light and dark mode.
+ */
+const jsonViewStyles: StyleProps = {
+  ...defaultStyles,
+  container: `${defaultStyles.container} sorokit-json-view`,
+  label: `${defaultStyles.label} sorokit-json-label`,
+  clickableLabel: `${defaultStyles.clickableLabel} sorokit-json-label`,
+  stringValue: `${defaultStyles.stringValue} sorokit-json-string`,
+  numberValue: `${defaultStyles.numberValue} sorokit-json-number`,
+  booleanValue: `${defaultStyles.booleanValue} sorokit-json-boolean`,
+  nullValue: `${defaultStyles.nullValue} sorokit-json-null`,
+  undefinedValue: `${defaultStyles.undefinedValue} sorokit-json-null`,
+  otherValue: `${defaultStyles.otherValue} sorokit-json-other`,
+  punctuation: `${defaultStyles.punctuation} sorokit-json-punctuation`,
+};
+
+const DIFF_KIND_LABELS: Record<DiffKind, string> = {
+  added: "Added",
+  removed: "Removed",
+  changed: "Changed",
+};
 
 /**
  * Soroban VM diagnostics are sometimes returned with raw ANSI colour codes
@@ -99,19 +137,86 @@ export function readDebugHistory(): DebuggerEntry[] {
   }
 }
 
+function truncateString(value: string): string {
+  if (value.length <= MAX_STORED_STRING_LENGTH) return value;
+  return `${value.slice(0, MAX_STORED_STRING_LENGTH)}… (${value.length} chars truncated)`;
+}
+
+/**
+ * Returns a storage-safe copy of `value`: byte buffers are replaced with a
+ * short summary, long strings and arrays are clipped, and deep nesting is
+ * collapsed so a single entry can never exceed the storage quota.
+ */
+export function compactForStorage(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return truncateString(value);
+  if (typeof value === "bigint") return value.toString();
+  if (value === null || typeof value !== "object") return value;
+
+  if (value instanceof ArrayBuffer) {
+    return `[bytes: ${value.byteLength}]`;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return `[bytes: ${value.byteLength}]`;
+  }
+  if (depth >= MAX_STORED_DEPTH) return "[truncated]";
+
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_STORED_ARRAY_LENGTH)
+      .map((item) => compactForStorage(item, depth + 1));
+    if (value.length > MAX_STORED_ARRAY_LENGTH) {
+      items.push(`… ${value.length - MAX_STORED_ARRAY_LENGTH} more items`);
+    }
+    return items;
+  }
+
+  const compacted: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    compacted[key] = compactForStorage(item, depth + 1);
+  }
+  return compacted;
+}
+
+function compactEntry(entry: DebuggerEntry): DebuggerEntry {
+  return {
+    ...entry,
+    args: compactForStorage(entry.args) as unknown[],
+    preparedCall: entry.preparedCall ? truncateString(entry.preparedCall) : null,
+    result: entry.result
+      ? {
+          ...entry.result,
+          summary: entry.result.summary
+            ? truncateString(entry.result.summary)
+            : undefined,
+        }
+      : null,
+  };
+}
+
+function persistDebugHistory(entries: DebuggerEntry[]) {
+  // Drop the oldest entries until the payload fits; never throw on quota errors.
+  for (let count = entries.length; count >= 0; count -= 1) {
+    try {
+      window.sessionStorage.setItem(
+        DEBUG_HISTORY_KEY,
+        JSON.stringify(entries.slice(0, count)),
+      );
+      return;
+    } catch {
+      // quota exceeded or storage unavailable — retry with fewer entries
+    }
+  }
+}
+
 export function addDebugHistory(
   entry: DebuggerEntry,
   current: DebuggerEntry[],
 ): DebuggerEntry[] {
   const next = [
-    entry,
+    compactEntry(entry),
     ...current.filter((item) => item.timestamp !== entry.timestamp),
   ].slice(0, DEBUG_HISTORY_LIMIT);
-  try {
-    window.sessionStorage.setItem(DEBUG_HISTORY_KEY, JSON.stringify(next));
-  } catch {
-    // best effort
-  }
+  persistDebugHistory(next);
   return next;
 }
 
@@ -145,6 +250,12 @@ function formatSnapshot(value: unknown): string {
   }
 }
 
+function diffKind(beforeValue: unknown, afterValue: unknown): DiffKind {
+  if (beforeValue === undefined) return "added";
+  if (afterValue === undefined) return "removed";
+  return "changed";
+}
+
 function collectDiffEntries(
   before: unknown,
   after: unknown,
@@ -174,6 +285,7 @@ function collectDiffEntries(
           afterValue: afterValue,
           beforeType: describeValue(beforeValue),
           afterType: describeValue(afterValue),
+          kind: diffKind(beforeValue, afterValue),
         });
       }
     }
@@ -204,6 +316,7 @@ function collectDiffEntries(
           afterValue: afterValue,
           beforeType: describeValue(beforeValue),
           afterType: describeValue(afterValue),
+          kind: diffKind(beforeValue, afterValue),
         });
       }
     }
@@ -217,6 +330,7 @@ function collectDiffEntries(
       afterValue: after,
       beforeType: describeValue(before),
       afterType: describeValue(after),
+      kind: diffKind(before, after),
     },
   ];
 }
@@ -295,6 +409,7 @@ export function ContractInteractionDebugger({
   stateAfter,
   history = [],
   onHistoryChange,
+  onReplay,
 }: ContractInteractionDebuggerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -416,6 +531,7 @@ export function ContractInteractionDebugger({
               <JsonView
                 data={{ contractId, method, args }}
                 shouldExpandNode={() => true}
+                style={jsonViewStyles}
               />
             </div>,
             "prepared-call",
@@ -487,9 +603,13 @@ export function ContractInteractionDebugger({
                         {stateDiffEntries.map((entry) => (
                           <details
                             key={entry.path}
-                            className="rounded-lg border border-line bg-surface-2 p-3"
+                            className="sorokit-diff-row rounded-lg border p-3"
+                            data-diff-kind={entry.kind}
                           >
-                            <summary className="cursor-pointer text-[13px] font-semibold text-ink">
+                            <summary className="cursor-pointer text-[13px] font-semibold">
+                              <span className="sorokit-diff-badge mr-2 rounded px-1.5 py-0.5 text-[11px] uppercase tracking-[0.08em]">
+                                {DIFF_KIND_LABELS[entry.kind]}
+                              </span>
                               {entry.path} · {entry.beforeType} →{" "}
                               {entry.afterType}
                             </summary>
@@ -614,7 +734,11 @@ export function ContractInteractionDebugger({
                 </p>
               ) : null}
               {result ? (
-                <JsonView data={result} shouldExpandNode={() => true} />
+                <JsonView
+                  data={result}
+                  shouldExpandNode={() => true}
+                  style={jsonViewStyles}
+                />
               ) : (
                 <p className="text-[12px] text-ink-3">No final result yet.</p>
               )}
@@ -634,13 +758,25 @@ export function ContractInteractionDebugger({
                     key={`${entry.timestamp}-${entry.contractId}`}
                     className="rounded-lg border border-line bg-surface p-3 text-[12px] text-ink-2"
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-semibold">
                         {entry.contractId} · {entry.method}
                       </span>
-                      <span className="text-ink-3">
-                        {formatTimestamp(entry.timestamp)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-ink-3">
+                          {formatTimestamp(entry.timestamp)}
+                        </span>
+                        {onReplay ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label={`Replay ${entry.method} with same arguments`}
+                            onClick={() => onReplay(entry)}
+                          >
+                            Replay
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 ))}

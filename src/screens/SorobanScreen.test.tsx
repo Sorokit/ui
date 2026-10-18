@@ -1,4 +1,4 @@
-import { act,fireEvent, render, screen } from "@testing-library/react";
+import { act,fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach,beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -309,6 +309,140 @@ describe("SorobanScreen", () => {
       fireEvent.change(input, { target: { value: "not-a-valid-contract" } });
 
       expect(screen.queryByRole("link", { name: /Stellar Expert/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("network switching (#909)", () => {
+    const CONTRACT_ID = "CAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+
+    function mockNetwork(name: string | null) {
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+        address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+        network: name ? { name } : null,
+      } as unknown as ReturnType<typeof useSorokit>);
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("clears the active contract and warns when the network changes", () => {
+      mockNetwork("testnet");
+      const { rerender } = render(<SorobanScreen />);
+      const input = screen.getByPlaceholderText(/C\.\.\./i) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: CONTRACT_ID } });
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(screen.getByText("Contract Events")).toBeInTheDocument();
+
+      mockNetwork("futurenet");
+      rerender(<SorobanScreen />);
+
+      expect((screen.getByPlaceholderText(/C\.\.\./i) as HTMLInputElement).value).toBe("");
+      expect(screen.queryByText("Contract Events")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent(
+        /switched from testnet to futurenet/i,
+      );
+    });
+
+    it("keeps the pre-filled contract when the network first resolves", () => {
+      localStorage.setItem("sorokit-soroban-contract-history", JSON.stringify([CONTRACT_ID]));
+      mockNetwork(null);
+      const { rerender } = render(<SorobanScreen />);
+
+      mockNetwork("testnet");
+      rerender(<SorobanScreen />);
+
+      expect((screen.getByPlaceholderText(/C\.\.\./i) as HTMLInputElement).value).toBe(CONTRACT_ID);
+      expect(screen.queryByText(/switched from/i)).not.toBeInTheDocument();
+    });
+
+    it("does not warn when no contract is active", () => {
+      mockNetwork("testnet");
+      const { rerender } = render(<SorobanScreen />);
+
+      mockNetwork("mainnet");
+      rerender(<SorobanScreen />);
+
+      expect(screen.queryByText(/switched from/i)).not.toBeInTheDocument();
+    });
+
+    it("lets the user dismiss the network notice", () => {
+      mockNetwork("testnet");
+      const { rerender } = render(<SorobanScreen />);
+      fireEvent.change(screen.getByPlaceholderText(/C\.\.\./i), { target: { value: CONTRACT_ID } });
+
+      mockNetwork("mainnet");
+      rerender(<SorobanScreen />);
+      fireEvent.click(screen.getByRole("button", { name: /dismiss network notice/i }));
+
+      expect(screen.queryByText(/switched from/i)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("end-to-end contract flow (#909)", () => {
+    const CONTRACT_ID = "CAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+
+    beforeEach(() => {
+      localStorage.clear();
+      window.sessionStorage.clear();
+    });
+
+    it("loads a contract, inspects its ABI, simulates a call and shows the result", async () => {
+      const invokeContract = vi.fn().mockResolvedValue({
+        data: { hash: "tx-hash-123", returnValue: 1000 },
+        error: null,
+        status: "success",
+      });
+      const client = {
+        soroban: {
+          invokeContract,
+          simulateContract: vi.fn(),
+          getEvents: vi.fn().mockResolvedValue({ data: [], error: null }),
+        },
+      } as unknown as SorokitClient;
+      vi.mocked(getClient).mockReturnValue(client);
+      vi.mocked(useSorokit).mockReturnValue({
+        isConnected: true,
+        address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
+        network: { name: "testnet" },
+        client,
+      } as unknown as ReturnType<typeof useSorokit>);
+      localStorage.setItem("sorokit-soroban-contract-history", JSON.stringify([CONTRACT_ID]));
+
+      render(<SorobanScreen />);
+
+      // 1. Load the saved contract.
+      fireEvent.click(screen.getByTitle(CONTRACT_ID));
+      expect((screen.getByPlaceholderText(/C\.\.\./i) as HTMLInputElement).value).toBe(CONTRACT_ID);
+
+      // 2. Inspect the ABI — methods populate the method suggestions.
+      fireEvent.click(screen.getByTestId("soroban-toggle-abi"));
+      fireEvent.change(await screen.findByPlaceholderText(/paste contract abi/i), {
+        target: { value: JSON.stringify([{ name: "balance" }, { name: "transfer" }]) },
+      });
+      fireEvent.click(screen.getByTestId("soroban-load-abi"));
+      await waitFor(() => {
+        const datalist = document.getElementById("soroban-abi-methods");
+        expect(datalist?.querySelectorAll("option")).toHaveLength(2);
+      });
+
+      // 3. Fill in the call and submit it.
+      fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
+      fireEvent.change(screen.getByLabelText(/arguments/i), { target: { value: '["GABC"]' } });
+      fireEvent.click(screen.getByTestId("soroban-submit"));
+
+      await waitFor(() =>
+        expect(invokeContract).toHaveBeenCalledWith(
+          expect.objectContaining({ contractId: CONTRACT_ID, method: "balance", args: ["GABC"] }),
+        ),
+      );
+
+      // 4. View the result and its simulation breakdown.
+      expect(await screen.findByText(/tx-hash-123/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /show debugger/i }));
+      expect(screen.getByText(/simulation result/i)).toBeInTheDocument();
+      expect(screen.getByText(/gas estimate/i)).toBeInTheDocument();
     });
   });
 });

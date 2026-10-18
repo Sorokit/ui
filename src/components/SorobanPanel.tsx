@@ -221,6 +221,15 @@ export function SorobanPanel({
     }
   }
 
+  function handleReplay(entry: DebuggerEntry) {
+    // Restore the previous invocation's parameters so it can be re-run as-is.
+    const replayArgs = entry.args.length > 0 ? JSON.stringify(entry.args) : "";
+    argsRef.current = replayArgs;
+    setArgs(replayArgs);
+    setMethod(entry.method);
+    if (entry.contractId !== contractId) onContractIdChange(entry.contractId);
+  }
+
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (state === "loading") return;
@@ -422,6 +431,7 @@ export function SorobanPanel({
                     error={error}
                     history={debugHistory}
                     onHistoryChange={setDebugHistory}
+                    onReplay={handleReplay}
                   />
                 )}
 

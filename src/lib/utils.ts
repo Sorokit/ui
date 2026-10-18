@@ -193,6 +193,19 @@ export function decodeMuxedAccount(address: string): MuxedAccount | null {
   };
 }
 
+/** StrKey version byte for a contract ID ('C...' addresses). */
+const STRKEY_VERSION_CONTRACT = 2 << 3; // 0x10
+
+/** Encode a raw 32-byte ED25519 public key as a `G...` account address. */
+export function encodeAccountAddress(publicKey: Uint8Array): string {
+  return encodeStrKey(STRKEY_VERSION_ED25519_PUBLIC_KEY, publicKey);
+}
+
+/** Encode a raw 32-byte contract hash as a `C...` contract address. */
+export function encodeContractAddress(contractHash: Uint8Array): string {
+  return encodeStrKey(STRKEY_VERSION_CONTRACT, contractHash);
+}
+
 /** True when `address` is a valid, checksummed muxed (`M...`) account. */
 export function isMuxedAccount(address: string): boolean {
   return decodeMuxedAccount(address) !== null;

@@ -53,6 +53,7 @@ import { Badge } from "@/components/ui/Badge";
 import { useSorokit } from "@/context/useSorokit";
 import { useIsVisible } from "@/hooks/useIsVisible";
 import type { ContractEvent } from "@/lib/client";
+import { decodeScValTopic } from "@/lib/scval";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const EVENT_TYPE_VARIANT: Record<
@@ -68,6 +69,10 @@ const EVENT_TYPE_VARIANT: Record<
 const DEFAULT_MAX_VALUE_LENGTH = 200;
 const TOPIC_PREVIEW_COUNT = 3;
 const HIGHLIGHT_DURATION_MS = 1500;
+// Issue #908: how close (px) to the bottom of the list counts as "following"
+// the feed. Further up than this, the user is reading history and new events
+// must not yank the scroll position.
+const AUTO_SCROLL_THRESHOLD_PX = 24;
 
 // Issue #732: persist the last-seen ledger per contract so navigating away and
 // back (an unmount/remount, not just a re-render) resumes where the feed left
@@ -146,21 +151,35 @@ function EventValue({
 
 function TopicTag({ topic }: { topic: string }) {
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Issue #908: topics arrive as base64 XDR ScVals; show symbols, addresses
+  // and integers as readable text, keeping the raw value on hover.
+  const decoded = useMemo(() => decodeScValTopic(topic), [topic]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   async function handleCopy(e: React.MouseEvent) {
     e.stopPropagation();
     try {
-      await navigator.clipboard.writeText(topic);
+      await navigator.clipboard.writeText(decoded);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 1500);
     } catch {
       /* fallback */
     }
   }
 
   return (
-    <span className="group inline-flex items-center gap-1 text-[10px] font-mono text-ink-3 bg-surface-2 rounded px-1.5 py-0.5 border border-line">
-      <span>{topic.length > 20 ? truncateAddress(topic, 8, 4) : topic}</span>
+    <span
+      className="group inline-flex items-center gap-1 text-[10px] font-mono text-ink-3 bg-surface-2 rounded px-1.5 py-0.5 border border-line"
+      title={decoded !== topic ? topic : undefined}
+    >
+      <span>{decoded.length > 20 ? truncateAddress(decoded, 8, 4) : decoded}</span>
       <button
         type="button"
         onClick={handleCopy}
@@ -291,6 +310,14 @@ export function ContractEventFeed({
   // request started - or after the feed moved to another contract - is
   // discarded instead of overwriting the current events.
   const requestIdRef = useRef(0);
+  // Issue #908: pending highlight-clear timers, torn down on unmount so they
+  // can't fire setState on an unmounted component.
+  const highlightTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // Issue #908: whether the list is pinned to the bottom. Starts true so the
+  // feed follows new events until the user scrolls up to read older ones.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const [autoScrollPaused, setAutoScrollPaused] = useState(false);
 
   // IDs highlighted as newly-arrived. `prevEventIdsRef` is the baseline from
   // the previous successful load — `null` means no baseline yet, so the very
@@ -385,13 +412,16 @@ export function ContractEventFeed({
           .map((e) => e.id);
         if (addedIds.length > 0) {
           setNewEventIds((prev) => new Set([...prev, ...addedIds]));
-          window.setTimeout(() => {
+          const timers = highlightTimersRef.current;
+          const timerId = setTimeout(() => {
+            timers.delete(timerId);
             setNewEventIds((prev) => {
               const next = new Set(prev);
               addedIds.forEach((id) => next.delete(id));
               return next;
             });
           }, HIGHLIGHT_DURATION_MS);
+          timers.add(timerId);
         }
       }
       prevEventIdsRef.current = new Set(newData.map((e) => e.id));
@@ -447,6 +477,44 @@ export function ContractEventFeed({
       }
     };
   }, [live, isVisible, pollInterval, load, contractId]);
+
+  // Issue #908: on unmount, invalidate any in-flight `load` (so its response
+  // is dropped instead of updating an unmounted component) and clear every
+  // pending highlight timer.
+  useEffect(() => {
+    const requestIds = requestIdRef;
+    const timers = highlightTimersRef.current;
+    return () => {
+      requestIds.current += 1;
+      timers.forEach((timerId) => clearTimeout(timerId));
+      timers.clear();
+    };
+  }, []);
+
+  // Issue #908: keep the newest events in view only while the user is
+  // following the feed. Once they scroll up, leave their position alone.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !stickToBottomRef.current) return;
+    list.scrollTop = list.scrollHeight;
+  }, [events]);
+
+  function handleListScroll() {
+    const list = listRef.current;
+    if (!list) return;
+    const distanceFromBottom =
+      list.scrollHeight - list.scrollTop - list.clientHeight;
+    const atBottom = distanceFromBottom <= AUTO_SCROLL_THRESHOLD_PX;
+    stickToBottomRef.current = atBottom;
+    setAutoScrollPaused(!atBottom);
+  }
+
+  function jumpToLatest() {
+    const list = listRef.current;
+    stickToBottomRef.current = true;
+    setAutoScrollPaused(false);
+    if (list) list.scrollTop = list.scrollHeight;
+  }
 
   // Register a cancel callback so `resetTransactionWatchers` can stop polling
   // on network switch (#715).
@@ -665,15 +733,32 @@ export function ContractEventFeed({
           </p>
         </div>
       ) : (
-        <div aria-live="polite">
-          {filteredEvents.map((e) => (
-            <EventRow
-              key={e.id}
-              event={e}
-              maxValueLength={maxValueLength}
-              isNew={newEventIds.has(e.id)}
-            />
-          ))}
+        <div className="relative">
+          <div
+            ref={listRef}
+            onScroll={handleListScroll}
+            aria-live="polite"
+            data-testid="contract-event-list"
+            className="max-h-[480px] overflow-y-auto"
+          >
+            {filteredEvents.map((e) => (
+              <EventRow
+                key={e.id}
+                event={e}
+                maxValueLength={maxValueLength}
+                isNew={newEventIds.has(e.id)}
+              />
+            ))}
+          </div>
+          {autoScrollPaused && (
+            <button
+              type="button"
+              onClick={jumpToLatest}
+              className="absolute bottom-3 right-5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-surface-2 text-ink-2 border border-line-2 hover:bg-surface-3 transition-colors"
+            >
+              Auto-scroll paused · Jump to latest
+            </button>
+          )}
         </div>
       )}
     </div>
