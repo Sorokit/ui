@@ -257,10 +257,10 @@ describe("PortfolioRebalancer — allocation inputs", () => {
     mockClient();
   });
 
-  it("Equalise button distributes 100% evenly", async () => {
+  it("Distribute Evenly button distributes 100% evenly", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     // With 2 assets, each should be 50%
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -465,10 +465,10 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
     });
   });
 
-  it("Equalise distributes 100% across 5 assets (each ~20%)", async () => {
+  it("Distribute Evenly distributes 100% across 5 assets (each ~20%)", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     expect(inputs.length).toBe(5);
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -477,8 +477,8 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
 
   it("shows multiple swap suggestions for a complex rebalance", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     fireEvent.click(screen.getByRole("tab", { name: /preview/i }));
     // With 5 assets equalised from an imbalanced state there should be swaps
     await waitFor(() => {
@@ -653,8 +653,8 @@ describe("PortfolioRebalancer — issue #674", () => {
 
       render(<PortfolioRebalancer />);
 
-      await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-      fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+      await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+      fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
 
       // Go to preview and then execute
       fireEvent.click(screen.getByRole("tab", { name: /execute/i }));

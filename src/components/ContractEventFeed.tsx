@@ -24,6 +24,8 @@
  * @param props.limit - Maximum number of events to fetch per poll (default: 10)
  * @param props.pollInterval - Auto-poll interval in ms (default: 0, disabled)
  * @param props.filterTypes - Event types to show by default (default: all types)
+ * @param props.filterTopics - Only show events carrying at least one of these
+ *   topic names (default: no topic filter)
  * @param props.maxValueLength - Character length before an event value gets a
  *   "Show more" toggle (default: 200)
  *
@@ -253,6 +255,11 @@ export interface ContractEventFeedProps {
   limit?: number;
   /** Event types shown by default. Defaults to every type present in the feed. */
   filterTypes?: string[];
+  /**
+   * Only show events whose topics include at least one of these names (exact
+   * match). Omitted or empty shows events regardless of topic.
+   */
+  filterTopics?: string[];
   /** Character length before an event value is truncated with a "Show more" toggle. */
   maxValueLength?: number;
   /**
@@ -270,6 +277,7 @@ export function ContractEventFeed({
   pollInterval = 0,
   limit = 10,
   filterTypes,
+  filterTopics,
   maxValueLength = DEFAULT_MAX_VALUE_LENGTH,
   fromLedger,
   className,
@@ -279,7 +287,16 @@ export function ContractEventFeed({
   const [events, setEvents] = useState<ContractEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while live polling keeps failing after at least one successful load.
+  // The last good events stay on screen and the next successful poll clears it.
+  const [reconnecting, setReconnecting] = useState(false);
   const [live, setLive] = useState(pollInterval > 0);
+  // Read inside `load` without making it a dependency, so toggling Live or
+  // changing pollInterval doesn't trigger an extra fetch.
+  const pollingRef = useRef(live && pollInterval > 0);
+  useEffect(() => {
+    pollingRef.current = live && pollInterval > 0;
+  }, [live, pollInterval]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activeTypes, setActiveTypes] = useState<Set<string> | null>(
@@ -318,6 +335,7 @@ export function ContractEventFeed({
     setPrevContractId(contractId);
     setEvents([]);
     setError(null);
+    setReconnecting(false);
     setLastUpdatedAt(null);
     setNewEventIds(new Set());
     setEffectiveFromLedger(fromLedger ?? readPersistedFromLedger(contractId));
@@ -356,6 +374,15 @@ export function ContractEventFeed({
     // newer request exists is stale and must not touch state.
     const requestId = ++requestIdRef.current;
     const isStale = () => requestId !== requestIdRef.current;
+    // A failed poll after a successful load is treated as a dropped
+    // connection rather than a hard error: keep the feed and retry next tick.
+    const handleFailure = (message: string) => {
+      if (pollingRef.current && prevEventIdsRef.current !== null) {
+        setReconnecting(true);
+      } else {
+        setError(message);
+      }
+    };
     setLoading(true);
     try {
       const { data, error: err } = await client.soroban.getEvents(
@@ -365,7 +392,7 @@ export function ContractEventFeed({
       );
       if (isStale()) return;
       if (err) {
-        setError(err);
+        handleFailure(err);
         setLoading(false);
         return;
       }
@@ -397,10 +424,11 @@ export function ContractEventFeed({
       prevEventIdsRef.current = new Set(newData.map((e) => e.id));
       setEvents(newData);
       setError(null);
+      setReconnecting(false);
       setLastUpdatedAt(Date.now());
     } catch (e) {
       if (isStale()) return;
-      setError(e instanceof Error ? e.message : "Failed to load events");
+      handleFailure(e instanceof Error ? e.message : "Failed to load events");
     } finally {
       // Issue #442: a stale call must not clear the spinner that belongs to the
       // request that superseded it.
@@ -473,13 +501,20 @@ export function ContractEventFeed({
     return () => clearInterval(tickId);
   }, [live, isVisible, pollInterval]);
 
+  const topicFilterKey = filterTopics?.join("\u0000") ?? "";
+  const topicFilteredEvents = useMemo(() => {
+    if (!topicFilterKey) return events;
+    const wanted = new Set(topicFilterKey.split("\u0000"));
+    return events.filter((e) => e.topics.some((t) => wanted.has(t)));
+  }, [events, topicFilterKey]);
+
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const e of events) {
+    for (const e of topicFilteredEvents) {
       counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
     }
     return counts;
-  }, [events]);
+  }, [topicFilteredEvents]);
 
   const availableTypes = useMemo(
     () => Array.from(typeCounts.keys()).sort(),
@@ -487,9 +522,9 @@ export function ContractEventFeed({
   );
 
   const filteredEvents = useMemo(() => {
-    if (!activeTypes) return events;
-    return events.filter((e) => activeTypes.has(e.type));
-  }, [events, activeTypes]);
+    if (!activeTypes) return topicFilteredEvents;
+    return topicFilteredEvents.filter((e) => activeTypes.has(e.type));
+  }, [topicFilteredEvents, activeTypes]);
 
   function toggleType(type: string) {
     setActiveTypes((prev) => {
@@ -528,6 +563,11 @@ export function ContractEventFeed({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {reconnecting && (
+            <Badge variant="warning" dot live>
+              Reconnecting…
+            </Badge>
+          )}
           {pollInterval > 0 && (
             <button
               onClick={() => setLive((l) => !l)}

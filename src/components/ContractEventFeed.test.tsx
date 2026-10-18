@@ -1014,3 +1014,297 @@ describe("ContractEventFeed — issue #442", () => {
     expect(screen.getByText("NEW-EVT")).toBeInTheDocument();
   });
 });
+
+// ── Issue #911: topic filtering, reconnect recovery, ledger cursor paging ────
+describe("ContractEventFeed — issue #911", () => {
+  function mockEvents(getEvents: ReturnType<typeof vi.fn>) {
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+  }
+
+  function evt(
+    id: string,
+    overrides: Partial<ContractEvent> = {},
+  ): ContractEvent {
+    return { ...MOCK_EVENT, id, ...overrides };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("topic filtering", () => {
+    // A topic-filtered stream fixture: two events share the "swap" topic,
+    // one only carries "deposit".
+    const TOPIC_STREAM: ContractEvent[] = [
+      evt("t-1", { type: "transfer", topics: ["swap", "pool-a"] }),
+      evt("t-2", { type: "mint", topics: ["deposit", "pool-b"] }),
+      evt("t-3", { type: "burn", topics: ["pool-c", "swap"] }),
+    ];
+
+    it("only renders events carrying a matching topic name", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["swap"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-a")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+      expect(screen.queryByText("pool-b")).not.toBeInTheDocument();
+      expect(screen.queryByText("deposit")).not.toBeInTheDocument();
+    });
+
+    it("matches any of several topic names", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(
+        <ContractEventFeed
+          contractId={CONTRACT_ID}
+          filterTopics={["deposit", "pool-c"]}
+        />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-b")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+      expect(screen.queryByText("pool-a")).not.toBeInTheDocument();
+    });
+
+    it("counts type toggles over the topic-filtered events only", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["swap"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByRole("button", { name: "transfer (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "burn (1)" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^mint/ })).not.toBeInTheDocument();
+    });
+
+    it("shows the no-match message when no event carries the topic", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["withdraw"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(
+        await screen.findByText("No events match the selected filters"),
+      ).toBeInTheDocument();
+    });
+
+    it("shows every event when filterTopics is empty", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={[]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-a")).toBeInTheDocument();
+      expect(screen.getByText("pool-b")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+    });
+  });
+
+  describe("disconnect and reconnect", () => {
+    it("shows a Reconnecting badge when a poll fails and clears it once the stream recovers", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValueOnce({ data: null, error: "RPC disconnected" })
+        .mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+
+      // Poll #2 — the stream drops.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+      // The last good events stay visible instead of the hard error state.
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+      expect(screen.queryByText("RPC disconnected")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+      // Poll #3 — the stream recovers on its own.
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() =>
+        expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument(),
+      );
+      expect(getEvents).toHaveBeenCalledTimes(3);
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+    });
+
+    it("treats a rejected poll (network drop) as a reconnect, not a hard error", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockRejectedValueOnce(new Error("socket closed"))
+        .mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+      expect(screen.queryByText("socket closed")).not.toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() =>
+        expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument(),
+      );
+    });
+
+    it("keeps the badge up across consecutive failed polls", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValue({ data: null, error: "RPC disconnected" });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(3));
+      expect(screen.getByText("Reconnecting…")).toBeInTheDocument();
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+    });
+
+    it("shows the error state, not the badge, when the very first load fails", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: null, error: "RPC disconnected" }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("RPC disconnected")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    });
+
+    it("shows the error state, not the badge, when polling is off", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValue({ data: null, error: "RPC disconnected" });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      expect(await screen.findByText("RPC disconnected")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("ledger cursor pagination", () => {
+    it("advances the cursor past each page across consecutive ledgers", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [evt("p1-a", { ledger: 100 }), evt("p1-b", { ledger: 101 })],
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: [evt("p2-a", { ledger: 102 }), evt("p2-b", { ledger: 103 })],
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: [evt("p3-a", { ledger: 104 })],
+          error: null,
+        });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(1, CONTRACT_ID, 10, undefined),
+      );
+      expect(await screen.findByText("101")).toBeInTheDocument();
+      first.unmount();
+
+      const second = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(2, CONTRACT_ID, 10, 102),
+      );
+      expect(await screen.findByText("103")).toBeInTheDocument();
+      second.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(3, CONTRACT_ID, 10, 104),
+      );
+      expect(await screen.findByText("104")).toBeInTheDocument();
+    });
+
+    it("advances to the highest ledger in a page even when events arrive out of order", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            evt("o-a", { ledger: 205 }),
+            evt("o-b", { ledger: 200 }),
+            evt("o-c", { ledger: 203 }),
+          ],
+          error: null,
+        })
+        .mockResolvedValue({ data: [], error: null });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+      await screen.findByText("205");
+      first.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, 206),
+      );
+    });
+
+    it("does not move the cursor when a page comes back empty", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [evt("e-a", { ledger: 300 })], error: null })
+        .mockResolvedValue({ data: [], error: null });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await screen.findByText("300");
+      first.unmount();
+
+      const second = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(2, CONTRACT_ID, 10, 301),
+      );
+      await screen.findByText("No events found");
+      second.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(3, CONTRACT_ID, 10, 301),
+      );
+    });
+  });
+});
