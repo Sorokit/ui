@@ -9,6 +9,37 @@ import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry, type
 
 type State = "idle" | "loading" | "success" | "error";
 
+/** Stellar/Soroban contract IDs are strict-key-encoded: "C" + 55 base32 chars. */
+const CONTRACT_ID_PATTERN = /^C[A-Z0-9]{55}$/;
+
+/** True read-only ABI entries. Anything else is treated as state-changing. */
+const READ_ONLY_HINTS = ["view", "read", "query", "get"];
+
+function isReadOnlyMethod(name: string, mutating?: boolean): boolean {
+  if (typeof mutating === "boolean") return !mutating;
+  const lower = name.toLowerCase();
+  return READ_ONLY_HINTS.some((hint) => lower.startsWith(hint) || lower.includes(`_${hint}`));
+}
+
+interface AbiMethod {
+  name: string;
+  readOnly: boolean;
+}
+
+/**
+ * Validates and trims a contract ID before any RPC call is allowed. An empty
+ * string is not itself an error (nothing has been typed yet) — only a
+ * non-empty value that fails the format check produces a message.
+ */
+function validateContractId(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!CONTRACT_ID_PATTERN.test(trimmed)) {
+    return 'Invalid contract ID — expected "C" followed by 55 uppercase letters/digits';
+  }
+  return null;
+}
+
 interface SorobanPanelProps {
   contractId: string;
   onContractIdChange: (contractId: string) => void;
@@ -111,8 +142,9 @@ export function SorobanPanel({
   );
   const [abiOpen, setAbiOpen] = useState(false);
   const [abiRaw, setAbiRaw] = useState("");
-  const [abiMethods, setAbiMethods] = useState<string[]>([]);
+  const [abiMethods, setAbiMethods] = useState<AbiMethod[]>([]);
   const [abiError, setAbiError] = useState<string | null>(null);
+  const [contractIdTouched, setContractIdTouched] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const argsRef = useRef(args);
   const formId = useId();
@@ -141,13 +173,20 @@ export function SorobanPanel({
     }
   }, [args]);
 
+  const contractIdError = validateContractId(contractId);
+
   const canInvoke =
     Boolean(isConnected && contractId.trim() && method.trim()) &&
     isArgsJsonValid &&
+    !contractIdError &&
     state !== "loading";
 
   async function doInvoke() {
     if (!canInvoke) return;
+    // Belt-and-suspenders: canInvoke already covers this, but doInvoke can
+    // also be reached via the Cmd+Enter shortcut, so re-check right before
+    // any RPC call is made rather than relying solely on the disabled button.
+    if (validateContractId(contractId)) return;
 
     abortControllerRef.current?.abort();
     abortControllerRef.current = new AbortController();
@@ -235,20 +274,33 @@ export function SorobanPanel({
     setAbiError(null);
     try {
       const parsed = JSON.parse(abiRaw);
-      const methods: string[] = [];
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (entry.name && typeof entry.name === "string") {
-            methods.push(entry.name);
-          }
-        }
-      } else if (parsed.spec && Array.isArray(parsed.spec)) {
-        for (const entry of parsed.spec) {
-          if (entry.name && typeof entry.name === "string") {
-            methods.push(entry.name);
-          }
-        }
+      const entries: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : parsed?.spec && Array.isArray(parsed.spec)
+          ? parsed.spec
+          : [];
+
+      const methods: AbiMethod[] = [];
+      for (const entry of entries) {
+        if (!entry || typeof entry !== "object") continue;
+        const { name, mutating, readonly, stateMutability } = entry as {
+          name?: unknown;
+          mutating?: unknown;
+          readonly?: unknown;
+          stateMutability?: unknown;
+        };
+        if (typeof name !== "string") continue;
+        const isMutating =
+          typeof mutating === "boolean"
+            ? mutating
+            : typeof readonly === "boolean"
+              ? !readonly
+              : typeof stateMutability === "string"
+                ? !["view", "pure"].includes(stateMutability.toLowerCase())
+                : undefined;
+        methods.push({ name, readOnly: isReadOnlyMethod(name, isMutating) });
       }
+
       if (methods.length === 0) {
         setAbiError("No method names found in the ABI spec");
         return;
@@ -257,6 +309,13 @@ export function SorobanPanel({
     } catch {
       setAbiError("Invalid JSON — check the format and try again");
     }
+  }
+
+  /** Repopulates the builder inputs from a past invocation-history entry. */
+  function handleLoadHistoryEntry(entry: DebuggerEntry) {
+    onContractIdChange(entry.contractId);
+    setMethod(entry.method);
+    setArgs(JSON.stringify(entry.args ?? [], null, 2));
   }
 
   const handleCopyCurl = useCallback(() => {
@@ -295,12 +354,19 @@ export function SorobanPanel({
               placeholder="C..."
               value={contractId}
               onChange={(e) => onContractIdChange(e.target.value)}
+              onBlur={(e) => {
+                setContractIdTouched(true);
+                const trimmed = e.target.value.trim();
+                if (trimmed !== e.target.value) onContractIdChange(trimmed);
+              }}
               disabled={state === "loading"}
               list={
                 contractHistory.length > 0
                   ? CONTRACT_HISTORY_DATALIST_ID
                   : undefined
               }
+              error={contractIdTouched ? contractIdError ?? undefined : undefined}
+              aria-invalid={Boolean(contractIdTouched && contractIdError)}
             />
             {contractHistory.length > 0 && (
               <datalist id={CONTRACT_HISTORY_DATALIST_ID}>
@@ -334,10 +400,48 @@ export function SorobanPanel({
               />
               {abiMethods.length > 0 && (
                 <datalist id="soroban-abi-methods">
-                  {abiMethods.map((name) => (
+                  {abiMethods.map(({ name }) => (
                     <option key={name} value={name} />
                   ))}
                 </datalist>
+              )}
+              {abiMethods.length > 0 && (
+                <select
+                  aria-label="Select ABI method"
+                  value=""
+                  disabled={state === "loading"}
+                  onChange={(e) => {
+                    if (e.target.value) setMethod(e.target.value);
+                    e.target.value = "";
+                  }}
+                  className="w-full rounded-lg border border-line bg-surface-2 px-4 py-2 text-[12px] text-ink-2 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
+                >
+                  <option value="" disabled>
+                    Choose from loaded ABI…
+                  </option>
+                  {abiMethods.some((m) => m.readOnly) && (
+                    <optgroup label="Read (View)">
+                      {abiMethods
+                        .filter((m) => m.readOnly)
+                        .map((m) => (
+                          <option key={`read-${m.name}`} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                  {abiMethods.some((m) => !m.readOnly) && (
+                    <optgroup label="Write (State Changes)">
+                      {abiMethods
+                        .filter((m) => !m.readOnly)
+                        .map((m) => (
+                          <option key={`write-${m.name}`} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                </select>
               )}
             </div>
             {/* Issue #542: reuse the Input component's label-association logic
@@ -426,6 +530,7 @@ export function SorobanPanel({
                     error={error}
                     history={debugHistory}
                     onHistoryChange={setDebugHistory}
+                    onLoadEntry={handleLoadHistoryEntry}
                   />
                 )}
 
