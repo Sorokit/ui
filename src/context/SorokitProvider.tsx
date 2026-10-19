@@ -46,6 +46,10 @@ export function SorokitProvider({
   const [network, setNetwork] = useState<NetworkInfo | null>(null);
   const [initialNetwork, setInitialNetwork] = useState<NetworkInfo | null>(null);
   const [customNetworks, setCustomNetworks] = useState<NetworkInfo[]>(() => {
+    // #724 — guard against SSR/Node.js where `window` is undefined. The
+    // try/catch below only covers SecurityError from localStorage access,
+    // not the ReferenceError thrown when `window` itself doesn't exist.
+    if (typeof window === "undefined") return [];
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY_CUSTOM_NETWORKS);
       return saved ? JSON.parse(saved) : [];
@@ -127,17 +131,21 @@ export function SorokitProvider({
 
     const timerId = window.setTimeout(() => {
       let savedNet: string | NetworkInfo | null = null;
-      try {
-        const item = window.localStorage.getItem(STORAGE_KEY_NETWORK);
-        if (item) {
-          try {
-            savedNet = JSON.parse(item);
-          } catch {
-            savedNet = item as NetworkName;
+      // #724 — `window` may be undefined in SSR/non-browser environments;
+      // skip the localStorage restore when there's no browser storage.
+      if (typeof window !== "undefined") {
+        try {
+          const item = window.localStorage.getItem(STORAGE_KEY_NETWORK);
+          if (item) {
+            try {
+              savedNet = JSON.parse(item);
+            } catch {
+              savedNet = item as NetworkName;
+            }
           }
+        } catch {
+          savedNet = null;
         }
-      } catch {
-        savedNet = null;
       }
 
       // Read the client's own network first so the network it was initialised

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
+import { renderToString } from "react-dom/server";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
@@ -1163,6 +1164,44 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).toHaveTextContent(
         'Cannot add custom network with built-in name "testnet".',
       );
+    });
+  });
+
+  describe("SSR safety (#724)", () => {
+    it("renders without throwing when window is unavailable (SSR/Node.js)", () => {
+      vi.stubGlobal("window", undefined);
+      try {
+        expect(() =>
+          renderToString(
+            <SorokitProvider client={mockClient}>
+              <div>ssr-child</div>
+            </SorokitProvider>,
+          ),
+        ).not.toThrow();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("initializes customNetworks to [] when window is unavailable", () => {
+      const Probe = () => {
+        const { customNetworks } = useSorokit();
+        return <div data-testid="count">{customNetworks.length}</div>;
+      };
+
+      vi.stubGlobal("window", undefined);
+      let html: string;
+      try {
+        html = renderToString(
+          <SorokitProvider client={mockClient}>
+            <Probe />
+          </SorokitProvider>,
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(html).toContain("0");
     });
   });
 
