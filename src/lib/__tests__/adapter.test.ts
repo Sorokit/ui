@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ClientAdapter, createClientAdapter } from '../adapter';
+import {
+  ClientAdapter,
+  createClientAdapter,
+  HARDWARE_CONNECT_TIMEOUT_MS,
+  LedgerAdapter,
+  translateHardwareError,
+  withConnectionTimeout,
+} from '../adapter';
 
 describe('ClientAdapter', () => {
   let adapter: ClientAdapter;
@@ -321,5 +328,58 @@ describe('Happy-path flows (issue #814)', () => {
     expect(reconnected.status).toBe('success');
     const afterReconnect = await adapterWithClient.invokeContract(CONTRACT_ID, 'balance', []);
     expect(afterReconnect.status).toBe('success');
+  });
+});
+
+describe('LedgerAdapter timeout, backoff, and error translation (issue #973)', () => {
+  it('translates common Ledger hex error codes (0x6804, 0x6985, 0x6d00) into plain English guidance', () => {
+    expect(translateHardwareError(new Error('TransportStatusError: 0x6804'))).toContain(
+      'Unlock your Ledger and open the Stellar app',
+    );
+    expect(translateHardwareError(0x6985)).toContain('Action rejected on Ledger device');
+    expect(translateHardwareError('0x6d00')).toContain('Stellar app is not open');
+  });
+
+  it('times out unresponsive hardware wallet connection attempts after 15 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const neverResolves = () => new Promise<string>(() => {});
+      const promise = withConnectionTimeout(neverResolves, HARDWARE_CONNECT_TIMEOUT_MS);
+      const assertion = expect(promise).rejects.toThrow(/timed out after 15 seconds/i);
+      await vi.advanceTimersByTimeAsync(HARDWARE_CONNECT_TIMEOUT_MS + 10);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries failed connections with exponential backoff before succeeding', async () => {
+    const delays: number[] = [];
+    let calls = 0;
+    const ledger = new LedgerAdapter(
+      {
+        getPublicKey: vi.fn(async () => {
+          calls += 1;
+          if (calls < 3) {
+            throw new Error('0x6804');
+          }
+          return 'GLEDGERPUBLICKEY1234567890';
+        }),
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 200,
+        timeoutMs: 1000,
+        onDelay: (delayMs) => {
+          delays.push(delayMs);
+        },
+      },
+    );
+
+    const res = await ledger.connect();
+    expect(res.status).toBe('success');
+    expect(res.data).toBe('GLEDGERPUBLICKEY1234567890');
+    expect(calls).toBe(3);
+    expect(delays).toEqual([200, 400]);
   });
 });

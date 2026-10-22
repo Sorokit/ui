@@ -279,6 +279,164 @@ export class ClientAdapter {
   }
 }
 
+export const HARDWARE_CONNECT_TIMEOUT_MS = 15_000;
+export const DEFAULT_BACKOFF_BASE_MS = 500;
+export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
+
+const LEDGER_ERROR_MESSAGES: Record<string, string> = {
+  "0x6804": "Ledger device is locked or the Stellar app is not open. Unlock your Ledger and open the Stellar app.",
+  "0x6985": "Action rejected on Ledger device. Please review and approve the prompt on your hardware wallet.",
+  "0x6b00": "Invalid parameter sent to Ledger device. Update the Stellar app on Ledger Live and try again.",
+  "0x6d00": "Stellar app is not open on your Ledger device. Open the Stellar app and retry.",
+  "0x6e00": "Unsupported app open on Ledger. Quit the current app and open the Stellar app.",
+  "0x6700": "Invalid payload length for Ledger transaction. Check transaction size or blind-signing settings.",
+  "0x6a80": "Blind signing is disabled on the Ledger Stellar app. Enable hash/blind signing in the app settings.",
+};
+
+/**
+ * Translate raw hardware wallet hex status words (e.g. `0x6804`) into plain,
+ * actionable troubleshooting instructions for the user.
+ */
+export function translateHardwareError(error: unknown): string {
+  const raw =
+    typeof error === "number"
+      ? `0x${error.toString(16).toLowerCase()}`
+      : error instanceof Error
+        ? error.message
+        : String(error ?? "Unknown hardware wallet error");
+
+  const hexMatch = raw.match(/0x[0-9a-fA-F]{4}/);
+  if (hexMatch) {
+    const code = hexMatch[0].toLowerCase();
+    if (LEDGER_ERROR_MESSAGES[code]) {
+      return `${LEDGER_ERROR_MESSAGES[code]} (${code})`;
+    }
+    return `Hardware wallet returned error ${code}. Ensure your device is unlocked and the Stellar app is open.`;
+  }
+
+  return raw;
+}
+
+/**
+ * Wrap a hardware wallet connection promise with a hard timeout (default 15s)
+ * so WebUSB/HID calls do not hang indefinitely when the device is locked.
+ */
+export function withConnectionTimeout<T>(
+  operation: () => Promise<T>,
+  timeoutMs = HARDWARE_CONNECT_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `Hardware wallet connection timed out after ${Math.round(timeoutMs / 1000)} seconds. Unlock your device and open the Stellar app.`,
+        ),
+      );
+    }, timeoutMs);
+
+    operation().then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+export interface BackoffOptions {
+  maxAttempts?: number;
+  baseDelayMs?: number;
+  timeoutMs?: number;
+  onDelay?: (delayMs: number, attempt: number) => Promise<void> | void;
+}
+
+/**
+ * Execute a connection function with per-attempt timeout and exponential backoff
+ * (`baseDelayMs * 2^(attempt - 1)`).
+ */
+export async function connectWithBackoff<T>(
+  connectFn: () => Promise<T>,
+  options: BackoffOptions = {},
+): Promise<T> {
+  const {
+    maxAttempts = DEFAULT_MAX_RECONNECT_ATTEMPTS,
+    baseDelayMs = DEFAULT_BACKOFF_BASE_MS,
+    timeoutMs = HARDWARE_CONNECT_TIMEOUT_MS,
+    onDelay,
+  } = options;
+
+  let lastError: unknown;
+  const attempts = Math.max(1, maxAttempts);
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await withConnectionTimeout(connectFn, timeoutMs);
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts) {
+        const delayMs = baseDelayMs * 2 ** (attempt - 1);
+        if (onDelay) {
+          await onDelay(delayMs, attempt);
+        } else {
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+    }
+  }
+
+  throw new Error(translateHardwareError(lastError));
+}
+
+export interface LedgerTransportProvider {
+  getPublicKey: () => Promise<string>;
+}
+
+/**
+ * Hardware wallet adapter with 15-second connection timeout, exponential
+ * reconnection backoff, and human-readable Ledger status code translation.
+ */
+export class LedgerAdapter {
+  private address: string | null = null;
+
+  constructor(
+    private readonly transport: LedgerTransportProvider,
+    private readonly options: BackoffOptions = {},
+  ) {}
+
+  async connect(): Promise<AdapterResponse<string>> {
+    try {
+      const publicKey = await connectWithBackoff(
+        () => this.transport.getPublicKey(),
+        this.options,
+      );
+      this.address = publicKey;
+      return {
+        data: publicKey,
+        error: null,
+        status: "success",
+      };
+    } catch (err: unknown) {
+      return {
+        data: null,
+        error: translateHardwareError(err),
+        status: "error",
+      };
+    }
+  }
+
+  getAddress(): string | null {
+    return this.address;
+  }
+
+  disconnect(): void {
+    this.address = null;
+  }
+}
+
 // Factory for creating adapters
 export function createClientAdapter(
   sorobanClientOrFactory?: {
