@@ -291,3 +291,15 @@ export type {
 export { ToastContainer } from "./ui/Toast";
 export type { TooltipProps } from "./ui/Tooltip";
 export { Tooltip } from "./ui/Tooltip";
+
+// Batch Payments & Navigation Shell (#969)
+export { BatchPaymentProcessor } from "./BatchPaymentProcessor";
+export type { NavSection } from "./Sidebar";
+export { NAV, Sidebar } from "./Sidebar";
+export { TopBar } from "./TopBar";
+
+// Public Hooks (#969)
+export { useFeeData } from "../hooks/useFeeData";
+export { useIsVisible } from "../hooks/useIsVisible";
+export { useOutsideClick } from "../hooks/useOutsideClick";
+

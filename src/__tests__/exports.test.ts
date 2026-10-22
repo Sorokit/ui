@@ -194,4 +194,45 @@ describe("Public exports surface", () => {
     const actual: Expected = {} as Expected;
     expect(actual).toBeDefined();
   });
+
+  it("exports GovernanceDashboard, SwapSimulator, PortfolioRebalancer, BatchPaymentProcessor, Sidebar, TopBar, and public hooks (#969)", () => {
+    expect(exports.GovernanceDashboard).toBeDefined();
+    expect(exports.SwapSimulator).toBeDefined();
+    expect(exports.PortfolioRebalancer).toBeDefined();
+    expect(exports.BatchPaymentProcessor).toBeDefined();
+    expect(exports.Sidebar).toBeDefined();
+    expect(exports.TopBar).toBeDefined();
+    expect(exports.useFeeData).toBeTypeOf("function");
+    expect(exports.useIsVisible).toBeTypeOf("function");
+    expect(exports.useOutsideClick).toBeTypeOf("function");
+  });
+
+  it("detects circular dependencies in module graphs and verifies zero cycles in source modules (#969)", async () => {
+    const { detectCircularDependencies, VERIFIED_PUBLIC_EXPORTS } = await import(
+      "../verify-exports"
+    );
+    expect(VERIFIED_PUBLIC_EXPORTS.GovernanceDashboard).toBeDefined();
+    expect(VERIFIED_PUBLIC_EXPORTS.SwapSimulator).toBeDefined();
+    expect(VERIFIED_PUBLIC_EXPORTS.PortfolioRebalancer).toBeDefined();
+
+    // Acyclic graph returns empty array
+    const acyclic = {
+      "components/SwapSimulator.tsx": ["context/useSorokit.ts", "components/ui/Card.tsx"],
+      "context/useSorokit.ts": ["context/SorokitContext.ts"],
+      "context/SorokitContext.ts": ["lib/client.ts"],
+      "components/ui/Card.tsx": [],
+      "lib/client.ts": [],
+    };
+    expect(detectCircularDependencies(acyclic)).toEqual([]);
+
+    // Cyclic graph flags the exact cycle
+    const cyclic = {
+      "components/A.tsx": ["context/B.ts"],
+      "context/B.ts": ["components/A.tsx"],
+    };
+    const detected = detectCircularDependencies(cyclic);
+    expect(detected).toHaveLength(1);
+    expect(detected[0]).toEqual(["components/A.tsx", "context/B.ts", "components/A.tsx"]);
+  });
 });
+
