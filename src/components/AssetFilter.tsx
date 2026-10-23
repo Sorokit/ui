@@ -632,6 +632,7 @@ function AssetFilter({
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
+            setFocusedIndex(0);
             onPageReset?.();
           }}
           onKeyDown={handleKeyDown}
@@ -641,7 +642,10 @@ function AssetFilter({
         {search && (
           <button
             type="button"
-            onClick={() => setSearch("")}
+            onClick={() => {
+              setSearch("");
+              setFocusedIndex(0);
+            }}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
             aria-label="Clear search"
           >
@@ -810,7 +814,10 @@ function AssetFilter({
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch("")}
+                onClick={() => {
+                  setSearch("");
+                  setFocusedIndex(0);
+                }}
                 className="mt-1 text-[12px] text-ink-4 underline hover:text-ink-2"
               >
                 Clear search
