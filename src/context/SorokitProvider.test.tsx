@@ -111,6 +111,8 @@ describe("SorokitProvider", () => {
     for (const key of WALLET_GLOBALS) {
       delete (window as unknown as Record<string, unknown>)[key];
     }
+  });
+
   // #845 — the provider is the single source of truth for hardware state. These
   // cover the contract the button now relies on: isHardware is exposed, it is
   // set during connectWallet, and it does not outlive the session on disconnect.
@@ -1049,6 +1051,46 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).not.toHaveTextContent("none");
       expect(screen.getByTestId("walletError")).toHaveTextContent(
         "Wallet extension unavailable",
+      );
+    });
+
+    // #852 — regression test. A throwing disconnect() adapter must leave context.error
+    // non-null, populate walletError with the exception message, and settle isDisconnecting to false.
+    it("asserts disconnect error is visible after isDisconnecting resets (#852)", async () => {
+      const disconnectErrorMessage = "Wallet adapter disconnected with error";
+      mockClient.wallet.disconnect = vi
+        .fn()
+        .mockRejectedValue(new Error(disconnectErrorMessage));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // isDisconnecting is false after failure
+      expect(screen.getByTestId("isDisconnecting")).toHaveTextContent("false");
+
+      // context.error is non-null and contains the error message
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent(
+          disconnectErrorMessage,
+        );
+      });
+      expect(screen.getByTestId("error")).not.toHaveTextContent("none");
+
+      // Error string from the exception is in walletError
+      expect(screen.getByTestId("walletError")).toHaveTextContent(
+        disconnectErrorMessage,
       );
     });
 
