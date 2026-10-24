@@ -330,4 +330,295 @@ describe("ContractInteractionBuilder", () => {
     fireEvent.change(textarea, { target: { value: "[1, 2, 3]" } });
     expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
   });
+
+  describe("recursive nested-value validation for complex types (#906)", () => {
+    it("flags a null element nested inside a vec", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "batch", args: [{ name: "items", type: "vec" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "batch" },
+      });
+
+      const textarea = screen.getByRole("textbox", { name: "items" });
+      fireEvent.change(textarea, { target: { value: "[1, null, 3]" } });
+
+      expect(screen.getByText(/value\[1\] is empty/)).toBeInTheDocument();
+    });
+
+    it("flags an empty-string element nested inside a tuple two levels deep", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "pair", args: [{ name: "data", type: "tuple" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "pair" },
+      });
+
+      const textarea = screen.getByRole("textbox", { name: "data" });
+      fireEvent.change(textarea, { target: { value: '[1, ["ok", ""]]' } });
+
+      expect(screen.getByText(/value\[1\]\[1\] is empty/)).toBeInTheDocument();
+    });
+
+    it("flags a missing field nested inside a map/struct", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "configure", args: [{ name: "settings", type: "map" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "configure" },
+      });
+
+      const textarea = screen.getByRole("textbox", { name: "settings" });
+      fireEvent.change(textarea, { target: { value: '{"owner": "GABC", "backup": null}' } });
+
+      expect(screen.getByText(/value\.backup is empty/)).toBeInTheDocument();
+    });
+
+    it("accepts a fully populated nested vec/tuple/map with no empty elements", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "batch", args: [{ name: "items", type: "vec" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "batch" },
+      });
+
+      const textarea = screen.getByRole("textbox", { name: "items" });
+      fireEvent.change(textarea, {
+        target: { value: '[1, ["ok", "also-ok"], {"k": "v"}]' },
+      });
+
+      expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
+      expect(screen.queryByText(/is empty/)).not.toBeInTheDocument();
+    });
+
+    it("does not flag an empty value before the user has typed anything", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "batch", args: [{ name: "items", type: "vec" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "batch" },
+      });
+
+      expect(screen.queryByText(/is empty/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Invalid JSON")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("safe BigInt parsing for u128/i128 (#906)", () => {
+    it("rejects a decimal value for i128 with an inline error instead of throwing", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "i128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      const input = screen.getByRole("textbox", { name: "amount" });
+      fireEvent.change(input, { target: { value: "12.5" } });
+
+      expect(
+        screen.getByText(/Enter a whole number for i128/),
+      ).toBeInTheDocument();
+    });
+
+    it("rejects non-numeric text for u128 with an inline error instead of throwing", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "u128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      const input = screen.getByRole("textbox", { name: "amount" });
+      fireEvent.change(input, { target: { value: "not-a-number" } });
+
+      expect(
+        screen.getByText(/Enter a whole number for u128/),
+      ).toBeInTheDocument();
+    });
+
+    it("rejects a negative value for u128 as out of range", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "u128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      const input = screen.getByRole("textbox", { name: "amount" });
+      fireEvent.change(input, { target: { value: "-5" } });
+
+      expect(screen.getByText(/out of range for u128/)).toBeInTheDocument();
+    });
+
+    it("rejects a value above the 128-bit bound as out of range", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "u128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      const input = screen.getByRole("textbox", { name: "amount" });
+      // 2^128, one past the unsigned 128-bit maximum.
+      fireEvent.change(input, {
+        target: { value: "340282366920938463463374607431768211456" },
+      });
+
+      expect(screen.getByText(/out of range for u128/)).toBeInTheDocument();
+    });
+
+    it("accepts a large valid i128 value with no error", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "i128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      const input = screen.getByRole("textbox", { name: "amount" });
+      fireEvent.change(input, { target: { value: "-170141183460469231731687303715884105728" } });
+
+      expect(screen.queryByText(/Enter a whole number/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/out of range/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/is not a valid/)).not.toBeInTheDocument();
+    });
+
+    it("does not show an error before the user has typed anything", () => {
+      const spec: ContractSpec = {
+        ...MOCK_SPEC,
+        methods: [{ name: "setAmount", args: [{ name: "amount", type: "i128" }] }],
+      };
+      render(<ContractInteractionBuilder contractSpec={spec} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "setAmount" },
+      });
+
+      expect(screen.queryByText(/Enter a whole number/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("multi-auth entry review (#906)", () => {
+    it("shows an authorization entry per address argument when a method has more than one", () => {
+      render(<ContractInteractionBuilder contractSpec={MOCK_SPEC} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "transfer" },
+      });
+
+      expect(screen.getByText("Authorization Entries")).toBeInTheDocument();
+      expect(screen.getByText("Signer: from")).toBeInTheDocument();
+      expect(screen.getByText("Signer: to")).toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "from requires authorization" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("checkbox", { name: "to requires authorization" }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not show the authorization panel for a method with fewer than two address arguments", () => {
+      render(<ContractInteractionBuilder contractSpec={MOCK_SPEC} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "balance" },
+      });
+
+      expect(screen.queryByText("Authorization Entries")).not.toBeInTheDocument();
+    });
+
+    it("defaults each authorization entry to requiring auth and allows unchecking it", () => {
+      render(<ContractInteractionBuilder contractSpec={MOCK_SPEC} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "transfer" },
+      });
+
+      const fromCheckbox = screen.getByRole("checkbox", {
+        name: "from requires authorization",
+      });
+      expect(fromCheckbox).toBeChecked();
+
+      fireEvent.click(fromCheckbox);
+      expect(fromCheckbox).not.toBeChecked();
+
+      // Unrelated entry is unaffected by toggling "from".
+      expect(
+        screen.getByRole("checkbox", { name: "to requires authorization" }),
+      ).toBeChecked();
+    });
+
+    it("reflects the filled-in address value next to each authorization entry", () => {
+      render(<ContractInteractionBuilder contractSpec={MOCK_SPEC} />);
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "transfer" },
+      });
+
+      // The input's accessible name is the arg name ("from"); the arg's
+      // `description` ("Sender account address") labels a separate tooltip
+      // span, not the input itself.
+      fireEvent.change(screen.getByRole("textbox", { name: "from" }), {
+        target: { value: "GSENDER123" },
+      });
+
+      expect(screen.getByText("GSENDER123")).toBeInTheDocument();
+    });
+
+    it("passes authEntries through to onParamsReady reflecting the current toggle state", () => {
+      const onParamsReady = vi.fn();
+      render(
+        <ContractInteractionBuilder
+          contractSpec={MOCK_SPEC}
+          onParamsReady={onParamsReady}
+        />,
+      );
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Contract Address" }), {
+        target: { value: MOCK_SPEC.contractId },
+      });
+      fireEvent.change(screen.getByRole("combobox", { name: "Method" }), {
+        target: { value: "transfer" },
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "from" }), {
+        target: { value: "GSENDER123" },
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "to" }), {
+        target: { value: "GRECIPIENT456" },
+      });
+      fireEvent.change(screen.getByRole("textbox", { name: "amount" }), {
+        target: { value: "100" },
+      });
+
+      fireEvent.click(
+        screen.getByRole("checkbox", { name: "to requires authorization" }),
+      );
+      fireEvent.click(screen.getByText("Generate Contract Call"));
+
+      expect(onParamsReady).toHaveBeenCalledWith(
+        expect.objectContaining({
+          authEntries: [
+            { argName: "from", address: "GSENDER123", needsAuth: true },
+            { argName: "to", address: "GRECIPIENT456", needsAuth: false },
+          ],
+        }),
+      );
+    });
+  });
 });

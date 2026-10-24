@@ -38,6 +38,10 @@ export class ClientAdapter {
     getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
   } | null = null;
   private userAddress: string | null = null;
+  private sorobanClientOrFactory: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+  } | SorobanClientFactory | null = null;
   private sorobanFactory: SorobanClientFactory | null = null;
 
   constructor(sorobanClientOrFactory?: {
@@ -45,10 +49,9 @@ export class ClientAdapter {
     getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
   } | SorobanClientFactory) {
     if (sorobanClientOrFactory) {
+      this.sorobanClientOrFactory = sorobanClientOrFactory;
       if (typeof sorobanClientOrFactory === "function") {
         this.sorobanFactory = sorobanClientOrFactory;
-      } else {
-        this.soroban = sorobanClientOrFactory;
       }
     }
   }
@@ -119,10 +122,16 @@ export class ClientAdapter {
 
       this.userAddress = connectedAddress;
 
-      // Initialize the Soroban client from the factory if one was provided
-      // and no direct client was passed in the constructor.
-      if (!this.soroban && this.sorobanFactory) {
-        this.soroban = this.sorobanFactory();
+      // Initialize the Soroban client from the client or factory provided in the constructor.
+      if (!this.soroban) {
+        if (this.sorobanClientOrFactory) {
+          this.soroban =
+            typeof this.sorobanClientOrFactory === "function"
+              ? this.sorobanClientOrFactory()
+              : this.sorobanClientOrFactory;
+        } else if (this.sorobanFactory) {
+          this.soroban = this.sorobanFactory();
+        }
       }
 
       return {

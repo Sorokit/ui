@@ -1,5 +1,5 @@
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
-import type { ReactElement, ReactNode } from "react";
+import { type ReactElement, type ReactNode, useCallback, useEffect, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -41,13 +41,36 @@ export function Tooltip({
   open,
   onOpenChange,
 }: TooltipProps) {
+  const isControlled = open !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isOpen = isControlled ? open : uncontrolledOpen;
+
+  const handleOpenChange = useCallback(
+    (next: boolean) => {
+      if (!isControlled) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [isControlled, onOpenChange],
+  );
+
+  // WCAG 2.1 SC 1.4.13 (Dismissable): Escape closes an open tooltip without
+  // moving focus or pointer, whether it opened from hover or focus.
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleOpenChange(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, handleOpenChange]);
+
   if (content === null || content === undefined || content === "") {
     return children;
   }
 
   return (
     <TooltipPrimitive.Provider delayDuration={delayDuration}>
-      <TooltipPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <TooltipPrimitive.Root open={isOpen} onOpenChange={handleOpenChange}>
         <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
         <TooltipPrimitive.Portal>
           <TooltipPrimitive.Content

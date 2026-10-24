@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +11,34 @@ import {
 } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 
+const INDICATORS_STORAGE_KEY = "sorokit:charting:indicators";
+
+const DEFAULT_INDICATORS = {
+  sma: true,
+  ema: false,
+  volume: true,
+  rsi: true,
+  macd: false,
+  bollinger: false,
+};
+
+type IndicatorState = typeof DEFAULT_INDICATORS;
+
+function loadIndicators(): IndicatorState {
+  try {
+    const raw = localStorage.getItem(INDICATORS_STORAGE_KEY);
+    if (!raw) return DEFAULT_INDICATORS;
+    const parsed = JSON.parse(raw) as Partial<Record<keyof IndicatorState, unknown>>;
+    const next = { ...DEFAULT_INDICATORS };
+    for (const key of Object.keys(next) as Array<keyof IndicatorState>) {
+      if (typeof parsed[key] === "boolean") next[key] = parsed[key];
+    }
+    return next;
+  } catch {
+    return DEFAULT_INDICATORS;
+  }
+}
+
 interface PriceAlert {
   id: string;
   price: number;
@@ -19,21 +47,31 @@ interface PriceAlert {
 }
 
 export function ChartingScreen() {
-  const [timeframe, setTimeframe] = useState<"1m" | "5m" | "15m" | "1h" | "1d">(
-    "1h",
+  const [timeframe, setTimeframeState] = useState<
+    "1m" | "5m" | "15m" | "1h" | "1d"
+  >("1h");
+  // Transition keeps the previous chart painted while the new timeframe renders
+  const [isRedrawing, startTransition] = useTransition();
+  const setTimeframe = (tf: typeof timeframe) =>
+    startTransition(() => setTimeframeState(tf));
+  // Crosshair lives outside timeframe state so it survives timeframe switches
+  const [crosshair, setCrosshair] = useState<{ x: number; y: number } | null>(
+    null,
   );
   const [chartType, setChartType] = useState<"candlestick" | "line">(
     "candlestick",
   );
 
   // Indicators active state
-  const [indicators, setIndicators] = useState({
-    sma: true,
-    ema: false,
-    rsi: true,
-    macd: false,
-    bollinger: false,
-  });
+  const [indicators, setIndicators] = useState<IndicatorState>(loadIndicators);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(INDICATORS_STORAGE_KEY, JSON.stringify(indicators));
+    } catch {
+      // storage unavailable (private mode / quota) — preferences just won't persist
+    }
+  }, [indicators]);
 
   // Price alerts state
   const [alerts, setAlerts] = useState<PriceAlert[]>([
@@ -222,14 +260,42 @@ export function ChartingScreen() {
                 )}
               </div>
             </CardHeader>
-            <CardContent className="h-[240px] flex items-center justify-center bg-surface-2 relative">
+            <CardContent
+              className="h-[240px] flex items-center justify-center bg-surface-2 relative"
+              data-testid="chart-canvas"
+              onMouseMove={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                setCrosshair({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+              }}
+              onMouseLeave={() => setCrosshair(null)}
+            >
               {/* Mock visual representation of the active chart selection */}
               <div className="absolute inset-0 p-6 flex flex-col justify-between pointer-events-none">
                 <div className="text-[10px] text-ink-4">0.1100</div>
                 <div className="text-[10px] text-ink-4">0.1050</div>
                 <div className="text-[10px] text-ink-4">0.1000</div>
               </div>
-              <div className="text-center space-y-2">
+              {crosshair && (
+                <div
+                  data-testid="chart-crosshair"
+                  className="absolute inset-0 pointer-events-none"
+                >
+                  <div
+                    className="absolute inset-y-0 w-px bg-ink-4/50"
+                    style={{ left: crosshair.x }}
+                  />
+                  <div
+                    className="absolute inset-x-0 h-px bg-ink-4/50"
+                    style={{ top: crosshair.y }}
+                  />
+                </div>
+              )}
+              <div
+                className={`text-center space-y-2 transition-opacity duration-150 ${
+                  isRedrawing ? "opacity-60" : "opacity-100"
+                }`}
+                aria-busy={isRedrawing}
+              >
                 <p className="text-[13px] font-semibold text-ink">
                   Rendering {chartType} chart ({timeframe})
                 </p>
@@ -252,6 +318,7 @@ export function ChartingScreen() {
           </Card>
 
           {/* Volume Indicator bars below price chart */}
+          {indicators.volume && (
           <Card className="bg-surface">
             <CardHeader className="py-2.5">
               <CardTitle className="text-[11px] text-ink-3">
@@ -266,6 +333,7 @@ export function ChartingScreen() {
               <div className="w-full bg-red/20 h-[50%] rounded-t-sm" />
             </CardContent>
           </Card>
+          )}
 
           {/* RSI Indicator section */}
           {indicators.rsi && (

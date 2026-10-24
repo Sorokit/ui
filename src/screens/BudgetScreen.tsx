@@ -10,7 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
-import { computeBudgetBreakdown } from "@/lib/budget";
+import { computeBudgetBreakdown, convertXlmToUsd, formatUtcDate } from "@/lib/budget";
 
 type AssetBreakdown = {
   asset: string;
@@ -18,12 +18,47 @@ type AssetBreakdown = {
   percentage: number;
 };
 
+/** Chart palette tokens defined per-theme in index.css (contrast-checked for light and dark). */
+const CHART_COLORS = [
+  "var(--color-chart-1)",
+  "var(--color-chart-2)",
+  "var(--color-chart-3)",
+  "var(--color-chart-4)",
+  "var(--color-chart-5)",
+];
+
+/** Spending at or above this share of the limit is flagged as critical. */
+const CRITICAL_THRESHOLD = 90;
+
+/** Mock XLM price in USD; replace with a live price feed. */
+const XLM_USD_RATE = 0.12;
+
+const DEFAULT_LIMIT = 1500;
+const DEFAULT_PERIOD_START = "2026-01-01T00:00:00Z";
+
+/** Returns an inline error message for an invalid budget limit, or null when valid. */
+function validateBudgetLimit(raw: string): string | null {
+  if (raw.trim() === "") return "Budget limit is required.";
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return "Enter a valid number.";
+  if (value < 0) return "Budget limit cannot be negative.";
+  if (value === 0) return "Budget limit must be greater than 0.";
+  return null;
+}
+
 export function BudgetScreen() {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(
     "monthly",
   );
-  const [budgetLimit, setBudgetLimit] = useState(1500);
-  const [currentSpent] = useState(1280);
+  const [budgetLimitInput, setBudgetLimitInput] = useState(String(DEFAULT_LIMIT));
+  const [lastValidLimit, setLastValidLimit] = useState(DEFAULT_LIMIT);
+  const budgetLimitError = validateBudgetLimit(budgetLimitInput);
+  // Invalid input never reaches the calculations; keep the last valid limit.
+  const budgetLimit = lastValidLimit;
+  const [currentSpent, setCurrentSpent] = useState(1280);
+  const [periodStart, setPeriodStart] = useState(DEFAULT_PERIOD_START);
+  const [xlmAmountInput, setXlmAmountInput] = useState("");
+  const xlmAsUsd = convertXlmToUsd(Number(xlmAmountInput), XLM_USD_RATE);
   const [warningThreshold, setWarningThreshold] = useState(80); // 80% default
   const [lockTransactions, setLockTransactions] = useState(false);
 
@@ -79,11 +114,25 @@ export function BudgetScreen() {
   }));
 
   // Calculations
-  const percentageUsed = (currentSpent / budgetLimit) * 100;
+  const hasBudget = budgetLimit > 0;
+  const percentageUsed = hasBudget ? (currentSpent / budgetLimit) * 100 : 0;
+  const isOverBudget = percentageUsed >= 100;
+  const isCriticalLimit =
+    percentageUsed >= CRITICAL_THRESHOLD && !isOverBudget;
   const isApproachingLimit =
-    percentageUsed >= warningThreshold && percentageUsed < 95;
-  const isCriticalLimit = percentageUsed >= 95;
-  const isOverBudget = currentSpent > budgetLimit;
+    percentageUsed >= warningThreshold && percentageUsed < CRITICAL_THRESHOLD;
+
+  /** Start a fresh period: zero out spending and stamp the reset time (UTC). */
+  const handleResetBudget = () => {
+    setCurrentSpent(0);
+    setPeriodStart(new Date().toISOString());
+  };
+
+  /** Remove the budget limit entirely; the user must enter a new one. */
+  const handleClearBudget = () => {
+    setBudgetLimitInput("");
+    setLastValidLimit(0);
+  };
 
   // Export report simulation
   const [exportMessage, setExportMessage] = useState("");
@@ -131,8 +180,13 @@ export function BudgetScreen() {
                 <span className="text-[24px] font-extrabold text-ink">
                   ${currentSpent}
                 </span>
-                <span className="text-ink-3">/ ${budgetLimit}</span>
+                <span className="text-ink-3" data-testid="budget-limit-display">
+                  {hasBudget ? `/ $${budgetLimit}` : "No limit set"}
+                </span>
               </div>
+              <p className="text-[11px] text-ink-3 mt-1" data-testid="period-start">
+                Period started {formatUtcDate(periodStart)}
+              </p>
             </div>
             <div>
               <select
@@ -165,12 +219,30 @@ export function BudgetScreen() {
             />
           </div>
 
+          {(isCriticalLimit || isOverBudget) && (
+            <div
+              role="alert"
+              data-testid="budget-alert-banner"
+              className={`rounded-lg border px-3 py-2 text-[12px] font-medium ${
+                isOverBudget
+                  ? "border-error-dim bg-error-dim text-red"
+                  : "border-warning-dim bg-warning-dim text-warning"
+              }`}
+            >
+              {isOverBudget
+                ? `Budget exceeded: you have spent ${percentageUsed.toFixed(1)}% of your ${period} limit.`
+                : `Warning: you have spent ${percentageUsed.toFixed(1)}% of your ${period} limit.`}
+            </div>
+          )}
+
           <div className="flex justify-between items-center text-[12px] text-ink-2">
             <span>{percentageUsed.toFixed(1)}% of budget utilized</span>
             <div className="flex gap-2">
               {isOverBudget && <Badge variant="error">Limit Exceeded</Badge>}
-              {isCriticalLimit && !isOverBudget && (
-                <Badge variant="error">Critical (&gt;95%)</Badge>
+              {isCriticalLimit && (
+                <Badge variant="warning">
+                  Critical (&gt;{CRITICAL_THRESHOLD}%)
+                </Badge>
               )}
               {isApproachingLimit && (
                 <Badge variant="warning">
@@ -196,9 +268,42 @@ export function BudgetScreen() {
               <Input
                 label="Set Budget Limit ($)"
                 type="number"
-                value={budgetLimit}
-                onChange={(e) => setBudgetLimit(Number(e.target.value))}
+                min="0"
+                step="any"
+                value={budgetLimitInput}
+                error={budgetLimitError ?? undefined}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setBudgetLimitInput(raw);
+                  if (validateBudgetLimit(raw) === null) {
+                    setLastValidLimit(Number(raw));
+                  }
+                }}
               />
+            </div>
+
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" className="flex-1" onClick={handleResetBudget}>
+                Reset budget
+              </Button>
+              <Button variant="secondary" size="sm" className="flex-1" onClick={handleClearBudget}>
+                Clear budget
+              </Button>
+            </div>
+
+            <div className="space-y-1">
+              <Input
+                label="Convert XLM to USD"
+                type="number"
+                min="0"
+                step="any"
+                placeholder="0"
+                value={xlmAmountInput}
+                onChange={(e) => setXlmAmountInput(e.target.value)}
+              />
+              <p className="text-[11px] text-ink-3" data-testid="xlm-usd-result">
+                ≈ ${xlmAsUsd.toFixed(2)} USD (1 XLM = ${XLM_USD_RATE})
+              </p>
             </div>
 
             <div className="space-y-1">
@@ -209,7 +314,7 @@ export function BudgetScreen() {
               <input
                 type="range"
                 min="50"
-                max="95"
+                max={CRITICAL_THRESHOLD}
                 value={warningThreshold}
                 onChange={(e) => setWarningThreshold(Number(e.target.value))}
                 className="w-full accent-brand"
@@ -251,13 +356,17 @@ export function BudgetScreen() {
                 By Asset
               </p>
               <div className="space-y-2">
-                {assets.map((asset) => (
+                {assets.map((asset, index) => (
                   <div
                     key={asset.asset}
                     className="flex justify-between items-center text-[12px]"
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-brand" />
+                      <span
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                        aria-hidden="true"
+                      />
                       <span className="font-medium text-ink">
                         {asset.asset}
                       </span>
@@ -276,12 +385,17 @@ export function BudgetScreen() {
                 By Transaction Type
               </p>
               <div className="space-y-2">
-                {txTypes.map((tx) => (
+                {txTypes.map((tx, index) => (
                   <div
                     key={tx.type}
                     className="flex justify-between items-center text-[12px]"
                   >
-                    <span className="text-ink-2">
+                    <span className="flex items-center gap-1.5 text-ink-2">
+                      <span
+                        className="w-2.5 h-2.5 rounded-sm"
+                        style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                        aria-hidden="true"
+                      />
                       {tx.type} ({tx.count} txs)
                     </span>
                     <strong className="text-ink">${tx.amount}</strong>

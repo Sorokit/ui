@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
-import { DUST_THRESHOLD_BALANCE, PortfolioRebalancer } from "./PortfolioRebalancer";
+import { DUST_THRESHOLD_BALANCE, fetchPrices,PortfolioRebalancer } from "./PortfolioRebalancer";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -726,6 +726,20 @@ describe("PortfolioRebalancer — issue #723", () => {
     await waitFor(() => {
       expect(screen.getByText(/portfolio value/i)).toBeInTheDocument();
     });
+  });
+
+  it("fetchPrices() invokes custom priceProvider when supplied without relying on hardcoded values", async () => {
+    const mockProvider = vi.fn().mockResolvedValue({ XLM: 0.25, USDC: 1.02 });
+    const prices = await fetchPrices(["XLM", "USDC"], mockProvider);
+
+    expect(mockProvider).toHaveBeenCalledWith(["XLM", "USDC"]);
+    expect(prices).toEqual({ XLM: 0.25, USDC: 1.02 });
+  });
+
+  it("fetchPrices() falls back to stub prices when no custom priceProvider is given", async () => {
+    const prices = await fetchPrices(["XLM", "USDC"]);
+    expect(prices.XLM).toBe(0.11);
+    expect(prices.USDC).toBe(1.0);
   });
 });
 

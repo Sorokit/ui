@@ -8,7 +8,10 @@ import {
   aggregateDailyRewards,
   computeUptimePct,
   createDefaultFilter,
+  DEFAULT_XLM_PRICE_USD,
   estimateDelegationFeeXlm,
+  estimateHistoricalXlmPriceUsd,
+  estimateRewardUsdValue,
   filterValidators,
   formatPct,
   formatXlm,
@@ -263,6 +266,56 @@ describe("generateMockRewardHistory", () => {
     for (const e of events) {
       expect(new Date(e.date).getTime()).toBeGreaterThan(cutoff.getTime());
     }
+  });
+
+  it("includes estimated historical priceUsd and usdValue on generated events", () => {
+    const events = generateMockRewardHistory();
+    for (const e of events) {
+      expect(e.priceUsd).toBeGreaterThan(0);
+      expect(e.usdValue).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─── estimateHistoricalXlmPriceUsd & estimateRewardUsdValue ──────────────────
+
+describe("estimateHistoricalXlmPriceUsd & estimateRewardUsdValue", () => {
+  it("returns a deterministic price around DEFAULT_XLM_PRICE_USD", () => {
+    const p1 = estimateHistoricalXlmPriceUsd("2026-10-15");
+    const p2 = estimateHistoricalXlmPriceUsd("2026-10-15");
+    expect(p1).toBe(p2);
+    expect(p1).toBeGreaterThan(0.08);
+    expect(p1).toBeLessThan(0.15);
+  });
+
+  it("falls back to DEFAULT_XLM_PRICE_USD for invalid date strings", () => {
+    expect(estimateHistoricalXlmPriceUsd("not-a-date")).toBe(
+      DEFAULT_XLM_PRICE_USD,
+    );
+  });
+
+  it("calculates usdValue from event amount and historical price when not explicitly set", () => {
+    const result = estimateRewardUsdValue({
+      id: "r1",
+      date: "2026-10-15",
+      amount: "100",
+      validatorId: "VALIDATOR_ALPHA",
+    });
+    expect(result.priceUsd).toBeGreaterThan(0);
+    expect(result.usdValue).toBeCloseTo(100 * result.priceUsd, 3);
+  });
+
+  it("preserves explicit priceUsd and usdValue when provided on the event", () => {
+    const result = estimateRewardUsdValue({
+      id: "r2",
+      date: "2026-10-15",
+      amount: "50",
+      validatorId: "VALIDATOR_ALPHA",
+      priceUsd: 0.2,
+      usdValue: 10,
+    });
+    expect(result.priceUsd).toBe(0.2);
+    expect(result.usdValue).toBe(10);
   });
 });
 

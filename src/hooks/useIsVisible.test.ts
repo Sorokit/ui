@@ -12,11 +12,16 @@ import { useIsVisible } from "./useIsVisible";
 class MockIntersectionObserver {
   static instances: MockIntersectionObserver[] = [];
   callback: IntersectionObserverCallback;
+  options: IntersectionObserverInit | undefined;
   observedNode: Element | null = null;
   disconnected = false;
 
-  constructor(callback: IntersectionObserverCallback) {
+  constructor(
+    callback: IntersectionObserverCallback,
+    options?: IntersectionObserverInit,
+  ) {
     this.callback = callback;
+    this.options = options;
     MockIntersectionObserver.instances.push(this);
   }
 
@@ -119,6 +124,87 @@ describe("useIsVisible", () => {
     expect(MockIntersectionObserver.instances.length).toBe(1);
     unmount();
     expect(MockIntersectionObserver.instances[0]!.disconnected).toBe(true);
+  });
+
+  describe("observer options (#955)", () => {
+    it("uses the default threshold of 0 when no options are given", () => {
+      const node = document.createElement("div");
+      renderHook(() => {
+        const [ref] = useIsVisible<HTMLDivElement>();
+        ref.current = node;
+        return ref;
+      });
+
+      expect(MockIntersectionObserver.instances[0]!.options).toMatchObject({
+        threshold: 0,
+      });
+    });
+
+    it("forwards a custom threshold and rootMargin to the observer", () => {
+      const node = document.createElement("div");
+      renderHook(() => {
+        const [ref] = useIsVisible<HTMLDivElement>({
+          threshold: 0.5,
+          rootMargin: "200px",
+        });
+        ref.current = node;
+        return ref;
+      });
+
+      expect(MockIntersectionObserver.instances[0]!.options).toMatchObject({
+        threshold: 0.5,
+        rootMargin: "200px",
+      });
+    });
+
+    it("forwards an array of thresholds", () => {
+      const node = document.createElement("div");
+      renderHook(() => {
+        const [ref] = useIsVisible<HTMLDivElement>({ threshold: [0, 0.5, 1] });
+        ref.current = node;
+        return ref;
+      });
+
+      expect(MockIntersectionObserver.instances[0]!.options?.threshold).toEqual([
+        0, 0.5, 1,
+      ]);
+    });
+
+    it("recreates the observer when rootMargin changes", () => {
+      const node = document.createElement("div");
+      const { rerender } = renderHook(
+        ({ margin }) => {
+          const [ref] = useIsVisible<HTMLDivElement>({ rootMargin: margin });
+          ref.current = node;
+          return ref;
+        },
+        { initialProps: { margin: "0px" } },
+      );
+
+      expect(MockIntersectionObserver.instances.length).toBe(1);
+      rerender({ margin: "100px" });
+
+      expect(MockIntersectionObserver.instances.length).toBe(2);
+      expect(MockIntersectionObserver.instances[0]!.disconnected).toBe(true);
+      expect(MockIntersectionObserver.instances[1]!.options).toMatchObject({
+        rootMargin: "100px",
+      });
+    });
+
+    it("does not recreate the observer when an equivalent threshold array is passed again", () => {
+      const node = document.createElement("div");
+      const { rerender } = renderHook(() => {
+        const [ref] = useIsVisible<HTMLDivElement>({ threshold: [0, 1] });
+        ref.current = node;
+        return ref;
+      });
+
+      expect(MockIntersectionObserver.instances.length).toBe(1);
+      // A fresh array identity, same values — should not tear down the observer.
+      rerender();
+
+      expect(MockIntersectionObserver.instances.length).toBe(1);
+    });
   });
 
   it("fails open (stays visible) when IntersectionObserver is unavailable", () => {

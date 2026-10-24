@@ -221,16 +221,37 @@ describe('Happy-path flows (issue #814)', () => {
     });
 
     const invokeMock = vi.fn(async () => ({ value: 99 }));
+    const eventsMock = vi.fn(async () => [{ id: 'evt-1' }]);
     const adapterWithClient = createClientAdapter({
       invokeContract: invokeMock,
-      getEvents: vi.fn(),
+      getEvents: eventsMock,
     });
 
-    await adapterWithClient.connect();
+    // Before connect, invoking contract or getting events fails
+    const preInvoke = await adapterWithClient.invokeContract(CONTRACT_ID, 'balance', []);
+    expect(preInvoke.status).toBe('error');
+    expect(preInvoke.error).toContain('Not connected');
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    const preEvents = await adapterWithClient.getEvents(CONTRACT_ID, 10);
+    expect(preEvents.status).toBe('error');
+    expect(preEvents.error).toContain('Not connected');
+    expect(eventsMock).not.toHaveBeenCalled();
+
+    // Connect initializes soroban client
+    const connectRes = await adapterWithClient.connect();
+    expect(connectRes.status).toBe('success');
+
+    // Post-connect works
     const result = await adapterWithClient.invokeContract(CONTRACT_ID, 'balance', []);
     expect(result.status).toBe('success');
     expect(result.data).toEqual({ value: 99 });
     expect(invokeMock).toHaveBeenCalledTimes(1);
+
+    const eventResult = await adapterWithClient.getEvents(CONTRACT_ID, 10);
+    expect(eventResult.status).toBe('success');
+    expect(eventResult.data).toEqual([{ id: 'evt-1' }]);
+    expect(eventsMock).toHaveBeenCalledTimes(1);
   });
 
   it('factory-injected client is created on connect', async () => {
@@ -242,16 +263,23 @@ describe('Happy-path flows (issue #814)', () => {
     });
 
     const invokeMock = vi.fn(async () => ({ value: 77 }));
+    const eventsMock = vi.fn(async () => [{ id: 'evt-2' }]);
     const factory = vi.fn(() => ({
       invokeContract: invokeMock,
-      getEvents: vi.fn(),
+      getEvents: eventsMock,
     }));
 
     const adapterWithFactory = createClientAdapter(factory);
 
-    // Before connect, soroban is null
+    // Before connect, factory is not called and methods return error
     const before = await adapterWithFactory.invokeContract(CONTRACT_ID, 'balance', []);
     expect(before.status).toBe('error');
+    expect(before.error).toContain('Not connected');
+    expect(factory).not.toHaveBeenCalled();
+
+    const beforeEvents = await adapterWithFactory.getEvents(CONTRACT_ID, 10);
+    expect(beforeEvents.status).toBe('error');
+    expect(beforeEvents.error).toContain('Not connected');
 
     await adapterWithFactory.connect();
     expect(factory).toHaveBeenCalledTimes(1);
@@ -259,9 +287,13 @@ describe('Happy-path flows (issue #814)', () => {
     const after = await adapterWithFactory.invokeContract(CONTRACT_ID, 'balance', []);
     expect(after.status).toBe('success');
     expect(after.data).toEqual({ value: 77 });
+
+    const afterEvents = await adapterWithFactory.getEvents(CONTRACT_ID, 10);
+    expect(afterEvents.status).toBe('success');
+    expect(afterEvents.data).toEqual([{ id: 'evt-2' }]);
   });
 
-  it('disconnect clears the soroban reference', async () => {
+  it('disconnect clears the soroban reference and reconnect restores it', async () => {
     vi.stubGlobal('window', {
       freighter: {
         requestAccess: vi.fn(async () => ({})),
@@ -269,8 +301,9 @@ describe('Happy-path flows (issue #814)', () => {
       },
     });
 
+    const invokeMock = vi.fn(async () => ({ ok: true }));
     const adapterWithClient = createClientAdapter({
-      invokeContract: vi.fn(async () => ({ ok: true })),
+      invokeContract: invokeMock,
       getEvents: vi.fn(async () => []),
     });
 
@@ -282,5 +315,11 @@ describe('Happy-path flows (issue #814)', () => {
     const after = await adapterWithClient.invokeContract(CONTRACT_ID, 'balance', []);
     expect(after.status).toBe('error');
     expect(after.error).toContain('Not connected');
+
+    // Reconnecting should re-initialize soroban and succeed
+    const reconnected = await adapterWithClient.connect();
+    expect(reconnected.status).toBe('success');
+    const afterReconnect = await adapterWithClient.invokeContract(CONTRACT_ID, 'balance', []);
+    expect(afterReconnect.status).toBe('success');
   });
 });

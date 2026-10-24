@@ -486,4 +486,296 @@ describe("ActivityTimeline", () => {
     const filterBtn = screen.getByRole("button", { name: /toggle filters/i });
     expect(filterBtn).toBeInTheDocument();
   });
+
+  // ── Status filter chips (issue #960) ────────────────────────────────────
+
+  describe("status filter", () => {
+    function makeMixedStatusGroup(): TimelineGroup[] {
+      return [
+        {
+          date: "2026-07-26",
+          transactions: [
+            makeGroupedTx({ hash: "hash-ok", status: "success" }),
+            makeGroupedTx({ hash: "hash-bad", status: "failed" }),
+          ],
+        },
+      ];
+    }
+
+    it("shows all transactions when the All chip is selected (default)", async () => {
+      mockGetTimeline(makeMixedStatusGroup(), 2);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+    });
+
+    it("shows only successful transactions when the Succeeded chip is selected", async () => {
+      mockGetTimeline(makeMixedStatusGroup(), 2);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Succeeded" }));
+
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(1);
+      });
+    });
+
+    it("shows only failed transactions when the Unsuccessful chip is selected", async () => {
+      mockGetTimeline(makeMixedStatusGroup(), 2);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Unsuccessful" }));
+
+      await waitFor(() => {
+        const rows = screen.getAllByTitle("Copy transaction hash");
+        expect(rows).toHaveLength(1);
+      });
+    });
+
+    it("returns to showing all transactions when the All chip is reselected", async () => {
+      mockGetTimeline(makeMixedStatusGroup(), 2);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Succeeded" }));
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(1);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "All" }));
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+    });
+
+    it("shows 'No transactions match your filters' when a status filter leaves nothing", async () => {
+      mockGetTimeline(
+        [
+          {
+            date: "2026-07-26",
+            transactions: [makeGroupedTx({ status: "success" })],
+          },
+        ],
+        1,
+      );
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(1);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Unsuccessful" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("No transactions match your filters")).toBeInTheDocument();
+      });
+    });
+
+    it("marks the active status chip with aria-pressed=true", async () => {
+      mockGetTimeline(makeMixedStatusGroup(), 2);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(2);
+      });
+
+      expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Succeeded" }));
+      expect(screen.getByRole("button", { name: "Succeeded" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "All" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+    });
+  });
+
+  // ── Relative date labels: Today / Yesterday (issue #960) ────────────────
+
+  describe("relative date labels", () => {
+    function isoDateDaysAgo(daysAgo: number): string {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      return d.toISOString().slice(0, 10);
+    }
+
+    it("labels today's group as 'Today' instead of the full date", async () => {
+      const groups: TimelineGroup[] = [
+        {
+          date: isoDateDaysAgo(0),
+          transactions: [makeGroupedTx({ date: isoDateDaysAgo(0) })],
+        },
+      ];
+      mockGetTimeline(groups, 1);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Today")).toBeInTheDocument();
+      });
+    });
+
+    it("labels yesterday's group as 'Yesterday' instead of the full date", async () => {
+      const groups: TimelineGroup[] = [
+        {
+          date: isoDateDaysAgo(1),
+          transactions: [makeGroupedTx({ date: isoDateDaysAgo(1) })],
+        },
+      ];
+      mockGetTimeline(groups, 1);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Yesterday")).toBeInTheDocument();
+      });
+    });
+
+    it("labels a group from several days ago with its full weekday/month/day date", async () => {
+      const longAgo = isoDateDaysAgo(10);
+      const groups: TimelineGroup[] = [
+        {
+          date: longAgo,
+          transactions: [makeGroupedTx({ date: longAgo })],
+        },
+      ];
+      mockGetTimeline(groups, 1);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        const expectedLabel = new Date(longAgo).toLocaleDateString("en-US", {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+        });
+        expect(screen.getByText(expectedLabel)).toBeInTheDocument();
+        expect(screen.queryByText("Today")).not.toBeInTheDocument();
+        expect(screen.queryByText("Yesterday")).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  // ── Large-list rendering performance (issue #960) ───────────────────────
+
+  describe("large list rendering", () => {
+    it("marks each transaction row with content-visibility so off-screen rows skip layout/paint", async () => {
+      const manyTransactions = Array.from({ length: 50 }, (_, i) =>
+        makeGroupedTx({ hash: `hash-${i}`, status: "success" }),
+      );
+      const groups: TimelineGroup[] = [{ date: "2026-07-26", transactions: manyTransactions }];
+      mockGetTimeline(groups, 50);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      const { container } = render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(50);
+      });
+
+      const rowWrappers = container.querySelectorAll('[style*="content-visibility"]');
+      expect(rowWrappers.length).toBe(50);
+      for (const wrapper of rowWrappers) {
+        expect((wrapper as HTMLElement).style.contentVisibility).toBe("auto");
+      }
+    });
+
+    it("switches an expanded row's content-visibility to visible so its operations stay rendered", async () => {
+      const groups: TimelineGroup[] = [
+        {
+          date: "2026-07-26",
+          transactions: [
+            makeGroupedTx({
+              hash: "hash-expand-me",
+              operationCount: 1,
+              operations: [makeOperation({ type: "payment" })],
+            }),
+          ],
+        },
+      ];
+      mockGetTimeline(groups, 1);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      const { container } = render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(1);
+      });
+
+      const wrapper = container.querySelector('[style*="content-visibility"]') as HTMLElement;
+      expect(wrapper.style.contentVisibility).toBe("auto");
+
+      fireEvent.click(screen.getByRole("button", { name: /1 operations/i }));
+
+      await waitFor(() => {
+        expect(wrapper.style.contentVisibility).toBe("visible");
+      });
+    });
+  });
+
+  // ── Sticky date headers (issue #960) ─────────────────────────────────────
+
+  describe("sticky date headers", () => {
+    it("applies sticky positioning to every date group header, not just the first", async () => {
+      const groups = makeTimelineGroups(3);
+      mockGetTimeline(groups, 6);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      const { container } = render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getAllByTitle("Copy transaction hash")).toHaveLength(6);
+      });
+
+      const headers = container.querySelectorAll(".sticky.top-0");
+      expect(headers.length).toBe(groups.length);
+    });
+  });
 });

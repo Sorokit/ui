@@ -364,4 +364,63 @@ describe("NetworkBanner", () => {
       vi.unstubAllGlobals();
     });
   });
+
+  describe("no-ResizeObserver fallback (#876)", () => {
+    it("sets --banner-height using getBoundingClientRect fallback when ResizeObserver is undefined", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      const spyGetBoundingClientRect = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          height: 44,
+          width: 800,
+          top: 0,
+          left: 0,
+          bottom: 44,
+          right: 800,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        });
+
+      try {
+        render(<NetworkBanner />);
+
+        // --banner-height should be set to 44px even without ResizeObserver
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("44px");
+      } finally {
+        spyGetBoundingClientRect.mockRestore();
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    });
+
+    it("resets --banner-height to 0px when banner is hidden without ResizeObserver", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      try {
+        const { rerender } = render(<NetworkBanner />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBeTruthy();
+
+        // Navigate to active="network" which hides the banner
+        rerender(<NetworkBanner active="network" />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("0px");
+      } finally {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    });
+  });
 });

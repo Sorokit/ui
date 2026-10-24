@@ -109,10 +109,15 @@ function LineChart({
   const minY = Math.min(...values);
   const maxY = Math.max(...values);
   const rangeY = maxY - minY || 1;
+  // A single data point makes `data.length - 1` zero, which turns xScale
+  // into a division by zero (`i / 0` => NaN for i > 0, and 0/0 => NaN for
+  // i === 0) and produces an invalid `d="M NaN NaN"` path. Falling back to 1
+  // here places that single point at the chart's left edge instead.
+  const xRangeDivisor = data.length - 1 || 1;
 
   const xScale = (i: number) =>
     padding.left +
-    (i / (data.length - 1)) * (width - padding.left - padding.right);
+    (i / xRangeDivisor) * (width - padding.left - padding.right);
   const yScale = (v: number) =>
     padding.top +
     (1 - (v - minY) / rangeY) * (height - padding.top - padding.bottom);

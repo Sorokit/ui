@@ -41,6 +41,15 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Custom RPC endpoints are health-checked before saving; stub a healthy node.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ result: { status: "healthy" } }),
+      }),
+    );
     switchNetwork = vi.fn().mockResolvedValue(undefined);
     addCustomNetwork = vi.fn().mockResolvedValue(undefined);
     resetTransactionWatchers = vi.fn();
@@ -171,7 +180,7 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
     const rpcInput = screen.getByLabelText(/rpc endpoint url \*/i);
 
     fireEvent.change(nameInput, { target: { value: "My Standalone" } });
-    fireEvent.change(rpcInput, { target: { value: "http://127.0.0.1:8000/soroban/rpc" } });
+    fireEvent.change(rpcInput, { target: { value: "http://localhost:8000/soroban/rpc" } });
 
     const submitBtn = screen.getByRole("button", { name: /add & switch network/i });
     await act(async () => {
@@ -181,7 +190,7 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
     expect(resetTransactionWatchers).toHaveBeenCalledTimes(1);
     expect(addCustomNetwork).toHaveBeenCalledWith({
       name: "My Standalone",
-      rpcUrl: "http://127.0.0.1:8000/soroban/rpc",
+      rpcUrl: "http://localhost:8000/soroban/rpc",
       horizonUrl: "http://localhost:8000",
       passphrase: "Standalone Network ; February 2017",
       status: "online",
@@ -242,7 +251,7 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
       fireEvent.submit(form);
     });
 
-    expect(screen.getByText("RPC URL must be a valid HTTP or HTTPS URL")).toBeInTheDocument();
+    expect(screen.getByText(/RPC URL must use HTTPS/)).toBeInTheDocument();
     expect(addCustomNetwork).not.toHaveBeenCalled();
   });
 
@@ -264,7 +273,7 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
       fireEvent.submit(form);
     });
 
-    expect(screen.getByText("RPC URL must be a valid HTTP or HTTPS URL")).toBeInTheDocument();
+    expect(screen.getByText(/RPC URL must use HTTPS/)).toBeInTheDocument();
     expect(addCustomNetwork).not.toHaveBeenCalled();
   });
 
@@ -288,7 +297,133 @@ describe("NetworkSwitcher", { timeout: 15000 }, () => {
       fireEvent.submit(form);
     });
 
-    expect(screen.getByText("Horizon URL must be a valid HTTP or HTTPS URL")).toBeInTheDocument();
+    expect(screen.getByText(/Horizon URL must use HTTPS/)).toBeInTheDocument();
+    expect(addCustomNetwork).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-local HTTP RPC URLs", async () => {
+    render(<NetworkSwitcher />);
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: /current network: testnet/i }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(screen.getByText("Add Custom Network..."));
+
+    fireEvent.change(screen.getByLabelText(/network name \*/i), {
+      target: { value: "Insecure Node" },
+    });
+    fireEvent.change(screen.getByLabelText(/rpc endpoint url \*/i), {
+      target: { value: "http://rpc.example.com" },
+    });
+
+    await act(async () => {
+      fireEvent.submit(
+        screen.getByRole("button", { name: /add & switch network/i }).closest("form")!,
+      );
+    });
+
+    expect(screen.getByText(/RPC URL must use HTTPS/)).toBeInTheDocument();
+    expect(addCustomNetwork).not.toHaveBeenCalled();
+  });
+
+  it("rejects localhost HTTP URLs outside development", async () => {
+    vi.stubEnv("DEV", false);
+    try {
+      render(<NetworkSwitcher />);
+      fireEvent.pointerDown(
+        screen.getByRole("button", { name: /current network: testnet/i }),
+        { button: 0, ctrlKey: false },
+      );
+      fireEvent.click(screen.getByText("Add Custom Network..."));
+
+      fireEvent.change(screen.getByLabelText(/network name \*/i), {
+        target: { value: "Local Node" },
+      });
+      fireEvent.change(screen.getByLabelText(/rpc endpoint url \*/i), {
+        target: { value: "http://localhost:8000/soroban/rpc" },
+      });
+
+      await act(async () => {
+        fireEvent.submit(
+          screen.getByRole("button", { name: /add & switch network/i }).closest("form")!,
+        );
+      });
+
+      expect(screen.getByText(/RPC URL must use HTTPS/)).toBeInTheDocument();
+      expect(addCustomNetwork).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("rejects non-local HTTP Horizon URLs", async () => {
+    render(<NetworkSwitcher />);
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: /current network: testnet/i }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(screen.getByText("Add Custom Network..."));
+
+    fireEvent.change(screen.getByLabelText(/network name \*/i), {
+      target: { value: "Insecure Horizon" },
+    });
+    fireEvent.change(screen.getByLabelText(/rpc endpoint url \*/i), {
+      target: { value: "https://rpc.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/horizon url \(optional\)/i), {
+      target: { value: "http://horizon.example.com" },
+    });
+
+    await act(async () => {
+      fireEvent.submit(
+        screen.getByRole("button", { name: /add & switch network/i }).closest("form")!,
+      );
+    });
+
+    expect(screen.getByText(/Horizon URL must use HTTPS/)).toBeInTheDocument();
+    expect(addCustomNetwork).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate custom network passphrases inline", async () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      network: TESTNET_NETWORK,
+      initialNetwork: TESTNET_NETWORK,
+      switchNetwork,
+      customNetworks: [
+        {
+          ...CUSTOM_NETWORK,
+          name: "Existing Network",
+          passphrase: "Shared Network Passphrase",
+        },
+      ],
+      addCustomNetwork,
+      resetTransactionWatchers,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<NetworkSwitcher />);
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: /current network: testnet/i }),
+      { button: 0, ctrlKey: false },
+    );
+    fireEvent.click(screen.getByText("Add Custom Network..."));
+
+    fireEvent.change(screen.getByLabelText(/network name \*/i), {
+      target: { value: "Another Network" },
+    });
+    fireEvent.change(screen.getByLabelText(/rpc endpoint url \*/i), {
+      target: { value: "https://rpc.example.com" },
+    });
+    fireEvent.change(screen.getByLabelText(/network passphrase \(optional\)/i), {
+      target: { value: "Shared Network Passphrase" },
+    });
+
+    await act(async () => {
+      fireEvent.submit(
+        screen.getByRole("button", { name: /add & switch network/i }).closest("form")!,
+      );
+    });
+
+    expect(screen.getByText("Network passphrase must be unique")).toBeInTheDocument();
     expect(addCustomNetwork).not.toHaveBeenCalled();
   });
 

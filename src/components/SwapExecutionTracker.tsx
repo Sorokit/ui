@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
+import { useSorokit } from "@/context/useSorokit";
 import type { SwapSuggestion } from "@/lib/rebalancer";
 import { formatPct } from "@/lib/rebalancer";
 
 export type SwapExecutionStatus =
+  | "signing"
   | "submitted"
   | "confirming"
   | "success"
@@ -24,6 +26,7 @@ export interface SwapExecutionTrackerProps {
   status?: SwapExecutionStatus;
   timeoutSeconds?: number;
   onRetry?: () => void;
+  onCancel?: () => void;
 }
 
 function formatTimestamp(value?: string | null): string {
@@ -38,6 +41,30 @@ function formatTimestamp(value?: string | null): string {
     minute: "2-digit",
     timeZoneName: "short",
   });
+}
+
+/**
+ * Get the explorer base URL for a transaction based on the network.
+ * Returns null if the network is not supported on Stellar Expert.
+ */
+function getExplorerTxUrl(
+  txHash: string | null | undefined,
+  networkName?: string | null,
+): string | null {
+  if (!txHash) return null;
+
+  const segment =
+    networkName === "mainnet"
+      ? "public"
+      : networkName === "testnet"
+        ? "testnet"
+        : networkName === "futurenet"
+          ? "futurenet"
+          : null;
+
+  if (!segment) return null;
+
+  return `https://stellar.expert/explorer/${segment}/tx/${txHash}`;
 }
 
 function getSlippageState(slippagePct: number, thresholdPct?: number) {
@@ -62,12 +89,18 @@ export function SwapExecutionTracker({
   status: statusProp,
   timeoutSeconds = 60,
   onRetry,
+  onCancel,
 }: SwapExecutionTrackerProps) {
+  const { network, registerWatcher } = useSorokit();
+  
   // Separate piece of state for the timeout condition only — never set inside
   // an effect body synchronously; the interval callback is async so it's fine.
   const [timedOut, setTimedOut] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const timeoutIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cancelledRef = useRef(false);
 
-  // Derive effective status from props + timedOut — no setState inside effects.
+  // Derive effective status from props + timedOut + isCancelled — no setState inside effects.
   const internalStatus: SwapExecutionStatus = (() => {
     if (timedOut) return "timeout";
     if (statusProp) return statusProp;
@@ -109,10 +142,10 @@ export function SwapExecutionTracker({
   // Handle timeout countdown for pending states (submitted / confirming)
   useEffect(() => {
     const isPending = internalStatus === "submitted" || internalStatus === "confirming";
-    if (!isPending || timeLeft <= 0) return;
+    if (!isPending || timeLeft <= 0 || cancelledRef.current) return;
 
     const timer = setInterval(() => {
-      setTimeLeft((prev) => {
+      setTimeLeft((prev: number) => {
         if (prev <= 1) {
           clearInterval(timer);
           setTimedOut(true);
@@ -122,8 +155,37 @@ export function SwapExecutionTracker({
       });
     }, 1000);
 
-    return () => clearInterval(timer);
+    timeoutIntervalRef.current = timer;
+    return () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timeoutIntervalRef.current = null;
+      }
+    };
   }, [internalStatus, timeLeft]);
+
+  // Handle cancellation of pending polling timers
+  const handleCancel = () => {
+    cancelledRef.current = true;
+    setIsCancelled(true);
+    if (timeoutIntervalRef.current !== null) {
+      clearInterval(timeoutIntervalRef.current);
+      timeoutIntervalRef.current = null;
+    }
+    onCancel?.();
+  };
+
+  // Register cancellation callback with the provider so that network switch
+  // can also cancel polling timers
+  useEffect(() => {
+    const cancel = () => {
+      handleCancel();
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+    };
+  }, [registerWatcher]);
 
   const isTimedOut = internalStatus === "timeout";
   const isFailed = internalStatus === "failed";
@@ -145,7 +207,10 @@ export function SwapExecutionTracker({
   };
 
   const badgeDetails = getBadgeDetails();
-  const effectiveExplorerUrl = explorerUrl ?? (txHash ? `https://stellar.expert/explorer/testnet/tx/${txHash}` : null);
+  
+  // Use dynamic explorer URL based on network, fallback to provided explorerUrl
+  const dynamicExplorerUrl = getExplorerTxUrl(txHash, network?.name);
+  const effectiveExplorerUrl = explorerUrl ?? dynamicExplorerUrl;
 
   return (
     <div className={className ?? "rounded-xl border border-line bg-surface overflow-hidden"}>
@@ -160,30 +225,54 @@ export function SwapExecutionTracker({
 
       {/* Execution Lifecycle Stepper */}
       <div className="flex items-center justify-between gap-2 px-5 py-3 border-b border-line bg-surface-2/40 text-[12px]">
+        {/* Step 1: Signing */}
         <div className="flex items-center gap-1.5 font-medium">
-          <span className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[9px]">✓</span>
+          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
+            internalStatus === "signing" ? "bg-brand text-white animate-pulse" :
+            internalStatus === "submitted" || internalStatus === "confirming" || internalStatus === "success" ? "bg-emerald-500 text-white" :
+            "bg-surface-3 text-ink-4"
+          }`}>
+            {internalStatus === "signing" ? "…" : internalStatus === "submitted" || internalStatus === "confirming" || internalStatus === "success" ? "✓" : "1"}
+          </span>
+          <span className={internalStatus === "signing" ? "text-ink font-semibold" : "text-ink-2"}>Signing</span>
+        </div>
+        <div className="h-px flex-1 bg-line" />
+
+        {/* Step 2: Submitted */}
+        <div className="flex items-center gap-1.5 font-medium">
+          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
+            internalStatus === "submitted" ? "bg-brand text-white animate-pulse" :
+            internalStatus === "confirming" || internalStatus === "success" ? "bg-emerald-500 text-white" :
+            "bg-surface-3 text-ink-4"
+          }`}>
+            {internalStatus === "submitted" ? "…" : internalStatus === "confirming" || internalStatus === "success" ? "✓" : "2"}
+          </span>
           <span className={internalStatus === "submitted" ? "text-ink font-semibold" : "text-ink-2"}>Submitted</span>
         </div>
-        <div className="h-[1px] flex-1 bg-line" />
+        <div className="h-px flex-1 bg-line" />
+
+        {/* Step 3: Confirming */}
         <div className="flex items-center gap-1.5 font-medium">
           <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
             internalStatus === "confirming" ? "bg-brand text-white animate-pulse" :
             isTimedOut || isFailed ? "bg-amber-500 text-white" :
             internalStatus === "success" ? "bg-emerald-500 text-white" : "bg-surface-3 text-ink-4"
           }`}>
-            {internalStatus === "confirming" ? "…" : isTimedOut || isFailed ? "!" : internalStatus === "success" ? "✓" : "2"}
+            {internalStatus === "confirming" ? "…" : isTimedOut || isFailed ? "!" : internalStatus === "success" ? "✓" : "3"}
           </span>
           <span className={internalStatus === "confirming" ? "text-ink font-semibold" : "text-ink-2"}>
             Confirming {isPending && `(${timeLeft}s)`}
           </span>
         </div>
-        <div className="h-[1px] flex-1 bg-line" />
+        <div className="h-px flex-1 bg-line" />
+
+        {/* Step 4: Confirmed */}
         <div className="flex items-center gap-1.5 font-medium">
           <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] ${
             internalStatus === "success" ? "bg-emerald-500 text-white" :
             isTimedOut ? "bg-amber-500 text-white" : "bg-surface-3 text-ink-4"
           }`}>
-            {internalStatus === "success" ? "✓" : isTimedOut ? "!" : "3"}
+            {internalStatus === "success" ? "✓" : isTimedOut ? "!" : "4"}
           </span>
           <span className={internalStatus === "success" ? "text-ink font-semibold" : isTimedOut ? "text-amber-500 font-semibold" : "text-ink-4"}>
             {isTimedOut ? "Timed Out" : "Confirmed"}
@@ -192,6 +281,32 @@ export function SwapExecutionTracker({
       </div>
 
       <div className="flex flex-col gap-4 px-5 py-4">
+        {/* Pending State Banner */}
+        {isPending && !isCancelled && (
+          <div className="rounded-lg border border-brand/30 bg-brand/10 p-4 text-ink">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="text-[13px] font-semibold text-brand">Transaction Pending</p>
+                <p className="text-[12px] text-ink-3 mt-0.5">
+                  {internalStatus === "signing"
+                    ? "Waiting for wallet signature..."
+                    : "Transaction submitted to network. Waiting for consensus confirmation..."}
+                </p>
+              </div>
+              {onCancel && (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="inline-flex items-center h-8 px-3 rounded-lg bg-surface border border-line text-[12px] font-medium text-ink-2 hover:bg-surface-2 transition-colors cursor-pointer shrink-0"
+                  aria-label="Cancel swap"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Timeout Alert Banner */}
         {isTimedOut && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-ink" role="alert">
@@ -258,9 +373,9 @@ export function SwapExecutionTracker({
             <span aria-hidden="true">↗</span>
             <span>Executed {formatTimestamp(executedAt)}</span>
           </div>
-          {txHash ? (
+          {txHash && effectiveExplorerUrl ? (
             <a
-              href={effectiveExplorerUrl ?? `https://stellar.expert/explorer/testnet/tx/${txHash}`}
+              href={effectiveExplorerUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 text-brand underline-offset-2 hover:underline"

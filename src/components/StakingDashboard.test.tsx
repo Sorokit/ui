@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
+import { createMockClient } from "@/lib/mock-client";
 import { MOCK_DELEGATIONS, MOCK_VALIDATORS } from "@/lib/staking";
 
 import { StakingDashboard } from "./StakingDashboard";
@@ -10,12 +11,19 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
 
-function mockConnection(isConnected: boolean) {
+function mockConnection(
+  isConnected: boolean,
+  overrides: Record<string, unknown> = {},
+) {
+  const refreshAccount = vi.fn();
   vi.mocked(useSorokit).mockReturnValue({
     isConnected,
     isLoadingAccount: false,
-    refreshAccount: vi.fn(),
+    refreshAccount,
+    client: createMockClient(),
+    ...overrides,
   } as unknown as ReturnType<typeof useSorokit>);
+  return { refreshAccount };
 }
 
 describe("StakingDashboard", () => {
@@ -114,6 +122,42 @@ describe("StakingDashboard", () => {
     vi.useRealTimers();
   });
 
+  it("applies a delegation adjustment and refreshes the account", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { refreshAccount } = mockConnection(true);
+    render(
+      <StakingDashboard
+        validators={MOCK_VALIDATORS}
+        delegations={MOCK_DELEGATIONS}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /manage delegation to alpha staking/i }),
+    );
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /delegate more to alpha staking/i }),
+    );
+    fireEvent.change(screen.getByLabelText(/amount to add \(xlm\)/i), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByLabelText("Confirm delegation change"));
+    fireEvent.click(screen.getByRole("button", { name: /confirm delegation/i }));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(800);
+    });
+
+    expect(refreshAccount).toHaveBeenCalledTimes(1);
+    // 5000 + 2500 + 1000 + 10 delegated.
+    expect(screen.getByText("8,510 XLM")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it("shows the correct total claimable reward in the Rewards tab", () => {
     mockConnection(true);
     render(
@@ -131,7 +175,7 @@ describe("StakingDashboard", () => {
 
   it("clears all claimable rewards after Claim All completes", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    mockConnection(true);
+    const { refreshAccount } = mockConnection(true);
     render(
       <StakingDashboard
         validators={MOCK_VALIDATORS}
@@ -149,6 +193,7 @@ describe("StakingDashboard", () => {
     expect(
       screen.getByText(/no claimable rewards at this time/i),
     ).toBeInTheDocument();
+    expect(refreshAccount).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
 });

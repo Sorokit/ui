@@ -39,7 +39,11 @@ function tokenizeCSVLine(line: string): string[] {
   const tokens: string[] = [];
   let i = 0;
   while (i <= line.length) {
-    if (i === line.length) { tokens.push(""); break; }
+    if (i === line.length) {
+      // Only push a trailing empty token when the line genuinely ends with a comma
+      if (i > 0 && line[i - 1] === ",") tokens.push("");
+      break;
+    }
     if (line[i] === '"') {
       i++;
       let field = "";
@@ -110,6 +114,7 @@ export function validateEntries(entries: BatchEntry[]): string[] {
     if (!VALID_AMOUNT_RE.test(entry.amount) || parseFloat(entry.amount) <= 0) {
       errors.push(`Row ${i + 2}: Invalid amount "${entry.amount}"`);
     }
+    // Issue #862: enforce Stellar MEMO_TEXT limit of 28 UTF-8 bytes (not char length)
     if (entry.memo && new TextEncoder().encode(entry.memo).length > 28) {
       errors.push(`Row ${i + 2}: memo exceeds 28 bytes (Stellar MEMO_TEXT limit)`);
     }
@@ -122,6 +127,29 @@ export function validateEntries(entries: BatchEntry[]): string[] {
     seen.add(entry.address);
   });
   return errors;
+}
+
+const STROOPS_PER_UNIT = BigInt(10_000_000);
+
+/** Sum Stellar amounts exactly using BigInt stroop arithmetic to avoid IEEE-754 drift. */
+export function sumAmountsStroops(amounts: string[]): string {
+  let total = BigInt(0);
+  for (const amt of amounts) {
+    const dot = amt.indexOf(".");
+    const whole = dot === -1 ? amt : amt.slice(0, dot);
+    const frac = dot === -1 ? "" : amt.slice(dot + 1);
+    const fracPadded = frac.padEnd(7, "0").slice(0, 7);
+    total += BigInt(whole || "0") * STROOPS_PER_UNIT + BigInt(fracPadded || "0");
+  }
+  const units = total / STROOPS_PER_UNIT;
+  const rem = total % STROOPS_PER_UNIT;
+  if (rem === BigInt(0)) return String(units);
+  return `${units}.${String(rem).padStart(7, "0").replace(/0+$/, "")}`;
+}
+
+function escapeCSVField(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
 }
 
 function generateCSVTemplate(): string {
@@ -244,9 +272,10 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   const downloadCSVReport = useCallback(
     (reportEntries: BatchEntryResult[], _totalFee: string) => {
       const header = "address,amount,status,txHash,error,retryCount";
-      const rows = reportEntries.map(
-        (r) =>
-          `${r.address},${r.amount},${r.status},${r.txHash ?? ""},${r.error ?? ""},${r.retryCount}`,
+      const rows = reportEntries.map((r) =>
+        [r.address, r.amount, r.status, r.txHash ?? "", r.error ?? "", String(r.retryCount)]
+          .map(escapeCSVField)
+          .join(","),
       );
       const csv = [header, ...rows].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });

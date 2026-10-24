@@ -1,17 +1,26 @@
-import { fireEvent,render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 
-import { AccountCard } from "./AccountCard";
+import {
+  AccountCard,
+  AccountCardCompact,
+  computeInitials,
+  copyToClipboard,
+  fnv1aHash,
+  generateAvatarGradient,
+  getStellarExpertUrl,
+} from "./AccountCard";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
 
 const successToast = vi.fn();
+const errorToast = vi.fn();
 vi.mock("@/context/ToastContext", () => ({
-  useToast: () => ({ success: successToast }),
+  useToast: () => ({ success: successToast, error: errorToast }),
 }));
 
 describe("AccountCard", () => {
@@ -132,15 +141,31 @@ describe("AccountCard", () => {
   });
 });
 
-// ── Stellar Expert URL tests (#716) ──────────────────────────────────────
-describe("AccountCard — Stellar Expert URL (#716)", () => {
+// ── Stellar Expert URL tests (#716, #848) ─────────────────────────────────
+describe("AccountCard — Stellar Expert URL (#716, #848)", () => {
   const ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("links to mainnet with /explorer/public/ path", () => {
+  it("links to mainnet with /explorer/public/ path on https://stellar.expert base", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDRESS,
+      account: { sequence: "1", subentryCount: 0 },
+      isLoadingAccount: false,
+      network: { name: "mainnet" },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const link = screen.getByText(/View on Stellar Expert/);
+    expect(link).toHaveAttribute(
+      "href",
+      `https://stellar.expert/explorer/public/account/${ADDRESS}`,
+    );
+  });
+
+  it("links to public network with /explorer/public/ path on https://stellar.expert base", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: ADDRESS,
       account: { sequence: "1", subentryCount: 0 },
@@ -156,7 +181,7 @@ describe("AccountCard — Stellar Expert URL (#716)", () => {
     );
   });
 
-  it("links to testnet with /explorer/testnet/ path", () => {
+  it("links to testnet with /explorer/testnet/ path on unified https://stellar.expert base", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: ADDRESS,
       account: { sequence: "1", subentryCount: 0 },
@@ -168,11 +193,11 @@ describe("AccountCard — Stellar Expert URL (#716)", () => {
     const link = screen.getByText(/View on Stellar Expert/);
     expect(link).toHaveAttribute(
       "href",
-      `https://testnet.stellar.expert/explorer/testnet/account/${ADDRESS}`,
+      `https://stellar.expert/explorer/testnet/account/${ADDRESS}`,
     );
   });
 
-  it("disables the link for futurenet", () => {
+  it("disables the link for futurenet with tooltip", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: ADDRESS,
       account: { sequence: "1", subentryCount: 0 },
@@ -184,9 +209,13 @@ describe("AccountCard — Stellar Expert URL (#716)", () => {
     const link = screen.getByText(/View on Stellar Expert/);
     expect(link).toHaveAttribute("aria-disabled", "true");
     expect(link).not.toHaveAttribute("href");
+    expect(link).toHaveAttribute(
+      "title",
+      "Stellar Expert is not available for this network",
+    );
   });
 
-  it("disables the link for localnet", () => {
+  it("disables the link for localnet with tooltip", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: ADDRESS,
       account: { sequence: "1", subentryCount: 0 },
@@ -198,23 +227,32 @@ describe("AccountCard — Stellar Expert URL (#716)", () => {
     const link = screen.getByText(/View on Stellar Expert/);
     expect(link).toHaveAttribute("aria-disabled", "true");
     expect(link).not.toHaveAttribute("href");
+    expect(link).toHaveAttribute(
+      "title",
+      "Stellar Expert is not available for this network",
+    );
+  });
+
+  describe("getStellarExpertUrl helper function", () => {
+    it("returns correct URL for mainnet", () => {
+      expect(getStellarExpertUrl(ADDRESS, "mainnet")).toBe(
+        `https://stellar.expert/explorer/public/account/${ADDRESS}`,
+      );
+    });
+
+    it("returns correct URL for testnet", () => {
+      expect(getStellarExpertUrl(ADDRESS, "testnet")).toBe(
+        `https://stellar.expert/explorer/testnet/account/${ADDRESS}`,
+      );
+    });
+
+    it("returns null for futurenet and localnet", () => {
+      expect(getStellarExpertUrl(ADDRESS, "futurenet")).toBeNull();
+      expect(getStellarExpertUrl(ADDRESS, "localnet")).toBeNull();
+    });
   });
 });
 
-function computeInitials(address: string): string {
-  const lastFourChars = address.slice(-4);
-  const charCode1 = lastFourChars.charCodeAt(0);
-  const charCode2 = lastFourChars.charCodeAt(1);
-  const charCode3 = lastFourChars.charCodeAt(2);
-  const charCode4 = lastFourChars.charCodeAt(3);
-  const total = charCode1 + charCode2 + charCode3 + charCode4;
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const char1 = alphabet[total % 26];
-  const char2 = alphabet[(total + charCode1) % 26];
-  return `${char1}${char2}`;
-}
-
-import { AccountCardCompact } from "./AccountCard";
 
 describe("AccountCardCompact", () => {
   beforeEach(() => {
@@ -285,5 +323,172 @@ describe("AccountCardCompact", () => {
 
     render(<AccountCardCompact />);
     expect(screen.getByText("Connected")).toBeInTheDocument();
+  });
+
+  it("renders avatar with memoized gradient style", () => {
+    const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+    vi.mocked(useSorokit).mockReturnValue({
+      address,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCardCompact />);
+    const avatar = screen.getByTestId("account-avatar");
+    expect(avatar).toBeInTheDocument();
+    expect(avatar.style.background).toContain("linear-gradient");
+  });
+
+  it("does not recompute gradient styles when non-account props change", () => {
+    const address = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+    vi.mocked(useSorokit).mockReturnValue({
+      address,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    const onNavigate1 = vi.fn();
+    const { rerender } = render(<AccountCardCompact onNavigate={onNavigate1} />);
+    const avatarBefore = screen.getByTestId("account-avatar").style.background;
+
+    const onNavigate2 = vi.fn();
+    rerender(<AccountCardCompact onNavigate={onNavigate2} />);
+    const avatarAfter = screen.getByTestId("account-avatar").style.background;
+
+    expect(avatarBefore).toBe(avatarAfter);
+  });
+});
+
+describe("AccountCard — Avatar Hashing & Clipboard Fallback", () => {
+  const ADDR_A = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+  // ADDR_B shares identical first 6 characters ("GAAZI4") but differs afterwards
+  const ADDR_B = "GAAZI4DIFFERENTADDRESSWITHIDENTICALPREFIX1234567890XYZ";
+
+  it("renders an avatar with gradient background in the AccountCard header", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDR_A,
+      account: { sequence: "123", subentryCount: 1 },
+      isLoadingAccount: false,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const avatar = screen.getByTestId("account-card-avatar");
+    expect(avatar).toBeInTheDocument();
+    expect(avatar.style.background).toContain("linear-gradient");
+  });
+
+  it("triggers error toast message when address copying fails", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockRejectedValue(new Error("Permission denied")),
+      },
+    });
+    const originalExecCommand = document.execCommand;
+    document.execCommand = vi.fn().mockReturnValue(false);
+
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDR_A,
+      account: { sequence: "123", subentryCount: 1 },
+      isLoadingAccount: false,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const copyBtn = screen.getByRole("button", { name: /Copy address/ });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+
+    expect(errorToast).toHaveBeenCalledWith("Copy Failed", {
+      message: "Failed to copy address to clipboard.",
+    });
+
+    document.execCommand = originalExecCommand;
+  });
+
+  it("triggers success toast message when address copying succeeds", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    vi.mocked(useSorokit).mockReturnValue({
+      address: ADDR_A,
+      account: { sequence: "123", subentryCount: 1 },
+      isLoadingAccount: false,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<AccountCard />);
+    const copyBtn = screen.getByRole("button", { name: /Copy address/ });
+    await act(async () => {
+      fireEvent.click(copyBtn);
+    });
+
+    expect(successToast).toHaveBeenCalledWith("Address Copied", {
+      message: "The address has been copied to your clipboard.",
+    });
+  });
+
+  it("avatar hash calculation uses full public key string and avoids prefix collisions", () => {
+    const hashA = fnv1aHash(ADDR_A);
+    const hashB = fnv1aHash(ADDR_B);
+    expect(hashA).not.toBe(hashB);
+
+    const gradA = generateAvatarGradient(ADDR_A);
+    const gradB = generateAvatarGradient(ADDR_B);
+    expect(gradA.background).not.toBe(gradB.background);
+  });
+
+  it("consistently returns identical avatar gradient for the same address", () => {
+    const grad1 = generateAvatarGradient(ADDR_A);
+    const grad2 = generateAvatarGradient(ADDR_A);
+    expect(grad1.background).toBe(grad2.background);
+    expect(grad1.colors).toEqual(grad2.colors);
+    expect(grad1.angle).toBe(grad2.angle);
+  });
+
+  describe("copyToClipboard", () => {
+    it("uses navigator.clipboard.writeText when available", async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      const result = await copyToClipboard("test-value");
+      expect(result).toBe(true);
+      expect(writeText).toHaveBeenCalledWith("test-value");
+    });
+
+    it("falls back to document.execCommand when navigator.clipboard.writeText rejects", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: vi.fn().mockRejectedValue(new Error("Rejected")),
+        },
+      });
+      const originalExec = document.execCommand;
+      document.execCommand = vi.fn().mockReturnValue(true);
+
+      const result = await copyToClipboard("fallback-value");
+      expect(result).toBe(true);
+      expect(document.execCommand).toHaveBeenCalledWith("copy");
+
+      document.execCommand = originalExec;
+    });
+
+    it("returns false when both clipboard API and execCommand fail", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: vi.fn().mockRejectedValue(new Error("Permission denied")),
+        },
+      });
+      const originalExec = document.execCommand;
+      document.execCommand = vi.fn().mockReturnValue(false);
+
+      const result = await copyToClipboard("failure-value");
+      expect(result).toBe(false);
+
+      document.execCommand = originalExec;
+    });
   });
 });

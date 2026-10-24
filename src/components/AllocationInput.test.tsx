@@ -73,7 +73,7 @@ describe("AllocationInput", () => {
   // code (not a single number field). These cases exercise the per-asset
   // numeric input against the issue's criteria: initial value, 0–100 clamping,
   // and the onChange payload on valid input.
-  describe("percentage input (issue #740)", () => {
+  describe("percentage input (issues #740, #871)", () => {
     it("renders each input with its initial target value", () => {
       render(
         <AllocationInput

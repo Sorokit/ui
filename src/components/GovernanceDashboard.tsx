@@ -1,5 +1,5 @@
 /**
- * GovernanceDashboard — a full on-chain governance surface for Soroban dApps.
+ * GovernanceDashboard — a full on-chain governance surface for Soroban dApps (#866).
  *
  * Three panels:
  *  1. ProposalList   — proposals fetched from the governance contract, each
@@ -44,7 +44,20 @@ export type ProposalStatus =
   | "rejected"
   | "pending"
   | "executed"
+  | "closed"
   | (string & {});
+
+/** Statuses after which voting is over and no new votes can be cast. */
+const VOTING_CLOSED_STATUSES: ReadonlySet<string> = new Set([
+  "closed",
+  "executed",
+  "passed",
+  "rejected",
+]);
+
+export function isVotingClosed(status: ProposalStatus): boolean {
+  return VOTING_CLOSED_STATUSES.has(status);
+}
 
 export interface GovernanceProposal {
   id: string;
@@ -63,7 +76,7 @@ export type VoteChoice = "yes" | "no" | "abstain";
 export interface GovernanceDashboardProps {
   /**
    * Governance contract ID that exposes `get_proposals`, `get_delegate`,
-   * `vote`, and `delegate` methods. Defaults to a placeholder so the panel is
+   * `vote`, `delegate`, and `revoke_delegation` methods. Defaults to a placeholder so the panel is
    * usable in demos before a real contract is wired up.
    */
   contractId?: string;
@@ -133,6 +146,7 @@ function statusVariant(
       return "primary";
     case "pending":
       return "warning";
+    case "closed":
     default:
       return "default";
   }
@@ -173,7 +187,9 @@ interface ProposalCardProps {
   onVote: (proposal: GovernanceProposal, choice: VoteChoice) => void;
 }
 
-function ProposalCard({ proposal, disabled, onVote }: ProposalCardProps) {
+function ProposalCard({ proposal, disabled: walletDisabled, onVote }: ProposalCardProps) {
+  const votingClosed = isVotingClosed(proposal.status);
+  const disabled = walletDisabled || votingClosed;
   return (
     <div
       role="listitem"
@@ -218,6 +234,11 @@ function ProposalCard({ proposal, disabled, onVote }: ProposalCardProps) {
         >
           Vote Abstain
         </Button>
+        {votingClosed && (
+          <span className="self-center text-[11px] text-ink-3" data-testid="voting-closed-note">
+            Voting closed
+          </span>
+        )}
       </div>
     </div>
   );
@@ -334,6 +355,7 @@ interface DelegationPanelProps {
   submitting: boolean;
   error: string | null;
   onDelegate: (target: string) => void;
+  onRevoke: () => void;
 }
 
 function DelegationPanel({
@@ -342,6 +364,7 @@ function DelegationPanel({
   submitting,
   error,
   onDelegate,
+  onRevoke,
 }: DelegationPanelProps) {
   const [value, setValue] = useState("");
   const trimmed = value.trim();
@@ -395,6 +418,17 @@ function DelegationPanel({
         >
           {submitting ? "Delegating…" : "Delegate votes"}
         </Button>
+        {currentDelegate && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start"
+            disabled={disabled || submitting}
+            onClick={onRevoke}
+          >
+            Revoke delegation
+          </Button>
+        )}
       </CardContent>
     </Card>
   );
@@ -498,12 +532,17 @@ export function GovernanceDashboard({
     setVoting(true);
     setVoteError(null);
 
-    const { error } = await client.soroban.invokeContract({
-      contractId,
-      method: "vote",
-      args: [pendingProposal.id, pendingChoice],
-      sourceAccount: address ?? undefined,
-    });
+    let error: string | null;
+    try {
+      ({ error } = await client.soroban.invokeContract({
+        contractId,
+        method: "vote",
+        args: [pendingProposal.id, pendingChoice],
+        sourceAccount: address ?? undefined,
+      }));
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Unknown error";
+    }
 
     setVoting(false);
 
@@ -546,6 +585,30 @@ export function GovernanceDashboard({
     },
     [client, contractId, address],
   );
+
+  const revokeDelegation = useCallback(async () => {
+    if (!client) return;
+    setDelegating(true);
+    setDelegateError(null);
+
+    const { error } = await client.soroban.invokeContract({
+      contractId,
+      method: "revoke_delegation",
+      args: [],
+      sourceAccount: address ?? undefined,
+    });
+
+    setDelegating(false);
+
+    if (error) {
+      setDelegateError(friendlyError(error));
+      return;
+    }
+
+    setDelegate(null);
+    setNotice("Delegation revoked. You are voting for yourself again.");
+    setReloadKey((k) => k + 1);
+  }, [client, contractId, address]);
 
   return (
     <div className={cn("flex flex-col gap-5", className)}>
@@ -627,6 +690,7 @@ export function GovernanceDashboard({
         submitting={delegating}
         error={delegateError}
         onDelegate={submitDelegation}
+        onRevoke={() => void revokeDelegation()}
       />
 
       {/* Vote confirmation */}

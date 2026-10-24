@@ -13,7 +13,7 @@ export interface TransactionParams {
   asset: string;
   /** Issuer account for a non-native asset. Omitted (or undefined) for XLM. */
   assetIssuer?: string;
-  memoType: "none" | "text" | "id";
+  memoType: "none" | "text" | "id" | "hash" | "return";
   memo?: string;
 }
 
@@ -413,6 +413,10 @@ export type NftMetadata = {
   name: string;
   description?: string;
   image?: string;
+  /** Audio/video asset URL (e.g. `animation_url` in token metadata) */
+  animationUrl?: string;
+  /** MIME type of the primary media asset, e.g. `video/mp4`, `audio/mpeg` */
+  mimeType?: string;
   externalUrl?: string;
   attributes: NftAttribute[];
 };

@@ -1,4 +1,9 @@
-import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import {
+  AlertCircleIcon,
+  Cancel01Icon,
+  Copy01Icon,
+  Tick01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -13,9 +18,25 @@ export interface AddressDisplayProps {
   className?: string;
   label?: string;
   onCopy?: () => void;
+  onCopyError?: () => void;
   size?: "sm" | "md" | "lg";
   masked?: boolean;
   mono?: boolean;
+  /**
+   * A resolved Stellar federation name (SEP-2, e.g. "alice*example.com") for
+   * this address, if the host app already looked one up. `AddressDisplay`
+   * has no blockchain logic of its own (see package.json's description), so
+   * federation resolution itself is the host's responsibility; this only
+   * renders the result.
+   */
+  federationName?: string | null;
+  /**
+   * Set when the host app's federation lookup for this address failed
+   * (network error, no record, timeout, etc). Renders a subtle warning
+   * indicator instead of silently omitting the federation tag, so the
+   * failure isn't invisible to the user.
+   */
+  federationError?: boolean;
 }
 
 const sizeConfig = {
@@ -77,9 +98,12 @@ export function AddressDisplay({
   className,
   label,
   onCopy,
+  onCopyError,
   size = "md",
   masked = false,
   mono = false,
+  federationName = null,
+  federationError = false,
 }: AddressDisplayProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -90,6 +114,18 @@ export function AddressDisplay({
       clearTimeout(resetTimerRef.current);
       resetTimerRef.current = null;
     }
+  }
+
+  // The "Copied!"/"Copy failed" tooltip is otherwise only cleared by its 2s
+  // (or 1.5s) timeout, which is long enough that moving the cursor away and
+  // back before it elapses re-opens the tooltip still showing the stale
+  // result instead of the resting "Copy address" state. Clearing the state
+  // as soon as the cursor leaves, instead of waiting out the timer, keeps
+  // the tooltip accurate on re-hover regardless of timing.
+  function resetCopyStateOnLeave() {
+    clearResetTimer();
+    setCopied(false);
+    setCopyFailed(false);
   }
 
   // Without this, unmounting inside the copied/failed reset window leaves a
@@ -126,6 +162,7 @@ export function AddressDisplay({
     } else {
       setCopied(false);
       setCopyFailed(true);
+      onCopyError?.();
       resetTimerRef.current = setTimeout(() => setCopyFailed(false), FAILED_RESET_MS);
     }
   }
@@ -158,11 +195,34 @@ export function AddressDisplay({
           Invalid address
         </span>
       )}
+      {federationName && (
+        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-2" data-testid="federation-tag">
+          {federationName}
+        </span>
+      )}
+      {federationError && (
+        <Tooltip content="Federation name lookup failed">
+          <span
+            role="img"
+            aria-label="Federation name lookup failed"
+            data-testid="federation-error-indicator"
+            className="shrink-0 text-ink-4"
+          >
+            <HugeiconsIcon
+              icon={AlertCircleIcon}
+              size={iconSize}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </span>
+        </Tooltip>
+      )}
       <Tooltip
         content={copyFailed ? "Copy failed" : copied ? "Copied!" : "Copy address to clipboard"}
       >
         <button
           onClick={copy}
+          onMouseLeave={resetCopyStateOnLeave}
           aria-label={
             copyFailed
               ? "Failed to copy address"

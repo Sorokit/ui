@@ -79,6 +79,17 @@ describe("App routing", () => {
     );
   });
 
+  it("deep-linking to /soroban lands on the Soroban screen without being overridden (#850)", () => {
+    localStorage.setItem("sorokit-active-nav", "wallet");
+    setPath("/soroban");
+    vi.mocked(useSorokit).mockReturnValue({
+      isConnected: true,
+    } as ReturnType<typeof useSorokit>);
+    render(<App client={createMockClient() as SorokitClient} />);
+    expect(screen.getByTestId("active-section")).toHaveTextContent("soroban");
+    expect(window.location.pathname).toBe("/soroban");
+  });
+
   it("updates the URL when the section changes", () => {
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: true,

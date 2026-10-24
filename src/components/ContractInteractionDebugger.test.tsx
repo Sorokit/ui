@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry } from "./ContractInteractionDebugger";
+import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry, readDebugHistory } from "./ContractInteractionDebugger";
 
 describe("ContractInteractionDebugger", () => {
   beforeEach(() => {
@@ -164,5 +164,55 @@ describe("ContractInteractionDebugger", () => {
     expect(parsed).toHaveLength(1);
     expect(parsed[0].contractId).toBe("C-NEW");
     expect(parsed[0].method).toBe("mint");
+  });
+
+  it("appends a second invocation to existing history, newest first, and caps the stored list (#856)", () => {
+    const first = {
+      ...createDebuggerEntry({
+        contractId: "C-FIRST",
+        method: "mint",
+        args: [],
+        state: "success",
+      }),
+      timestamp: "2026-10-19T10:00:00.000Z",
+    };
+    addDebugHistory(first, []);
+
+    const second = {
+      ...createDebuggerEntry({
+        contractId: "C-SECOND",
+        method: "burn",
+        args: [],
+        state: "success",
+      }),
+      timestamp: "2026-10-19T10:00:01.000Z",
+    };
+    addDebugHistory(second, readDebugHistory());
+
+    expect(readDebugHistory().map((entry) => entry.contractId)).toEqual([
+      "C-SECOND",
+      "C-FIRST",
+    ]);
+
+    // Re-adding an entry with the same timestamp replaces it instead of duplicating.
+    addDebugHistory(first, readDebugHistory());
+    const deduped = readDebugHistory();
+    expect(deduped).toHaveLength(2);
+    expect(deduped[0].contractId).toBe("C-FIRST");
+
+    // The persisted list never grows past the history limit (newest first).
+    for (let i = 0; i < 15; i += 1) {
+      addDebugHistory(
+        {
+          ...second,
+          contractId: `C-${i}`,
+          timestamp: `2026-10-19T10:01:${String(i).padStart(2, "0")}.000Z`,
+        },
+        readDebugHistory(),
+      );
+    }
+    const capped = readDebugHistory();
+    expect(capped).toHaveLength(10);
+    expect(capped[0].contractId).toBe("C-14");
   });
 });

@@ -65,6 +65,13 @@
   --color-teal: #14b8a6;
   --color-purple: #a855f7;
 
+  /* ── Chart palette (≥3:1 against --color-surface in dark mode) ── */
+  --color-chart-1: #60a5fa;
+  --color-chart-2: #4ade80;
+  --color-chart-3: #fbbf24;
+  --color-chart-4: #f472b6;
+  --color-chart-5: #a78bfa;
+
   /* ── State backgrounds & borders ── */
   /* Warning badge/pill — foreground tuned per theme for WCAG AA (≥4.5:1). */
   --color-warning-fg: #fdba74;
@@ -125,6 +132,13 @@ html[data-theme="light"] {
   --color-warning-fg: #9a3412;
   --color-warning-bg: rgba(249, 115, 22, 0.12);
   --color-warning-border: rgba(154, 52, 18, 0.3);
+
+  /* Chart palette darkened for ≥3:1 against the light surface. */
+  --color-chart-1: #1d4ed8;
+  --color-chart-2: #15803d;
+  --color-chart-3: #b45309;
+  --color-chart-4: #be185d;
+  --color-chart-5: #6d28d9;
 }
 
 html[data-theme="light"] {
@@ -302,6 +316,15 @@ html[data-theme="light"] {
     );
     background-size: 200% 100%;
     animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* Static fallback for prefers-reduced-motion (issue #962): swapped in for
+     .skeleton-shimmer via a motion-reduce: variant at the call site (see
+     Skeleton.tsx), matching the convention already used for animate-pulse
+     in WalletStatusBadge. */
+  .skeleton-shimmer-static {
+    background-color: var(--color-surface-2);
+    opacity: 0.6;
   }
 }
 

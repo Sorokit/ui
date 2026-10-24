@@ -25,17 +25,20 @@ describe("LabelledValue", () => {
     expect(screen.getByText("1,250.50 XLM")).toBeInTheDocument();
   });
 
-  it("applies labelId to the label element", () => {
+  it("applies labelId to the label element and asserts aria-labelledby linkage", () => {
     render(
       <LabelledValue
         label="Account ID"
-        value="GABC...1234"
         labelId="account-id-label"
-      />,
+      >
+        <span aria-labelledby="account-id-label">GABC...1234</span>
+      </LabelledValue>,
     );
 
     const labelElement = screen.getByText("Account ID");
     expect(labelElement).toHaveAttribute("id", "account-id-label");
+    const valueElement = screen.getByText("GABC...1234");
+    expect(valueElement).toHaveAttribute("aria-labelledby", "account-id-label");
   });
 
   it("renders custom children instead of value when children are provided", () => {
@@ -79,12 +82,16 @@ describe("LabelledValue", () => {
 
     it("renders copy button and copies value to clipboard on click", async () => {
       vi.useFakeTimers();
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
-      });
+      if (!navigator.clipboard) {
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn() },
+          writable: true,
+          configurable: true,
+        });
+      }
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockResolvedValue(undefined);
 
       render(
         <LabelledValue
@@ -101,7 +108,7 @@ describe("LabelledValue", () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("SABC123456789");
+      expect(writeTextSpy).toHaveBeenCalledWith("SABC123456789");
 
       // Verify copied feedback state
       expect(
@@ -141,12 +148,16 @@ describe("LabelledValue", () => {
     });
 
     it("copies empty string when value is undefined", async () => {
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
-      });
+      if (!navigator.clipboard) {
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn() },
+          writable: true,
+          configurable: true,
+        });
+      }
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockResolvedValue(undefined);
 
       render(<LabelledValue label="Optional Field" copyable />);
 
@@ -156,16 +167,20 @@ describe("LabelledValue", () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("");
+      expect(writeTextSpy).toHaveBeenCalledWith("");
     });
 
     it("handles clipboard failure gracefully without throwing", async () => {
-      const writeTextMock = vi.fn().mockRejectedValue(new Error("Clipboard error"));
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
-      });
+      if (!navigator.clipboard) {
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn() },
+          writable: true,
+          configurable: true,
+        });
+      }
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockRejectedValue(new Error("Clipboard error"));
 
       render(<LabelledValue label="Address" value="GBRP..." copyable />);
 
@@ -175,7 +190,7 @@ describe("LabelledValue", () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("GBRP...");
+      expect(writeTextSpy).toHaveBeenCalledWith("GBRP...");
       expect(screen.getByRole("button", { name: "Copy Address" })).toBeInTheDocument();
       expect(successToast).not.toHaveBeenCalled();
     });

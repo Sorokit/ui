@@ -22,6 +22,32 @@ export const BUILTIN_NETWORKS: NetworkName[] = [
   "custom",
 ];
 
+/**
+ * Wallet-extension globals, keyed by the id we report to consumers. Outer
+ * arrays carry aliases because extensions don't agree on casing (xBull vs
+ * xbull, freighter vs isFreighter).
+ */
+const WALLET_GLOBAL_KEYS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["freighter", ["freighter", "isFreighter"]],
+  ["xbull", ["xbull", "xBull"]],
+  ["albedo", ["albedo"]],
+  ["lobstr", ["lobstr"]],
+];
+
+/**
+ * #954 — snapshot which supported wallet extensions have injected their
+ * globals. Extensions commonly inject a few milliseconds *after* DOM load,
+ * so this is called repeatedly (on mount, on the `stellar#initialized`
+ * event, and on a short poll) rather than once.
+ */
+function detectInjectedWallets(): string[] {
+  if (typeof window === "undefined") return [];
+  const win = window as unknown as Record<string, unknown>;
+  return WALLET_GLOBAL_KEYS.filter(([, keys]) =>
+    keys.some((key) => Boolean(win[key])),
+  ).map(([id]) => id);
+}
+
 export function SorokitProvider({
   client,
   onError,
@@ -39,6 +65,7 @@ export function SorokitProvider({
 
   const [address, setAddress] = useState<string | null>(null);
   const [walletName, setWalletName] = useState<string | null>(null);
+  const [isHardware, setIsHardware] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [account, setAccount] = useState<AccountData | null>(null);
   const [balances, setBalances] = useState<Balance[]>([]);
@@ -59,6 +86,12 @@ export function SorokitProvider({
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [errorSeverity, setErrorSeverity] = useState<"info" | "error">("error");
   const [errorHistory, setErrorHistory] = useState<string[]>([]);
+  // #954 — ids of wallet extensions currently detected on `window`. Seeded
+  // synchronously so an extension injected before mount is visible on the
+  // first render, then updated as late injections land.
+  const [detectedWallets, setDetectedWallets] = useState<string[]>(() =>
+    detectInjectedWallets(),
+  );
 
   const error = accountError ?? networkError ?? walletError ?? null;
 
@@ -66,6 +99,43 @@ export function SorokitProvider({
   useEffect(() => {
     onErrorRef.current = onError;
   }, [onError]);
+
+  // #954 — detect wallet extensions that inject after mount. Some announce
+  // readiness with `stellar#initialized`; others just assign their global a
+  // few frames later, so also poll briefly before giving up.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let cancelled = false;
+
+    const refresh = () => {
+      if (cancelled) return;
+      const next = detectInjectedWallets();
+      setDetectedWallets((prev) =>
+        prev.length === next.length && prev.every((w, i) => w === next[i])
+          ? prev
+          : next,
+      );
+    };
+
+    refresh();
+    window.addEventListener("stellar#initialized", refresh);
+    window.addEventListener("stellar:initialized", refresh);
+
+    let attempts = 0;
+    const maxAttempts = 10;
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      refresh();
+      if (attempts >= maxAttempts) window.clearInterval(intervalId);
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("stellar#initialized", refresh);
+      window.removeEventListener("stellar:initialized", refresh);
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   // #353 — connectWallet/disconnectWallet/switchNetwork/refreshAccount read
   // the client through this ref instead of closing over the `client` prop
@@ -93,6 +163,20 @@ export function SorokitProvider({
   // clicking "Refresh" again before the previous request settles), so a
   // slower earlier response can't land after a newer one and show stale data.
   const isRefreshingRef = useRef(false);
+
+  // #954 — cancels the in-flight account/balance query. The client API has no
+  // AbortSignal parameter, so the controller is used as the provider's own
+  // cancellation flag; what matters is that a superseded query (a rapid network
+  // switch, a disconnect, a new address) has its rejection checked and
+  // swallowed instead of surfacing as an unhandled promise rejection.
+  const accountRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      accountRequestRef.current?.abort();
+      accountRequestRef.current = null;
+    };
+  }, []);
 
   // #537 — a single source of truth for "a network switch is in flight".
   // `NetworkScreen` and `NetworkSwitcher` both read this through the context,
@@ -184,14 +268,21 @@ export function SorokitProvider({
     setAccountError(null);
 
     let active = true;
+    // Supersede any query already in flight (address change, client change,
+    // rapid network switching) before starting a new one.
+    accountRequestRef.current?.abort();
+    const controller = new AbortController();
+    accountRequestRef.current = controller;
+
     const timerId = window.setTimeout(() => {
+      if (!active || controller.signal.aborted) return;
       setIsLoadingAccount(true);
       Promise.all([
         client.account.getAccount(address),
         client.account.getBalances(address),
       ])
         .then(([accountRes, balancesRes]) => {
-          if (!active) return;
+          if (!active || controller.signal.aborted) return;
           if (accountRes.data) setAccount(accountRes.data);
           if (balancesRes.data) setBalances(balancesRes.data);
           const combined = [accountRes.error, balancesRes.error]
@@ -210,13 +301,27 @@ export function SorokitProvider({
             reportError(balancesRes.error, "account", "error");
           }
         })
+        .catch((e) => {
+          // A rejected request from a query that has since been superseded is
+          // expected (e.g. a network switch aborted it); only a rejection for
+          // the *current* query is a real error worth surfacing.
+          if (!active || controller.signal.aborted) return;
+          const message =
+            e instanceof Error ? e.message : "Failed to load account data";
+          setAccountError(message);
+          reportError(message, "account", "error");
+        })
         .finally(() => {
-          if (active) setIsLoadingAccount(false);
+          if (active && !controller.signal.aborted) setIsLoadingAccount(false);
         });
     }, 0);
 
     return () => {
       active = false;
+      controller.abort();
+      if (accountRequestRef.current === controller) {
+        accountRequestRef.current = null;
+      }
       window.clearTimeout(timerId);
     };
   }, [address, client, reportError]);
@@ -231,6 +336,26 @@ export function SorokitProvider({
     return null;
   }
 
+  // #845 — hardware detection lives here, once, instead of being re-derived from
+  // `walletName` inside each consumer. The provider already knows the wallet
+  // name at connect time, so it is the only place that can answer this.
+  //
+  // Matched against the name rather than an injected flag because the client
+  // adapter's `connect()` resolves to just an address (`SorokitClient.wallet.
+  // connect` in src/lib/client.ts) and surfaces no wallet metadata, and
+  // `detectWalletName()` only ever returns the four known extension names.
+  // Substring matching is therefore the only signal actually available here; the
+  // win is that it is now defined once and every consumer agrees on the answer.
+  function detectIsHardware(walletName: string | null): boolean {
+    if (!walletName) return false;
+    const name = walletName.toLowerCase();
+    return (
+      name.includes("ledger") ||
+      name.includes("hardware") ||
+      name.includes("webusb")
+    );
+  }
+
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     setWalletError(null);
@@ -239,6 +364,8 @@ export function SorokitProvider({
     try {
       const name = detectWalletName();
       setWalletName(name);
+      // #845 — set alongside walletName so the two can't disagree.
+      setIsHardware(detectIsHardware(name));
       const { data, error } = await clientRef.current.wallet.connect();
       if (error) {
         reportError(error, "wallet", "error");
@@ -257,6 +384,17 @@ export function SorokitProvider({
           "info",
         );
       }
+    } catch (e) {
+      // The extension itself can throw/reject (e.g. the user rejected the
+      // popup, or injection failed) instead of resolving with `{ error }`.
+      // Without this, isConnecting still clears in `finally` below but
+      // nothing sets `error`, leaving callers like WalletConnectModal with
+      // neither an address nor an error to transition out of "connecting".
+      reportError(
+        e instanceof Error ? e.message : "Failed to connect wallet.",
+        "wallet",
+        "error",
+      );
     } finally {
       setIsConnecting(false);
     }
@@ -278,6 +416,9 @@ export function SorokitProvider({
 
       setAddress(null);
       setWalletName(null);
+      // #845 — a disconnected session has no wallet, so the hardware flag goes
+      // with it rather than outliving the name it was derived from.
+      setIsHardware(false);
       setAccount(null);
       setBalances([]);
       setAccountError(null);
@@ -294,23 +435,26 @@ export function SorokitProvider({
     }
   }, [reportError]);
 
-  // #715 — registry of polling cancel callbacks. Each polling component
+  // #715, #847 — registry of polling cancel callbacks. Each polling component
   // (FeeEstimator, ContractEventFeed, TransactionStatusTracker, GasOptimizer)
   // registers its cancel on mount and deregisters on unmount.
-  const watchersRef = useRef<Map<() => void, () => void>>(new Map());
+  const watchersRef = useRef<Set<() => void>>(new Set());
 
   const registerWatcher = useCallback((cancel: () => void): () => void => {
-    watchersRef.current.set(cancel, cancel);
+    watchersRef.current.add(cancel);
     return () => {
       watchersRef.current.delete(cancel);
     };
   }, []);
 
   const resetTransactionWatchers = useCallback(() => {
-    for (const cancel of watchersRef.current.values()) {
-      cancel();
+    for (const cancel of watchersRef.current) {
+      try {
+        cancel();
+      } catch (err) {
+        console.error("Error executing watcher cancel callback:", err);
+      }
     }
-    watchersRef.current.clear();
   }, []);
 
   const switchNetwork = useCallback(
@@ -323,6 +467,11 @@ export function SorokitProvider({
       setIsSwitchingNetwork(true);
 
       try {
+      // #954 — cancel any in-flight account/balance query before the switch
+      // builds a new client, so the old network's responses can't land on the
+      // new one (and their rejections don't surface as unhandled).
+      accountRequestRef.current?.abort();
+      accountRequestRef.current = null;
       resetTransactionWatchers();
       const { data, error } = await clientRef.current.network.switchNetwork(param);
       if (error) {
@@ -395,6 +544,11 @@ export function SorokitProvider({
     [reportError, switchNetwork],
   );
 
+  const clearCustomNetworks = useCallback(() => {
+    window.localStorage.removeItem(STORAGE_KEY_CUSTOM_NETWORKS);
+    setCustomNetworks([]);
+  }, []);
+
   const clearError = useCallback(() => {
     setAccountError(null);
     setNetworkError(null);
@@ -405,11 +559,19 @@ export function SorokitProvider({
     if (!address || isRefreshingRef.current) return;
     isRefreshingRef.current = true;
     setIsLoadingAccount(true);
+
+    // Supersede the previous query and register this one so a network switch
+    // (which aborts `accountRequestRef`) cancels it cleanly.
+    accountRequestRef.current?.abort();
+    const controller = new AbortController();
+    accountRequestRef.current = controller;
+
     try {
       const [accountRes, balancesRes] = await Promise.all([
         clientRef.current.account.getAccount(address),
         clientRef.current.account.getBalances(address),
       ]);
+      if (controller.signal.aborted) return;
       if (accountRes.data) setAccount(accountRes.data);
       if (balancesRes.data) setBalances(balancesRes.data);
       if (accountRes.error && balancesRes.error) {
@@ -423,7 +585,19 @@ export function SorokitProvider({
       } else if (balancesRes.error) {
         reportError(balancesRes.error, "account", "error");
       }
+    } catch (e) {
+      // Swallow a rejection for a query that has been superseded (e.g. the
+      // network switched mid-refresh); surface only genuine failures.
+      if (controller.signal.aborted) return;
+      reportError(
+        e instanceof Error ? e.message : "Failed to refresh account data",
+        "account",
+        "error",
+      );
     } finally {
+      if (accountRequestRef.current === controller) {
+        accountRequestRef.current = null;
+      }
       setIsLoadingAccount(false);
       isRefreshingRef.current = false;
     }
@@ -434,6 +608,8 @@ export function SorokitProvider({
       client: currentClient,
       address,
       walletName,
+      detectedWallets,
+      isHardware,
       isConnected: !!address,
       isConnecting,
       isLoading: isConnecting || isLoadingAccount,
@@ -450,6 +626,7 @@ export function SorokitProvider({
       isSwitchingNetwork,
       customNetworks,
       addCustomNetwork,
+      clearCustomNetworks,
       resetTransactionWatchers,
       registerWatcher,
       error,
@@ -464,6 +641,8 @@ export function SorokitProvider({
       currentClient,
       address,
       walletName,
+      detectedWallets,
+      isHardware,
       isConnecting,
       isDisconnecting,
       isLoadingAccount,
@@ -478,6 +657,7 @@ export function SorokitProvider({
       isSwitchingNetwork,
       customNetworks,
       addCustomNetwork,
+      clearCustomNetworks,
       resetTransactionWatchers,
       registerWatcher,
       error,

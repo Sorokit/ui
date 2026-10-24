@@ -35,7 +35,13 @@ export function Skeleton({
           : resolvedShape === "square"
             ? "rounded-none"
             : "rounded-lg",
-        variant === "pulse" ? "animate-pulse" : "skeleton-shimmer",
+        // Gate the animation on motion-safe and provide the matching
+        // motion-reduce fallback, rather than an unconditional
+        // animate-pulse/skeleton-shimmer (issue #962): the bare utility
+        // would keep animating even with prefers-reduced-motion set.
+        variant === "pulse"
+          ? "motion-safe:animate-pulse motion-reduce:opacity-60"
+          : "motion-safe:skeleton-shimmer motion-reduce:skeleton-shimmer-static",
         className,
       )}
       {...props}
@@ -155,6 +161,61 @@ export function SkeletonCard({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+export interface SkeletonTableProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Number of placeholder rows to render. */
+  rows?: number;
+  /** Number of placeholder columns per row. */
+  columns?: number;
+}
+
+/**
+ * Pre-composed table loading state: a header row of column-label
+ * placeholders above `rows` body rows of `columns` cell placeholders each
+ * (issue #962). Columns are laid out with `grid` so every row's cells line
+ * up under the header regardless of `columns`.
+ */
+export function SkeletonTable({
+  rows = 4,
+  columns = 4,
+  className,
+  ...props
+}: SkeletonTableProps) {
+  const gridStyle = { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` };
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      className={cn("rounded-xl border border-line bg-surface overflow-hidden", className)}
+      {...props}
+    >
+      <div
+        className="grid gap-4 px-5 py-4 border-b border-line"
+        style={gridStyle}
+        data-testid="skeleton-table-header"
+      >
+        {Array.from({ length: columns }).map((_, i) => (
+          <Skeleton key={`skeleton-table-header-${i}`} className="h-3.5 w-16" />
+        ))}
+      </div>
+      {Array.from({ length: rows }).map((_, rowIndex) => (
+        <div
+          key={`skeleton-table-row-${rowIndex}`}
+          className="grid gap-4 px-5 py-4 border-b border-line last:border-0"
+          style={gridStyle}
+          data-testid="skeleton-table-row"
+        >
+          {Array.from({ length: columns }).map((_, colIndex) => (
+            <Skeleton
+              key={`skeleton-table-cell-${rowIndex}-${colIndex}`}
+              className="h-4 w-full"
+            />
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

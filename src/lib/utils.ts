@@ -16,6 +16,23 @@ export function truncateAddress(address: string | null | undefined, start = 6, e
   return `${chars.slice(0, start).join("")}...${chars.slice(-end).join("")}`;
 }
 
+/**
+ * Truncate an address adaptively for compact or mobile viewports.
+ * @param address Stellar address, contract ID, or tx hash
+ * @param options Configuration for compact / responsive truncation.
+ *                `compact: true` uses (3, 3) e.g. "GAB...WXYZ" for narrow/mobile containers (<360px).
+ */
+export function truncateAddressResponsive(
+  address: string | null | undefined,
+  options?: { compact?: boolean; start?: number; end?: number },
+): string {
+  if (!address) return "";
+  if (options?.compact) {
+    return truncateAddress(address, options.start ?? 3, options.end ?? 3);
+  }
+  return truncateAddress(address, options?.start ?? 6, options?.end ?? 4);
+}
+
 export function safeFormat(balance: string): string {
   const n = parseFloat(balance);
   if (!balance || isNaN(n)) return "0.00";

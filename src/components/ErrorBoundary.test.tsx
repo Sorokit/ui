@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -442,6 +442,76 @@ describe("ErrorBoundary", () => {
       );
 
       expect(screen.queryByText("Show component stack")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("copy error details (#953)", () => {
+    it("renders a 'Copy error details' button in the fallback UI", () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent shouldThrow={true} />
+        </ErrorBoundary>
+      );
+
+      expect(
+        screen.getByRole("button", { name: /copy error details/i })
+      ).toBeInTheDocument();
+    });
+
+    it("copies a diagnostics report and confirms with 'Copied!'", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const originalClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent
+            shouldThrow={true}
+            errorMessage="Diagnostics boom"
+          />
+        </ErrorBoundary>
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy error details/i })
+      );
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      const report = writeText.mock.calls[0][0] as string;
+      expect(report).toContain("sorokit-ui error report");
+      expect(report).toContain("Diagnostics boom");
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /copied!/i })
+        ).toBeInTheDocument()
+      );
+
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    });
+
+    it("keeps the details copyable even when production hides the message", () => {
+      vi.stubEnv("DEV", false);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent shouldThrow={true} />
+        </ErrorBoundary>
+      );
+
+      expect(
+        screen.getByRole("button", { name: /copy error details/i })
+      ).toBeInTheDocument();
     });
   });
 });

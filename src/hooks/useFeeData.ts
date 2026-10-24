@@ -30,6 +30,25 @@ export function useFeeData(refreshInterval = 0, isVisible: boolean = true) {
   const [, forceRender] = useState({});
   const currentNetworkKey = networkKey(network);
 
+  // #955 — pause polling while the tab is backgrounded. Browsers throttle
+  // timers in hidden tabs anyway, so the poll buys nothing there but still
+  // costs network requests; `visibilitychange` lets the interval be cleared
+  // outright and re-armed with a fresh estimate when the tab comes back.
+  const [tabVisible, setTabVisible] = useState<boolean>(() =>
+    typeof document === "undefined" ? true : document.visibilityState !== "hidden",
+  );
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const onVisibilityChange = () => {
+      setTabVisible(document.visibilityState !== "hidden");
+    };
+    onVisibilityChange();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+
   const load = useCallback(async () => {
     if (!client || globalLoading) return;
     const generation = globalGeneration;
@@ -92,7 +111,7 @@ export function useFeeData(refreshInterval = 0, isVisible: boolean = true) {
   }, []);
 
   useEffect(() => {
-    if (!isVisible || !client) return;
+    if (!isVisible || !tabVisible || !client) return;
 
     // Always fetch immediately on mount/resume, unless already loading
     if (!globalLoading) {
@@ -115,7 +134,7 @@ export function useFeeData(refreshInterval = 0, isVisible: boolean = true) {
         }
       };
     }
-  }, [client, isVisible, refreshInterval, load]);
+  }, [client, isVisible, tabVisible, refreshInterval, load]);
 
   return {
     fee: globalFeeData,

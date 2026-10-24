@@ -230,4 +230,156 @@ describe("AccountSidebar", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(mockClose).toHaveBeenCalledTimes(1);
   });
+
+  // ── Empty-state message (#890) ──────────────────────────────────────────
+  describe("empty state", () => {
+    it("shows a helpful 'No linked accounts' message when there are zero balances", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ address: ADDRESS, isConnected: true, balances: [] }),
+      );
+      render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+      const message = screen.getByText(/no linked accounts/i);
+      expect(message).toBeInTheDocument();
+      expect(message).toHaveAttribute("role", "status");
+    });
+
+    it("does not show the empty-account message when balances are present", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          balances: [makeBalance()],
+        }),
+      );
+      render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+      expect(screen.queryByText(/no linked accounts/i)).not.toBeInTheDocument();
+    });
+
+    it("renders every balance when multiple accounts/assets exist", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          balances: [
+            makeBalance({ asset: "native", assetType: "native", balance: "10" }),
+            makeBalance({ asset: "USDC:ISSUER", assetType: "credit_alphanum4", assetCode: "USDC", balance: "20" }),
+            makeBalance({ asset: "AQUA:ISSUER", assetType: "credit_alphanum4", assetCode: "AQUA", balance: "30" }),
+          ],
+        }),
+      );
+      render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+      expect(screen.getByText("Assets (3)")).toBeInTheDocument();
+      expect(screen.getAllByRole("option")).toHaveLength(3);
+    });
+  });
+
+  // ── Balance listbox keyboard navigation (#890) ──────────────────────────
+  describe("balance listbox keyboard navigation", () => {
+    function renderWithBalances() {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          balances: [
+            makeBalance({ asset: "native", assetType: "native", balance: "10" }),
+            makeBalance({ asset: "USDC:ISSUER", assetType: "credit_alphanum4", assetCode: "USDC", balance: "20" }),
+            makeBalance({ asset: "AQUA:ISSUER", assetType: "credit_alphanum4", assetCode: "AQUA", balance: "30" }),
+          ],
+        }),
+      );
+      return render(<AccountSidebar open={true} onClose={vi.fn()} />);
+    }
+
+    it("exposes the balances as an ARIA listbox with the first item active by default", async () => {
+      renderWithBalances();
+      await flushTxFetch();
+      const listbox = screen.getByRole("listbox", { name: "Account balances" });
+      expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-0");
+      const options = screen.getAllByRole("option");
+      expect(options[0]).toHaveAttribute("aria-selected", "true");
+      expect(options[1]).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("moves the active descendant forward on ArrowDown", async () => {
+      renderWithBalances();
+      await flushTxFetch();
+      const listbox = screen.getByRole("listbox", { name: "Account balances" });
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+      expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-1");
+      expect(screen.getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("moves the active descendant backward on ArrowUp, wrapping to the last item", async () => {
+      renderWithBalances();
+      await flushTxFetch();
+      const listbox = screen.getByRole("listbox", { name: "Account balances" });
+      fireEvent.keyDown(listbox, { key: "ArrowUp" });
+      expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-2");
+    });
+
+    it("wraps ArrowDown from the last item back to the first", async () => {
+      renderWithBalances();
+      await flushTxFetch();
+      const listbox = screen.getByRole("listbox", { name: "Account balances" });
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+      fireEvent.keyDown(listbox, { key: "ArrowDown" });
+      expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-0");
+    });
+
+    it("triggers refreshAccount when Enter is pressed on the active item", async () => {
+      const mockRefresh = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          address: ADDRESS,
+          isConnected: true,
+          balances: [makeBalance()],
+          refreshAccount: mockRefresh,
+        }),
+      );
+      render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+      const listbox = screen.getByRole("listbox", { name: "Account balances" });
+      fireEvent.keyDown(listbox, { key: "Enter" });
+      expect(mockRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("selects an item by clicking it directly", async () => {
+      renderWithBalances();
+      await flushTxFetch();
+      const options = screen.getAllByRole("option");
+      fireEvent.click(options[2]);
+      expect(options[2]).toHaveAttribute("aria-selected", "true");
+      expect(
+        screen.getByRole("listbox", { name: "Account balances" }),
+      ).toHaveAttribute("aria-activedescendant", "balance-item-2");
+    });
+  });
+
+  // ── Collapsed-state persistence across remounts (#890) ──────────────────
+  describe("collapsed-state persistence across unmount/remount", () => {
+    it("preserves the collapsed selection when the sidebar unmounts and remounts", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ address: ADDRESS, isConnected: true }),
+      );
+      const { unmount } = render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+
+      fireEvent.click(screen.getByRole("button", { name: "Collapse account sidebar" }));
+      expect(screen.queryByText("Account")).not.toBeInTheDocument();
+
+      // Simulate the real unmount/remount cycle the issue describes (e.g. the
+      // host app conditionally rendering <AccountSidebar> rather than only
+      // toggling its `open` prop).
+      unmount();
+      render(<AccountSidebar open={true} onClose={vi.fn()} />);
+      await flushTxFetch();
+
+      expect(screen.queryByText("Account")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Expand account sidebar" })).toBeInTheDocument();
+    });
+  });
 });

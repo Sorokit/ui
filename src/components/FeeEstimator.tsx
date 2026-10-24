@@ -134,7 +134,7 @@ export function FeeEstimator({
   }, [hookLoad]);
 
   // Register a cancel callback so `resetTransactionWatchers` can stop polling
-  // on network switch (#715).
+  // on network switch (#715) and unmount (#861).
   useEffect(() => {
     const cancel = () => {
       if (intervalIdRef.current !== null) {

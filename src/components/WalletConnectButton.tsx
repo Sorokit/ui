@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import { useOutsideClick } from "@/hooks/useOutsideClick";
-import { truncateAddress } from "@/lib/utils";
+import { truncateAddress, truncateAddressResponsive } from "@/lib/utils";
 
 import { WalletConnectModal } from "./WalletConnectModal";
 
@@ -42,14 +42,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     }
   }, [isConnected]);
 
-  const isHardwareWallet =
-    Boolean(isHardware) ||
-    Boolean(
-      walletName &&
-        (walletName.toLowerCase().includes("ledger") ||
-          walletName.toLowerCase().includes("hardware") ||
-          walletName.toLowerCase().includes("webusb")),
-    );
+  // #845 — read straight from context. The provider owns hardware detection;
+  // re-deriving it here from `walletName` was duplicated logic that could drift
+  // from the provider's own answer.
+  const isHardwareWallet = isHardware;
 
   const handleDisconnect = async () => {
     try {
@@ -88,18 +84,27 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
       return (
         <button
           type="button"
-          onClick={onOpenModal}
-          className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenModal();
+          }}
+          className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
           aria-label={`Wallet connected: ${address}. Click to manage.`}
         >
           <span className="w-2 h-2 rounded-full bg-green shrink-0" />
+          <span
+            data-address-compact
+            className="inline sm:hidden font-mono text-[11px] truncate"
+          >
+            {truncateAddressResponsive(address, { compact: true })}
+          </span>
           <span data-address className="hidden sm:inline">
             {truncateAddress(address)}
           </span>
           {isHardwareWallet && (
             <span
               data-testid="hardware-badge"
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30"
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30 shrink-0"
             >
               {walletName && walletName.toLowerCase().includes("ledger")
                 ? "Ledger"
@@ -115,20 +120,29 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            onClick={() => setDropdownOpen((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            onClick={(e) => {
+              e.stopPropagation();
+              setDropdownOpen((prev) => !prev);
+            }}
+            className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
             aria-label={`Wallet connected: ${address}. Click to manage.`}
             aria-haspopup="menu"
             aria-expanded={dropdownOpen}
           >
             <span className="w-2 h-2 rounded-full bg-green shrink-0" />
+            <span
+              data-address-compact
+              className="inline sm:hidden font-mono text-[11px] truncate"
+            >
+              {truncateAddressResponsive(address, { compact: true })}
+            </span>
             <span data-address className="hidden sm:inline">
               {truncateAddress(address)}
             </span>
             {isHardwareWallet && (
               <span
                 data-testid="hardware-badge"
-                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30"
+                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30 shrink-0"
               >
                 {walletName && walletName.toLowerCase().includes("ledger")
                   ? "Ledger"
@@ -197,9 +211,14 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
       <Button
         size="md"
         loading={isConnecting}
-        onClick={() => setConnectModalOpen(true)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setConnectModalOpen(true);
+        }}
         className="px-2.5 sm:px-4"
         aria-label={isConnecting ? "Connecting…" : "Connect Wallet"}
+        aria-haspopup="dialog"
+        aria-expanded={connectModalOpen}
       >
         <span className="hidden sm:inline">
           {isConnecting ? "Connecting…" : "Connect Wallet"}
@@ -214,7 +233,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         >
           <span>{error}</span>
           <button
-            onClick={clearError}
+            onClick={(e) => {
+              e.stopPropagation();
+              clearError();
+            }}
             className="text-red opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shrink-0"
             aria-label="Clear error"
           >

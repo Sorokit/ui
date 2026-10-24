@@ -294,10 +294,13 @@ export function StakingDashboard({
         prev.map((d) => ({ ...d, claimableReward: "0" })),
       );
       setAnnouncement("All rewards claimed");
+      // Refresh the connected account so claimed balances propagate outside
+      // the dashboard as well.
+      await refreshAccount();
     } finally {
       setIsClaimingAll(false);
     }
-  }, []);
+  }, [refreshAccount]);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (

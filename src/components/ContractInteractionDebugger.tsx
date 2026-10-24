@@ -46,6 +46,8 @@ export interface ContractInteractionDebuggerProps {
   stateAfter?: unknown;
   history?: DebuggerEntry[];
   onHistoryChange?: (history: DebuggerEntry[]) => void;
+  /** Called with a past invocation-history entry to repopulate the builder form. */
+  onLoadEntry?: (entry: DebuggerEntry) => void;
 }
 
 interface DiffEntry {
@@ -295,6 +297,7 @@ export function ContractInteractionDebugger({
   stateAfter,
   history = [],
   onHistoryChange,
+  onLoadEntry,
 }: ContractInteractionDebuggerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -375,6 +378,7 @@ export function ContractInteractionDebugger({
         </div>
         {copyLabel && copyValue ? (
           <Button
+            type="button"
             variant="secondary"
             size="sm"
             onClick={() => void handleCopy(copyLabel, copyValue)}
@@ -399,6 +403,7 @@ export function ContractInteractionDebugger({
           </p>
         </div>
         <Button
+          type="button"
           variant="secondary"
           size="sm"
           onClick={() => setIsOpen((prev) => !prev)}
@@ -434,6 +439,7 @@ export function ContractInteractionDebugger({
                           Pre-invocation snapshot
                         </p>
                         <Button
+                          type="button"
                           variant="secondary"
                           size="sm"
                           onClick={() =>
@@ -458,6 +464,7 @@ export function ContractInteractionDebugger({
                           Post-invocation snapshot
                         </p>
                         <Button
+                          type="button"
                           variant="secondary"
                           size="sm"
                           onClick={() =>
@@ -642,6 +649,18 @@ export function ContractInteractionDebugger({
                         {formatTimestamp(entry.timestamp)}
                       </span>
                     </div>
+                    {onLoadEntry && (
+                      <div className="mt-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onLoadEntry(entry)}
+                        >
+                          Load into form
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

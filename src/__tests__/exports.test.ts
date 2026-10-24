@@ -1,6 +1,10 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import * as exports from "../index";
+import { findCircularDependencies } from "../verify-exports";
 
 describe("Public exports surface", () => {
   it("exposes all recently added and core component exports", () => {
@@ -108,6 +112,7 @@ describe("Public exports surface", () => {
     expect(exports.PortfolioRebalancer).toBeDefined();
     expect(exports.DelegationRow).toBeDefined();
     expect(exports.RewardHistory).toBeDefined();
+    expect(exports.generateRewardHistoryCsv).toBeTypeOf("function");
     expect(exports.RewardsPanel).toBeDefined();
     expect(exports.SwapExecutionTracker).toBeDefined();
     expect(exports.PieChart).toBeDefined();
@@ -141,8 +146,11 @@ describe("Public exports surface", () => {
     // Staking Utilities
     expect(exports.aggregateDailyRewards).toBeTypeOf("function");
     expect(exports.createDefaultFilter).toBeTypeOf("function");
+    expect(exports.DEFAULT_XLM_PRICE_USD).toBeTypeOf("number");
     expect(exports.DELEGATION_BASE_FEE_STROOPS).toBeTypeOf("number");
     expect(exports.estimateDelegationFeeXlm).toBeTypeOf("function");
+    expect(exports.estimateHistoricalXlmPriceUsd).toBeTypeOf("function");
+    expect(exports.estimateRewardUsdValue).toBeTypeOf("function");
     expect(exports.filterValidators).toBeTypeOf("function");
     expect(exports.formatStakingPct).toBeTypeOf("function");
     expect(exports.formatXlm).toBeTypeOf("function");
@@ -189,5 +197,54 @@ describe("Public exports surface", () => {
     };
     const actual: Expected = {} as Expected;
     expect(actual).toBeDefined();
+  });
+
+  it("has no circular dependencies between component files and context providers", () => {
+    const cycles = findCircularDependencies();
+    expect(
+      cycles,
+      cycles.length > 0
+        ? `found ${cycles.length} import cycle(s):\n${cycles
+            .map((c) => c.join(" -> "))
+            .join("\n")}`
+        : undefined,
+    ).toEqual([]);
+  });
+});
+
+describe("Type declaration bundle", () => {
+  // Assumes `npm run build` has already produced dist/ -- CI runs the Build
+  // step before Verify Exports (see .github/workflows/test.yml), and
+  // re-running the ~7s vite build here on every test run, rather than
+  // asserting against what that step already produced, would duplicate work
+  // the pipeline already pays for.
+  const distDir = resolve(import.meta.dirname, "../../dist");
+  const componentsDts = resolve(distDir, "components/index.d.ts");
+
+  it("built dist/components/index.d.ts", () => {
+    expect(
+      existsSync(componentsDts),
+      `${componentsDts} does not exist -- run "npm run build" first`,
+    ).toBe(true);
+  });
+
+  it("declares every component named in this package's public API without an error marker", () => {
+    const dts = readFileSync(componentsDts, "utf-8");
+
+    // vite-plugin-dts/rollup emit a comment containing this when a type
+    // couldn't be resolved into the bundle, rather than failing the build
+    // outright -- the silent failure mode this test exists to catch.
+    expect(dts).not.toMatch(/could not be resolved|Unresolved type/i);
+
+    for (const name of [
+      "GovernanceDashboard",
+      "SwapSimulator",
+      "PortfolioRebalancer",
+    ]) {
+      expect(
+        dts.includes(name),
+        `expected dist/components/index.d.ts to declare ${name}`,
+      ).toBe(true);
+    }
   });
 });

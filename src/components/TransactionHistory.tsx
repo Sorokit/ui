@@ -5,6 +5,7 @@ import {
   CheckmarkCircle01Icon,
   CoinsSwapIcon,
   ContractsIcon,
+  Copy01Icon,
   GiftIcon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
@@ -217,8 +218,11 @@ export const TxRow = memo(function TxRow({
       className="flex items-center justify-between px-5 py-3.5 border-b border-line last:border-0 gap-4 hover:bg-surface-2 transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 min-w-0">
-        {/* Status icon */}
+        {/* Status icon: purely decorative, hidden from the accessibility
+            tree since the Success/Failed badge below already announces
+            the same status as real text (issue #961). */}
         <div
+          aria-hidden="true"
           data-testid="status-icon-container"
           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${tx.successful ? "bg-success-dim" : "bg-error-dim"}`}
         >
@@ -235,10 +239,13 @@ export const TxRow = memo(function TxRow({
           <span data-txhash className="truncate">
             {truncateAddress(tx.hash, 10, 6)}
           </span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-ink-3">Ledger {tx.ledger}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] text-ink-3 shrink-0">Ledger {tx.ledger}</span>
             {tx.memo && (
-              <span className="text-[10px] text-ink-3" title={tx.memo}>
+              <span
+                className="text-[10px] text-ink-3 truncate min-w-0"
+                title={tx.memo}
+              >
                 · {truncateMemo(tx.memo)}
               </span>
             )}
@@ -265,6 +272,31 @@ export const TxRow = memo(function TxRow({
               {tx.operationCount} ops
             </Badge>
           )}
+          {/* A real <button> would be invalid HTML nested inside the row's
+              own <a> wrapper (when it links to the explorer), so this
+              uses role="button" on a <span> instead, with the same click
+              and keyboard handling a native button gets for free. */}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              navigator.clipboard?.writeText(tx.hash).catch(() => {});
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                navigator.clipboard?.writeText(tx.hash).catch(() => {});
+              }
+            }}
+            className="p-1 rounded hover:bg-surface-2 text-ink-3 hover:text-ink transition-colors cursor-pointer"
+            aria-label={`Copy transaction hash ${truncateAddress(tx.hash, 10, 6)}`}
+            title="Copy transaction hash"
+          >
+            <HugeiconsIcon icon={Copy01Icon} size={12} strokeWidth={1.5} />
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span

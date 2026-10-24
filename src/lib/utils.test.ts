@@ -7,6 +7,7 @@ import {
   isMuxedAccount,
   toXLM,
   truncateAddress,
+  truncateAddressResponsive,
   truncateToUtf8ByteLength,
   utf8ByteLength,
   validateStellarAddress,
@@ -51,6 +52,33 @@ describe("truncateAddress", () => {
     const elevenCharString = "12345678901"; // 11 chars (start+end=10, start+end+3=13)
     expect(() => truncateAddress(elevenCharString, 6, 4)).not.toThrow();
     expect(truncateAddress(elevenCharString, 6, 4)).toBe("123456...8901");
+  });
+});
+
+describe("truncateAddressResponsive (#887)", () => {
+  const STELLAR_ADDRESS_56 =
+    "GABCDEF123456789012345678901234567890123456789012345WXYZ";
+
+  it("truncates with compact bounds (3, 3) for narrow mobile viewports", () => {
+    const compactResult = truncateAddressResponsive(STELLAR_ADDRESS_56, { compact: true });
+    expect(compactResult).toBe("GAB...XYZ");
+    expect(compactResult.length).toBe(9);
+  });
+
+  it("defaults to standard bounds (6, 4) when compact is omitted or false", () => {
+    const standardResult = truncateAddressResponsive(STELLAR_ADDRESS_56);
+    expect(standardResult).toBe("GABCDE...WXYZ");
+  });
+
+  it("respects custom start and end bounds in responsive mode", () => {
+    const customResult = truncateAddressResponsive(STELLAR_ADDRESS_56, { compact: true, start: 4, end: 4 });
+    expect(customResult).toBe("GABC...WXYZ");
+  });
+
+  it("handles null, undefined, and empty string safely", () => {
+    expect(truncateAddressResponsive(null)).toBe("");
+    expect(truncateAddressResponsive(undefined)).toBe("");
+    expect(truncateAddressResponsive("")).toBe("");
   });
 });
 

@@ -71,4 +71,47 @@ describe("Separator", () => {
     expect(markup).not.toMatch(/bg-\[#/);
     expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });
+
+  // ── Flex-container height collapse (issue #963) ──────────────────────────
+
+  it("applies self-stretch and min-h-full so a vertical separator keeps its height in a stretch flex container", () => {
+    const { container } = render(<Separator orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass("self-stretch");
+    expect(root).toHaveClass("min-h-full");
+  });
+
+  // ── Decorative / semantic role (issue #963) ──────────────────────────────
+
+  it("exposes role=separator and aria-orientation by default (non-decorative)", () => {
+    const { container } = render(<Separator orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "separator");
+    expect(root).toHaveAttribute("aria-orientation", "vertical");
+    expect(root).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("hides a decorative horizontal separator from the accessibility tree", () => {
+    const { container } = render(<Separator decorative />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(root).not.toHaveAttribute("aria-orientation");
+  });
+
+  it("hides a decorative vertical separator from the accessibility tree while keeping its layout classes", () => {
+    const { container } = render(<Separator decorative orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(root).toHaveClass("self-stretch");
+  });
+
+  it("hides a decorative labelled separator from the accessibility tree", () => {
+    const { container } = render(<Separator decorative label="OR" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("OR")).toBeInTheDocument();
+  });
 });

@@ -28,13 +28,17 @@ const TESTNET_NETWORK = {
 
 describe("NetworkScreen", () => {
   let switchNetwork: ReturnType<typeof vi.fn>;
+  let clearCustomNetworks: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     switchNetwork = vi.fn();
+    clearCustomNetworks = vi.fn();
     vi.mocked(useSorokit).mockReturnValue({
       network: TESTNET_NETWORK,
       switchNetwork,
+      customNetworks: [],
+      clearCustomNetworks,
     } as unknown as ReturnType<typeof useSorokit>);
 
     // jsdom does not implement scrollIntoView
@@ -84,6 +88,27 @@ describe("NetworkScreen", () => {
     expect(screen.getByText("Testnet")).toBeInTheDocument();
     expect(screen.getByText("Futurenet")).toBeInTheDocument();
     expect(screen.getByText("Localnet")).toBeInTheDocument();
+  });
+
+  it("clears all custom networks when resetting to defaults", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      network: TESTNET_NETWORK,
+      switchNetwork,
+      customNetworks: [
+        {
+          name: "Local Dev",
+          rpcUrl: "https://rpc.example.com",
+          horizonUrl: "https://horizon.example.com",
+          passphrase: "Local Dev Network",
+        },
+      ],
+      clearCustomNetworks,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<NetworkScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Defaults" }));
+
+    expect(clearCustomNetworks).toHaveBeenCalledTimes(1);
   });
 
   it("does not render the active info panel when network is null", () => {

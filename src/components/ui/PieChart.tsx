@@ -35,6 +35,8 @@ export interface PieChartProps {
   className?: string;
   /** Aria-label for the SVG element */
   ariaLabel?: string;
+  /** Optional callback fired when a slice is hovered or focused (#873) */
+  onSliceHover?: (slice: PieSlice | null) => void;
 }
 
 // ─── Palette ─────────────────────────────────────────────────────────────────
@@ -197,6 +199,7 @@ export function PieChart({
   centerLabel,
   className,
   ariaLabel,
+  onSliceHover,
 }: PieChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
@@ -254,8 +257,9 @@ export function PieChart({
       const x = rect ? clientX - rect.left : clientX;
       const y = rect ? clientY - rect.top : clientY;
       setHoverState({ slice, pct, x, y });
+      onSliceHover?.(slice);
     },
-    [],
+    [onSliceHover],
   );
 
   const handleFocus = useCallback(
@@ -264,13 +268,15 @@ export function PieChart({
       const x = cx + midR * Math.cos(midAngle);
       const y = cy + midR * Math.sin(midAngle);
       setHoverState({ slice, pct, x, y });
+      onSliceHover?.(slice);
     },
-    [cx, cy, r, innerR],
+    [cx, cy, r, innerR, onSliceHover],
   );
 
   const handlePointerLeave = useCallback(() => {
     setHoverState(null);
-  }, []);
+    onSliceHover?.(null);
+  }, [onSliceHover]);
 
   // Empty state — render a grey placeholder ring
   if (total <= 0 || !slices || slices.length === 0) {
@@ -335,7 +341,10 @@ export function PieChart({
                 tabIndex={0}
                 role="graphics-symbol"
                 aria-label={`${slice.label}: ${pct.toFixed(1)}%`}
-                className="transition-opacity duration-150 hover:opacity-80 focus:opacity-80 focus:outline-none cursor-pointer"
+                // A keyboard user tabs onto each slice; the focus ring (plus a
+                // brand-coloured stroke, since box-shadow rings don't render
+                // reliably on SVG) makes the focused slice obvious.
+                className="transition-opacity duration-150 hover:opacity-80 focus:opacity-80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-base focus-visible:stroke-brand focus-visible:stroke-2"
                 onMouseEnter={(e) => handlePointerMove(e, slice, pct)}
                 onMouseMove={(e) => handlePointerMove(e, slice, pct)}
                 onFocus={() => handleFocus(slice, pct, midAngle)}

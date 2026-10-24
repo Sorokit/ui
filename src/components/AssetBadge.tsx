@@ -1,3 +1,8 @@
+import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
+
+import { Tooltip } from "@/components/ui/Tooltip";
 import type { Balance } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
@@ -64,6 +69,41 @@ export function isKnownAsset(code: string): boolean {
   return KNOWN_ASSETS.has(code.toUpperCase());
 }
 
+const COPIED_RESET_MS = 2000;
+
+function copyViaExecCommand(text: string): boolean {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+
+  const selection = document.getSelection();
+  const previousRange =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  let succeeded: boolean;
+  try {
+    succeeded = document.execCommand("copy");
+  } catch {
+    succeeded = false;
+  } finally {
+    document.body.removeChild(textarea);
+    if (previousRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
+  }
+  return succeeded;
+}
+
 export interface AssetBadgeProps {
   balance: Balance;
   showIssuer?: boolean;
@@ -78,6 +118,8 @@ export interface AssetBadgeProps {
    */
   showIssuerSuffix?: boolean;
   size?: "sm" | "md" | "lg";
+  /** Network variant styling (e.g. "mainnet" | "testnet"). */
+  network?: "mainnet" | "testnet" | (string & {});
   /** Makes the badge an interactive button — e.g. for asset selection. */
   onClick?: () => void;
   /** Custom color map merged with default ASSET_COLORS */
@@ -91,19 +133,36 @@ export function AssetBadge({
   showIssuerForUnknown,
   showIssuerSuffix = false,
   size = "md",
+  network,
   onClick,
   colorMap,
   className,
 }: AssetBadgeProps) {
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const isLpShares = balance.assetType === "liquidity_pool_shares";
+  const isNative = balance.assetType === "native";
   const code = isLpShares
     ? "LP"
-    : balance.assetType === "native"
+    : isNative
       ? "XLM"
       : (balance.assetCode ?? balance.asset);
   const { bg, text } = isLpShares
     ? (colorMap?.[code] ?? colorMap?.LP ?? { bg: "bg-surface-2", text: "text-ink-2" })
-    : getAssetColor(code, colorMap);
+    : network === "testnet" && !colorMap?.[code]
+      ? { bg: "bg-warning-dim", text: "text-warning" }
+      : getAssetColor(code, colorMap);
 
   const iconSize =
     size === "sm"
@@ -137,6 +196,40 @@ export function AssetBadge({
       ? truncateAddress(balance.assetIssuer, 4, 4)
       : null;
 
+  const hasIssuerTooltip = !isNative && !isLpShares && Boolean(balance.assetIssuer);
+
+  async function handleCopyIssuer(e: MouseEvent) {
+    e.stopPropagation();
+    if (!balance.assetIssuer) return;
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+
+    let succeeded = false;
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(balance.assetIssuer);
+        succeeded = true;
+      } catch {
+        succeeded = false;
+      }
+    }
+    if (!succeeded) {
+      succeeded = copyViaExecCommand(balance.assetIssuer);
+    }
+
+    if (succeeded) {
+      setCopyFailed(false);
+      setCopied(true);
+      resetTimerRef.current = setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    } else {
+      setCopied(false);
+      setCopyFailed(true);
+      resetTimerRef.current = setTimeout(() => setCopyFailed(false), COPIED_RESET_MS);
+    }
+  }
+
   const content = (
     <>
       <div
@@ -152,7 +245,13 @@ export function AssetBadge({
         {iconLabel}
       </div>
       <div className="flex flex-col gap-0.5 min-w-0">
-        <span className={cn("font-medium text-ink leading-none", labelSize)}>
+        <span
+          title={code}
+          className={cn(
+            "font-medium text-ink leading-none truncate max-w-[12ch]",
+            labelSize,
+          )}
+        >
           {code}
           {issuerSuffix && (
             <span className="text-ink-3 font-normal ml-1 text-[11px]">
@@ -161,14 +260,14 @@ export function AssetBadge({
           )}
         </span>
         {issuerVisible &&
-          (balance.assetType === "native" ? (
+          (isNative ? (
             <span className={cn("text-ink-3", subSize)}>Stellar Lumens</span>
           ) : isLpShares ? (
             <span className={cn("text-ink-3", subSize)}>
               Liquidity Pool Shares
             </span>
           ) : balance.assetIssuer ? (
-            <span data-address className={subSize}>
+            <span data-address className={cn("truncate", subSize)}>
               {truncateAddress(balance.assetIssuer, 6, 4)}
             </span>
           ) : null)}
@@ -176,30 +275,92 @@ export function AssetBadge({
     </>
   );
 
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        aria-label={`Select ${code}`}
-        className={cn(
-          "flex items-center gap-2.5 text-left rounded-lg -mx-1.5 px-1.5 py-1 cursor-pointer transition-colors",
-          "hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
-          className,
-        )}
-      >
-        {content}
-      </button>
-    );
+  const badgeElement = onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`Select ${code}`}
+      className={cn(
+        "flex items-center gap-2.5 min-w-0 text-left rounded-lg -mx-1.5 px-1.5 py-1 cursor-pointer transition-colors",
+        "hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
+        className,
+      )}
+    >
+      {content}
+    </button>
+  ) : (
+    <div
+      tabIndex={hasIssuerTooltip ? 0 : undefined}
+      className={cn(
+        "flex items-center gap-2.5 min-w-0",
+        hasIssuerTooltip &&
+          "rounded-lg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
+        className,
+      )}
+    >
+      {content}
+    </div>
+  );
+
+  if (!hasIssuerTooltip || !balance.assetIssuer) {
+    return badgeElement;
   }
 
+  const truncatedIssuer = truncateAddress(balance.assetIssuer, 6, 4);
+
+  const tooltipContent = (
+    <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+          Issuer
+        </span>
+        <span
+          data-testid="issuer-tooltip-address"
+          title={balance.assetIssuer}
+          className="font-mono text-[11px] text-ink"
+        >
+          {truncatedIssuer}
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={(e) => void handleCopyIssuer(e)}
+        aria-label={
+          copyFailed
+            ? "Failed to copy issuer address"
+            : copied
+              ? "Issuer address copied"
+              : "Copy issuer address"
+        }
+        className={cn(
+          "shrink-0 p-1 rounded-md transition-all cursor-pointer",
+          copyFailed
+            ? "text-red bg-error-dim"
+            : copied
+              ? "text-green bg-success-dim"
+              : "text-ink-3 hover:text-ink-2 hover:bg-surface-3",
+        )}
+      >
+        <HugeiconsIcon
+          icon={copyFailed ? Cancel01Icon : copied ? Tick01Icon : Copy01Icon}
+          size={12}
+          color="currentColor"
+          strokeWidth={2}
+        />
+      </button>
+    </div>
+  );
+
   return (
-    <div className={cn("flex items-center gap-2.5", className)}>{content}</div>
+    <Tooltip content={tooltipContent} delayDuration={0}>
+      {badgeElement}
+    </Tooltip>
   );
 }
 
 export interface AssetPillProps {
   assetCode: string;
+  network?: "mainnet" | "testnet" | (string & {});
   colorMap?: Record<string, { bg: string; text: string }>;
   className?: string;
 }
@@ -207,14 +368,19 @@ export interface AssetPillProps {
 /** Inline pill version — just the code with colored dot */
 export function AssetPill({
   assetCode,
+  network,
   colorMap,
   className,
 }: AssetPillProps) {
-  const { bg, text } = getAssetColor(assetCode, colorMap);
+  const { bg, text } =
+    network === "testnet" && !colorMap?.[assetCode]
+      ? { bg: "bg-warning-dim", text: "text-warning" }
+      : getAssetColor(assetCode, colorMap);
   return (
     <span
+      title={assetCode}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border border-line-2",
+        "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border border-line-2 truncate max-w-[12ch]",
         bg,
         text,
         className,

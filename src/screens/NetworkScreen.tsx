@@ -48,8 +48,15 @@ const NETWORKS: {
 export function NetworkScreen() {
   // #537 — `isSwitchingNetwork` is the provider-wide in-flight flag. It
   // defaults to `false` so tests that mock a partial context keep working.
-  const { network, switchNetwork, isSwitchingNetwork = false } = useSorokit();
+  const {
+    network,
+    switchNetwork,
+    isSwitchingNetwork = false,
+    customNetworks = [],
+    clearCustomNetworks,
+  } = useSorokit();
   const [switching, setSwitching] = useState<string | null>(null);
+  const [resetError, setResetError] = useState("");
   const activeCardRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -69,6 +76,20 @@ export function NetworkScreen() {
       await switchNetwork(networkName);
     } finally {
       setSwitching(null);
+    }
+  }
+
+  function handleResetToDefaults() {
+    if (!clearCustomNetworks) return;
+    try {
+      clearCustomNetworks();
+      setResetError("");
+    } catch (error) {
+      setResetError(
+        error instanceof Error
+          ? error.message
+          : "Failed to clear custom networks",
+      );
     }
   }
 
@@ -186,6 +207,23 @@ export function NetworkScreen() {
           );
         })}
       </div>
+
+      {customNetworks.length > 0 && (
+        <div className="flex flex-col items-start gap-2">
+          <button
+            type="button"
+            onClick={handleResetToDefaults}
+            className="rounded-lg border border-line px-4 py-2 text-[13px] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            Reset to Defaults
+          </button>
+          {resetError && (
+            <p role="alert" className="text-[12px] text-red">
+              {resetError}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

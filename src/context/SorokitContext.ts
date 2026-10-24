@@ -12,7 +12,22 @@ export interface SorokitState {
   client: SorokitClient;
   address: string | null;
   walletName: string | null;
+  /**
+   * Ids of supported wallet extensions currently detected on `window`. Seeded
+   * on mount and refreshed when an extension injects late (`stellar#initialized`
+   * plus a short poll), so the connect UI can pick up a wallet that wasn't
+   * present when the page first rendered.
+   */
+  detectedWallets?: string[];
   isHardware?: boolean;
+   * Whether the connected wallet is a hardware wallet.
+   *
+   * Owned by the provider so detection lives in exactly one place (#845). It was
+   * previously declared optional here but never assigned, so it was always
+   * `undefined` and `WalletConnectButton` had to re-derive the answer from
+   * `walletName` string-matching — the duplication this field now removes.
+   */
+  isHardware: boolean;
   isConnected: boolean;
   isConnecting: boolean;
   isLoading: boolean;
@@ -41,6 +56,7 @@ export interface SorokitState {
   isSwitchingNetwork?: boolean;
   customNetworks?: NetworkInfo[];
   addCustomNetwork?: (config: NetworkInfo) => Promise<void>;
+  clearCustomNetworks?: () => void;
   /**
    * Resets any pending transaction watchers/polling timers across the client context.
    */

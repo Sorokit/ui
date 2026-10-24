@@ -478,6 +478,101 @@ describe("AddressDisplay", () => {
 
   // issue #586: the execCommand fallback selects a throwaway textarea, which
   // wipes whatever the user already had highlighted unless it is restored.
+  // issue #891: the copy tooltip stayed stuck on "Copied!" if the cursor left
+  // and re-entered before the 2s timeout expired, because only the timeout
+  // itself ever reset `copied`/`copyFailed`.
+  describe("tooltip reset on mouse leave (#891)", () => {
+    it("resets to 'Copy address to clipboard' immediately on mouse leave, before the 2s timeout", async () => {
+      vi.useFakeTimers();
+      render(<AddressDisplay address={address} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy address to clipboard" }));
+      });
+      expect(screen.getByRole("button", { name: "Address copied" })).toBeInTheDocument();
+
+      // Leave well before the 2s window elapses.
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+      fireEvent.mouseLeave(screen.getByRole("button", { name: "Address copied" }));
+
+      expect(
+        screen.getByRole("button", { name: "Copy address to clipboard" }),
+      ).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("shows the correct tooltip again if re-hovered and re-copied after a mouse leave", async () => {
+      vi.useFakeTimers();
+      render(<AddressDisplay address={address} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy address to clipboard" }));
+      });
+      fireEvent.mouseLeave(screen.getByRole("button", { name: "Address copied" }));
+      expect(screen.getByRole("button", { name: "Copy address to clipboard" })).toBeInTheDocument();
+
+      // Re-entering and copying again must produce a fresh "Address copied" state,
+      // not a stale one left over from the first copy.
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy address to clipboard" }));
+      });
+      expect(screen.getByRole("button", { name: "Address copied" })).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("resets a stuck 'Copy failed' state on mouse leave as well", async () => {
+      vi.useFakeTimers();
+      mockWriteText.mockRejectedValueOnce(new Error("denied"));
+      document.execCommand = vi.fn().mockReturnValue(false);
+
+      render(<AddressDisplay address={address} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy address to clipboard" }));
+      });
+      expect(screen.getByRole("button", { name: "Failed to copy address" })).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(200);
+      });
+      fireEvent.mouseLeave(screen.getByRole("button", { name: "Failed to copy address" }));
+
+      expect(
+        screen.getByRole("button", { name: "Copy address to clipboard" }),
+      ).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+  });
+
+  // issue #891: federation name tag / lookup-failure indicator.
+  describe("federation name (#891)", () => {
+    it("renders the federation tag when federationName is provided", () => {
+      render(<AddressDisplay address={address} federationName="alice*example.com" />);
+      expect(screen.getByTestId("federation-tag")).toHaveTextContent("alice*example.com");
+    });
+
+    it("does not render a federation tag when federationName is omitted", () => {
+      render(<AddressDisplay address={address} />);
+      expect(screen.queryByTestId("federation-tag")).not.toBeInTheDocument();
+    });
+
+    it("shows a subtle warning indicator when federationError is true", () => {
+      render(<AddressDisplay address={address} federationError />);
+      const indicator = screen.getByTestId("federation-error-indicator");
+      expect(indicator).toBeInTheDocument();
+      expect(indicator).toHaveAttribute("aria-label", "Federation name lookup failed");
+    });
+
+    it("does not show the warning indicator when federationError is false", () => {
+      render(<AddressDisplay address={address} />);
+      expect(screen.queryByTestId("federation-error-indicator")).not.toBeInTheDocument();
+    });
+  });
+
   describe("execCommand fallback hygiene", () => {
     it("marks the temporary textarea readOnly and restores the prior selection", async () => {
       Object.defineProperty(navigator, "clipboard", {

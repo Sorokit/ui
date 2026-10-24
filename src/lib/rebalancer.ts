@@ -15,10 +15,43 @@ export interface PortfolioAsset {
   assetCode: string;
   /** Raw balance string as returned by the network */
   balance: string;
+  /**
+   * Decimal places `balance` is expressed in (7 for native XLM, up to 18 for
+   * some wrapped tokens). Optional and defaults to parsing `balance` as a
+   * plain float: most Stellar-native assets never carry enough significant
+   * digits for that to matter. Set this when `balance` may have 16+
+   * significant digits (e.g. an 18-decimal wrapped token's full raw amount),
+   * so `computeCurrentAllocations` uses exact BigInt arithmetic instead of
+   * `parseFloat`, which silently rounds past a double's ~15-17 digit
+   * precision (issue #970).
+   */
+  decimals?: number;
   /** USD value of the balance, or null when price is unavailable */
   usdValue: number | null;
   /** Current allocation as a fraction 0–1 (set after computeCurrentAllocations) */
   currentPct: number;
+}
+
+/** A single intermediate hop in a multi-hop swap route */
+export interface RouteHop {
+  /** Intermediate asset ticker code (e.g. "USDC") */
+  asset?: string;
+  /** Hop source asset (e.g. "XLM") */
+  from?: string;
+  /** Hop destination asset (e.g. "USDC") */
+  to?: string;
+  /** Pool fee tier (e.g. 0.3, "0.3%", 3000) */
+  feeTier?: number | string;
+  /** Pool fee tier percentage (e.g. 0.3) */
+  feeTierPct?: number;
+  /** Pool liquidity depth formatted or numeric (e.g. "$1.2M", 1200000, "$500k") */
+  liquidityDepth?: number | string;
+  /** Alias for pool liquidity depth */
+  poolDepth?: number | string;
+  /** Alias for pool liquidity depth */
+  poolLiquidityDepth?: number | string;
+  /** Numeric USD pool depth */
+  poolDepthUsd?: number;
 }
 
 /** A single suggested swap to move toward the target allocation */
@@ -39,6 +72,10 @@ export interface SwapSuggestion {
   swapFeePct: number;
   /** Total cost of this swap in USD (fee + slippage impact) */
   totalCostUsd: number;
+  /** Optional intermediate hops for multi-hop routes */
+  hops?: RouteHop[];
+  /** Optional full asset route path, e.g. ["XLM", "USDC", "BTC"] */
+  path?: string[];
 }
 
 /** The result of a completed rebalance operation */
@@ -91,6 +128,104 @@ export const SLIPPAGE_MARKET_IMPACT_PER_1K = 0.05;
 
 // ─── Allocation helpers ───────────────────────────────────────────────────────
 
+/** Fixed-point scale `price` is converted to before any BigInt arithmetic.
+ * 8 decimal places matches Stellar's own `price` XDR convention; a price
+ * realistically never needs more than this to be represented exactly. */
+const PRICE_SCALE_DIGITS = 8n;
+
+/** `Number.MAX_SAFE_INTEGER` is 9007199254740991, a 16-digit number that
+ * does not start with 9999... -- so a 16-digit result is not always safe
+ * (9999999999999999 > 9007199254740991), but every 15-digit result always
+ * is (999999999999999 < 9007199254740991). 15 is therefore the largest
+ * digit count that is unconditionally safe regardless of the rounded
+ * value's leading digits. */
+const MAX_SAFE_DIGITS = 15n;
+
+/** Number of base-10 digits in a positive `BigInt` (0 has 1 digit). */
+function digitCount(n: bigint): bigint {
+  return BigInt(n.toString().length);
+}
+
+/**
+ * Divides `numerator` by `10n ** exponent`, rounding to the nearest integer
+ * (half away from zero) rather than truncating toward zero the way BigInt's
+ * own `/` does. Truncation would systematically bias every result toward
+ * zero by up to half a unit; for a value computed this many scale-steps
+ * removed from the original balance, that bias would otherwise compound.
+ */
+function roundedDiv(numerator: bigint, exponent: bigint): bigint {
+  if (exponent <= 0n) return numerator;
+  const divisor = 10n ** exponent;
+  const halfDivisor = divisor / 2n;
+  return numerator >= 0n
+    ? (numerator + halfDivisor) / divisor
+    : (numerator - halfDivisor) / divisor;
+}
+
+/**
+ * Computes the USD value of a decimal balance string by parsing it into its
+ * exact raw integer units (a `BigInt`) and multiplying by the price in
+ * integer arithmetic throughout: no float ever sees more digits of `balance`
+ * than its own `decimals` calls for.
+ *
+ * `parseFloat(balance)` alone loses precision past a `number`'s ~15-17
+ * significant decimal digits, invisible for a 7-decimal native XLM amount,
+ * real for an 18-decimal wrapped token's full raw balance (issue #970). This
+ * never routes `balance` through `parseFloat`; it splits on the decimal
+ * point and parses each half as plain digit strings into `BigInt`s instead.
+ *
+ * The exact BigInt product of the raw units and the scaled price can itself
+ * have far more than 16 digits (it carries `decimals` + `PRICE_SCALE_DIGITS`
+ * digits of fixed-point scale on top of the value's own magnitude), which
+ * would silently lose precision the moment it is handed to `Number()`,
+ * exactly the failure a single fixed scale factor ran into during this
+ * function's own development (see the commit history on this file). The
+ * scale actually divided back out here is instead chosen per call, based on
+ * how many digits the product has: just enough to bring it down to
+ * `MAX_SAFE_DIGITS`, keeping as many significant digits as a safe integer
+ * can hold regardless of the balance's magnitude.
+ *
+ * `usdValue` is still a display `number` in the end, so this is not a claim
+ * of unlimited precision: a balance whose true USD value itself exceeds
+ * safe-integer range (an amount in the quadrillions of dollars) is the one
+ * case this cannot make meaningfully more exact than `parseFloat`, since
+ * `MAX_SAFE_DIGITS` of precision is spent entirely on the whole-dollar part
+ * before the fractional part is even reached, the same ceiling either way.
+ * What this reliably fixes is the realistic case issue #970 describes: a
+ * human-scale balance (anywhere from a fraction of a cent to millions of
+ * tokens) at a realistic price, where the exact raw-unit parsing below
+ * removes the precision `parseFloat` would have thrown away before any
+ * arithmetic even started.
+ */
+function parseBalanceExactUsd(balance: string, decimals: number, price: number): number {
+  const trimmed = balance.trim();
+  const negative = trimmed.startsWith("-");
+  const unsigned = negative ? trimmed.slice(1) : trimmed;
+  const [wholePart, fractionPartRaw = ""] = unsigned.split(".");
+  // Pad/truncate the fractional part to exactly `decimals` digits so every
+  // balance is compared in the same raw-integer-unit scale regardless of how
+  // many digits the source string actually included.
+  const fractionPart = fractionPartRaw.padEnd(decimals, "0").slice(0, decimals);
+  const rawUnits = BigInt(wholePart || "0") * 10n ** BigInt(decimals) + BigInt(fractionPart || "0");
+  const signedRawUnits = negative ? -rawUnits : rawUnits;
+
+  const scaledPrice = BigInt(Math.round(price * 10 ** Number(PRICE_SCALE_DIGITS)));
+  const scaledUsd = signedRawUnits * scaledPrice;
+  const totalScaleDigits = BigInt(decimals) + PRICE_SCALE_DIGITS;
+
+  const productDigits = digitCount(scaledUsd < 0n ? -scaledUsd : scaledUsd);
+  // Only divides down as far as the product's own size requires; a small
+  // balance's product may already fit, in which case this is 0 and no
+  // rounding step runs at all.
+  const digitsToDrop = productDigits > MAX_SAFE_DIGITS ? productDigits - MAX_SAFE_DIGITS : 0n;
+  const rounded = roundedDiv(scaledUsd, digitsToDrop);
+  const remainingScaleDigits = totalScaleDigits - digitsToDrop;
+
+  return remainingScaleDigits >= 0n
+    ? Number(rounded) / 10 ** Number(remainingScaleDigits)
+    : Number(rounded) * 10 ** Number(-remainingScaleDigits);
+}
+
 /**
  * Compute the current allocation percentages for each asset given USD prices.
  *
@@ -104,10 +239,17 @@ export function computeCurrentAllocations(
   assets: Omit<PortfolioAsset, "currentPct">[],
   prices: Record<string, number>,
 ): PortfolioAsset[] {
-  const withValues = assets.map((a) => ({
-    ...a,
-    usdValue: prices[a.assetCode] != null ? parseFloat(a.balance) * prices[a.assetCode] : null,
-  }));
+  const withValues = assets.map((a) => {
+    const price = prices[a.assetCode];
+    if (price == null) {
+      return { ...a, usdValue: null };
+    }
+    const usdValue =
+      a.decimals != null
+        ? parseBalanceExactUsd(a.balance, a.decimals, price)
+        : parseFloat(a.balance) * price;
+    return { ...a, usdValue };
+  });
 
   const totalUsd = withValues.reduce((sum, a) => sum + (a.usdValue ?? 0), 0);
 

@@ -35,6 +35,15 @@ describe("Button component", () => {
       const button = screen.getByRole("button", { name: /destructive/i });
       expect(button).toHaveClass("bg-error-dim", "text-red");
     });
+
+    it("supports the outline variant", () => {
+      render(<Button variant="outline">Outline</Button>);
+      expect(screen.getByRole("button", { name: "Outline" })).toHaveClass(
+        "bg-transparent",
+        "text-ink",
+        "border",
+      );
+    });
   });
 
   describe("sizes", () => {
@@ -84,6 +93,35 @@ describe("Button component", () => {
       );
       const button = screen.getByRole("button");
       await userEvent.click(button);
+      expect(handleClick).not.toHaveBeenCalled();
+    });
+
+    it("blocks Enter and Space keyboard activation while loading", () => {
+      const handleClick = vi.fn();
+      const handleKeyDown = vi.fn();
+      render(
+        <Button
+          loading
+          size="sm"
+          variant="outline"
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+          aria-label="Loading save"
+        >
+          Save
+        </Button>,
+      );
+      const button = screen.getByRole("button", { name: "Loading save" });
+
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button).toHaveClass("h-8", "px-3.5", "border", "bg-transparent");
+
+      button.focus();
+      expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(false);
+      expect(fireEvent.keyDown(button, { key: " " })).toBe(false);
+      expect(handleKeyDown).not.toHaveBeenCalled();
       expect(handleClick).not.toHaveBeenCalled();
     });
   });

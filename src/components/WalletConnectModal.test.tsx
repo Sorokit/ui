@@ -11,8 +11,8 @@ vi.mock("@/context/useSorokit", () => ({
 }));
 
 function getWalletButton(name: RegExp | string) {
-  const grid = screen.getByRole("grid", { name: /available wallets/i });
-  return within(grid).getByRole("button", { name });
+  const radiogroup = screen.getByRole("radiogroup", { name: /available wallets/i });
+  return within(radiogroup).getByRole("radio", { name });
 }
 
 function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
@@ -54,6 +54,7 @@ describe("WalletConnectModal", () => {
     vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
     render(<WalletConnectModal open={true} onClose={mockOnClose} />);
     expect(screen.getByRole("dialog", { name: /connect a wallet/i })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /available wallets/i })).toBeInTheDocument();
     expect(getWalletButton(/Freighter/i)).toBeInTheDocument();
     expect(getWalletButton(/xBull/i)).toBeInTheDocument();
     expect(getWalletButton(/Lobstr/i)).toBeInTheDocument();
@@ -70,7 +71,7 @@ describe("WalletConnectModal", () => {
       />,
     );
     expect(getWalletButton(/Rabet/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Freighter/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Freighter/i })).not.toBeInTheDocument();
   });
 
   it("calls connectWallet and shows a connecting state when a wallet is selected", () => {
@@ -219,51 +220,60 @@ describe("WalletConnectModal", () => {
     });
   });
 
-  // ── Arrow Key Navigation (#746) ───────────
+  // ── Arrow Key Navigation (#746, #877) ───────────
   describe("Arrow Key Navigation", () => {
-    it("supports arrow key navigation between wallet options", () => {
+    it("supports arrow key navigation between wallet options with radiogroup semantics", () => {
       vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const grid = screen.getByRole("grid", { name: /available wallets/i });
-      const buttons = within(grid).getAllByRole("button");
+      const radiogroup = screen.getByRole("radiogroup", { name: /available wallets/i });
+      const options = within(radiogroup).getAllByRole("radio");
 
-      // Initially first wallet should be pressed
-      expect(buttons[0]).toHaveAttribute("aria-pressed", "true");
-      expect(buttons[1]).toHaveAttribute("aria-pressed", "false");
+      // Verify role="radiogroup" and role="radio"
+      expect(radiogroup).toBeInTheDocument();
+      expect(options).toHaveLength(4);
+
+      // Initially first wallet should be checked
+      expect(options[0]).toHaveAttribute("aria-checked", "true");
+      expect(options[1]).toHaveAttribute("aria-checked", "false");
 
       // ArrowDown moves to next wallet
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      expect(buttons[1]).toHaveFocus();
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      expect(options[1]).toHaveFocus();
+      expect(options[1]).toHaveAttribute("aria-checked", "true");
 
       // ArrowDown again moves to third wallet
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      expect(buttons[2]).toHaveFocus();
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      expect(options[2]).toHaveFocus();
+      expect(options[2]).toHaveAttribute("aria-checked", "true");
 
       // ArrowUp moves back to second wallet
-      fireEvent.keyDown(grid, { key: "ArrowUp" });
-      expect(buttons[1]).toHaveFocus();
+      fireEvent.keyDown(radiogroup, { key: "ArrowUp" });
+      expect(options[1]).toHaveFocus();
+      expect(options[1]).toHaveAttribute("aria-checked", "true");
     });
 
     it("wraps around when arrow key navigation reaches the end", () => {
       vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const grid = screen.getByRole("grid", { name: /available wallets/i });
-      const buttons = within(grid).getAllByRole("button");
+      const radiogroup = screen.getByRole("radiogroup", { name: /available wallets/i });
+      const options = within(radiogroup).getAllByRole("radio");
 
       // Move to last wallet
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
 
       // Wrap around to first wallet
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      expect(buttons[0]).toHaveFocus();
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      expect(options[0]).toHaveFocus();
+      expect(options[0]).toHaveAttribute("aria-checked", "true");
 
       // Wrap backward from first to last
-      fireEvent.keyDown(grid, { key: "ArrowUp" });
-      expect(buttons[buttons.length - 1]).toHaveFocus();
+      fireEvent.keyDown(radiogroup, { key: "ArrowUp" });
+      expect(options[options.length - 1]).toHaveFocus();
+      expect(options[options.length - 1]).toHaveAttribute("aria-checked", "true");
     });
 
     it("selects wallet when Enter is pressed on focused option", async () => {
@@ -272,11 +282,11 @@ describe("WalletConnectModal", () => {
       );
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const grid = screen.getByRole("grid", { name: /available wallets/i });
+      const radiogroup = screen.getByRole("radiogroup", { name: /available wallets/i });
 
       // Move to second wallet and press Enter
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      fireEvent.keyDown(grid, { key: "Enter" });
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      fireEvent.keyDown(radiogroup, { key: "Enter" });
 
       expect(mockConnect).toHaveBeenCalledTimes(1);
       expect(screen.getByRole("status")).toHaveTextContent(/waiting for xbull approval/i);
@@ -288,11 +298,11 @@ describe("WalletConnectModal", () => {
       );
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const grid = screen.getByRole("grid", { name: /available wallets/i });
+      const radiogroup = screen.getByRole("radiogroup", { name: /available wallets/i });
 
       // Move to second wallet and press Space
-      fireEvent.keyDown(grid, { key: "ArrowDown" });
-      fireEvent.keyDown(grid, { key: " " });
+      fireEvent.keyDown(radiogroup, { key: "ArrowDown" });
+      fireEvent.keyDown(radiogroup, { key: " " });
 
       expect(mockConnect).toHaveBeenCalledTimes(1);
       expect(screen.getByRole("status")).toHaveTextContent(/waiting for xbull approval/i);

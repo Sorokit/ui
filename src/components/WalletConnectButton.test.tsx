@@ -12,8 +12,13 @@ vi.mock("@/context/useSorokit", () => ({
 }));
 
 function getWalletButton(name: RegExp | string) {
-  const grid = screen.getByRole("grid", { name: /available wallets/i });
-  return within(grid).getByRole("button", { name });
+  const container =
+    screen.queryByRole("radiogroup", { name: /available wallets/i }) ??
+    screen.getByRole("grid", { name: /available wallets/i });
+  return (
+    within(container).queryByRole("radio", { name }) ??
+    within(container).getByRole("button", { name })
+  );
 }
 
 describe("WalletConnectButton", () => {
@@ -32,6 +37,7 @@ describe("WalletConnectButton", () => {
       get client() { return getClient(); },
       address: null,
       walletName: null,
+      isHardware: false,
       isConnected: false,
       isConnecting: false,
       isLoading: false,
@@ -345,12 +351,49 @@ describe("WalletConnectButton", () => {
         mockUseSorokit({
           isConnected: true,
           address: fullAddress,
-          walletName: "Ledger",
+          walletName: "Ledger Nano X",
+          isHardware: true,
         }),
       );
 
       render(<WalletConnectButton />);
       expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // #845 — "Ledger Nano X" is the acceptance-criteria case: a name that does
+    // not contain the bare word "Ledger" at position 0, and one the button must
+    // not be re-deriving itself. `isHardware` comes from context only, so if the
+    // provider says true the badge shows regardless of the exact name.
+    it("shows the badge for a hardware wallet named 'Ledger Nano X' (#845)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Ledger Nano X",
+          isHardware: true,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // The regression the issue is really about: the button used to fall back to
+    // string-matching `walletName`, so a consumer that set `isHardware: false`
+    // for a hardware-named wallet would still get a badge. Context is now the
+    // only input, so the two can no longer disagree.
+    it("does not show the badge for a software wallet (#845)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Freighter",
+          isHardware: false,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.queryByTestId("hardware-badge")).toBeNull();
     });
 
     it("purges cached wallet session keys from localStorage on disconnect", async () => {
@@ -394,6 +437,103 @@ describe("WalletConnectButton", () => {
       expect(screen.getByTestId("connection-error-alert")).toHaveTextContent(
         "Connection rejected by user",
       );
+    });
+
+    it("stops click event bubbling to parent containers when clicked in disconnected state (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton />
+        </div>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("stops click event bubbling to parent containers when clicked in connected state (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton />
+        </div>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /wallet connected/i }),
+      );
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("stops click event bubbling when onOpenModal is provided (#887)", () => {
+      const mockOnOpen = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton onOpenModal={mockOnOpen} />
+        </div>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /wallet connected/i }),
+      );
+      expect(mockOnOpen).toHaveBeenCalledTimes(1);
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("has accessible attributes aria-haspopup='dialog' and aria-expanded when disconnected (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      const btn = screen.getByRole("button", { name: "Connect Wallet" });
+      expect(btn).toHaveAttribute("aria-haspopup", "dialog");
+      expect(btn).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("renders compact address on mobile (<360px) and standard address on larger viewports (#887)", () => {
+      const fullAddr = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: fullAddr,
+        }),
+      );
+
+      const { container } = render(<WalletConnectButton />);
+      const compactSpan = container.querySelector("[data-address-compact]");
+      const standardSpan = container.querySelector("[data-address]");
+
+      expect(compactSpan).toBeInTheDocument();
+      expect(compactSpan).toHaveTextContent("GAB...XYZ");
+      expect(standardSpan).toBeInTheDocument();
+      expect(standardSpan).toHaveTextContent("GABC12...WXYZ");
     });
   });
 });

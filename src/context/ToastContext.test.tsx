@@ -284,6 +284,106 @@ describe("ToastContext", () => {
     });
   });
 
+  describe("auto-dismiss timer pause/resume", () => {
+    it("pauses the countdown while hovered and resumes from where it left off", () => {
+      renderToasts();
+      act(() => {
+        api().info("Hover me", { duration: 1000 });
+      });
+
+      const toast = screen.getByRole("alert");
+      fireEvent.mouseEnter(toast);
+
+      // Far beyond the original duration — a paused timer must not fire.
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(api().toasts).toHaveLength(1);
+
+      // The remaining 1s is served after the pointer leaves.
+      fireEvent.mouseLeave(toast);
+      act(() => {
+        vi.advanceTimersByTime(999);
+      });
+      expect(api().toasts).toHaveLength(1);
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(api().toasts).toHaveLength(0);
+    });
+
+    it("pauses the countdown while focused and resumes on blur", () => {
+      renderToasts();
+      act(() => {
+        api().info("Focus me", { duration: 1000 });
+      });
+
+      const toast = screen.getByRole("alert");
+      act(() => toast.focus());
+
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(api().toasts).toHaveLength(1);
+
+      act(() => toast.blur());
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(api().toasts).toHaveLength(0);
+    });
+
+    it("keeps the countdown paused while hover and focus overlap", () => {
+      renderToasts();
+      act(() => {
+        api().info("Both", { duration: 1000 });
+      });
+
+      const toast = screen.getByRole("alert");
+      // Pointer enters, then keyboard focus arrives; releasing only one of the
+      // two sources must not let the timer resume.
+      fireEvent.mouseEnter(toast);
+      act(() => toast.focus());
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(api().toasts).toHaveLength(1);
+
+      fireEvent.mouseLeave(toast);
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(api().toasts).toHaveLength(1);
+
+      act(() => toast.blur());
+      act(() => {
+        vi.advanceTimersByTime(1000);
+      });
+      expect(api().toasts).toHaveLength(0);
+    });
+
+    it("pauseToast/resumeToast are exposed on the context", () => {
+      renderToasts();
+      expect(typeof api().pauseToast).toBe("function");
+      expect(typeof api().resumeToast).toBe("function");
+    });
+
+    it("sticky toasts (duration 0) have no countdown to pause", () => {
+      renderToasts();
+      act(() => {
+        api().info("Sticky", { duration: 0 });
+      });
+
+      const toast = screen.getByRole("alert");
+      fireEvent.mouseEnter(toast);
+      fireEvent.mouseLeave(toast);
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(api().toasts).toHaveLength(1);
+    });
+  });
+
   describe("stacking", () => {
     it("renders every toast in a single viewport, oldest to newest", () => {
       renderToasts();

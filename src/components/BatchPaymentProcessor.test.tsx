@@ -5,7 +5,7 @@ import { useSorokit } from "@/context/useSorokit";
 import type { SorokitClient } from "@/lib/client";
 import { createMockClient } from "@/lib/mock-client";
 
-import { BatchPaymentProcessor, parseCSV, validateEntries } from "./BatchPaymentProcessor";
+import { BatchPaymentProcessor, parseCSV, sumAmountsStroops, validateEntries } from "./BatchPaymentProcessor";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -46,6 +46,46 @@ describe("parseCSV — field parsing", () => {
   it("returns empty array for a header-only CSV", () => {
     expect(parseCSV("address,amount\n")).toHaveLength(0);
   });
+
+  it("parses a row with an empty trailing memo column (trailing comma)", () => {
+    const csv = `address,amount,memo\n${VALID_ADDR},100,\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].memo).toBe("");
+    expect(entries[0].amount).toBe("100");
+  });
+
+  it("parses a row that omits the memo value entirely (no trailing comma)", () => {
+    const csv = `address,amount,memo\n${VALID_ADDR},100\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].memo).toBe("");
+  });
+
+  it("does not produce a phantom extra column for rows without trailing commas", () => {
+    const csv = `address,amount\n${VALID_ADDR},100\n`;
+    const entries = parseCSV(csv);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].amount).toBe("100");
+  });
+});
+
+describe("sumAmountsStroops — BigInt precision", () => {
+  it("returns exact sum avoiding IEEE-754 drift (0.1 + 0.2 = 0.3)", () => {
+    expect(sumAmountsStroops(["0.1", "0.2"])).toBe("0.3");
+  });
+
+  it("handles whole-number amounts", () => {
+    expect(sumAmountsStroops(["100", "200"])).toBe("300");
+  });
+
+  it("handles mixed whole and decimal amounts", () => {
+    expect(sumAmountsStroops(["1.5", "2.25", "0.25"])).toBe("4");
+  });
+
+  it("returns '0' for an empty array", () => {
+    expect(sumAmountsStroops([])).toBe("0");
+  });
 });
 
 describe("validateEntries — validation rules", () => {
@@ -59,19 +99,20 @@ describe("validateEntries — validation rules", () => {
     expect(errors.some((e) => e.includes("Invalid Stellar address"))).toBe(true);
   });
 
-  it("rejects a memo that exceeds 28 UTF-8 bytes", () => {
+  // Issue #862: validateEntries checks memo byte length instead of character length
+  it("rejects a memo that exceeds 28 UTF-8 bytes (#862)", () => {
     const longMemo = "this-memo-is-definitely-too-long-for-stellar";
     const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo: longMemo }]);
     expect(errors.some((e) => e.includes("28 bytes"))).toBe(true);
   });
 
-  it("accepts a memo of exactly 28 bytes", () => {
+  it("accepts a memo of exactly 28 bytes (#862)", () => {
     const memo28 = "a".repeat(28);
     const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo: memo28 }]);
     expect(errors.every((e) => !e.includes("28 bytes"))).toBe(true);
   });
 
-  it("rejects a 10-emoji memo even though it is only 10 characters long", () => {
+  it("rejects a 10-emoji memo even though it is only 10 characters long (#862)", () => {
     // 10 emoji = 10 chars but 40 UTF-8 bytes — a character-length check would
     // wrongly accept this.
     const emojiMemo = "\u{1F600}".repeat(10);
@@ -79,14 +120,14 @@ describe("validateEntries — validation rules", () => {
     expect(errors.some((e) => e.includes("28 bytes"))).toBe(true);
   });
 
-  it("rejects a mixed-script memo whose byte length exceeds 28 despite fewer than 28 characters", () => {
+  it("rejects a mixed-script memo whose byte length exceeds 28 despite fewer than 28 characters (#862)", () => {
     // 14 CJK characters = 14 chars but 42 UTF-8 bytes (3 bytes each).
     const cjkMemo = "你好世界你好世界你好世界你好";
     const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo: cjkMemo }]);
     expect(errors.some((e) => e.includes("28 bytes"))).toBe(true);
   });
 
-  it("accepts a mixed-script memo within the 28-byte budget", () => {
+  it("accepts a mixed-script memo within the 28-byte budget (#862)", () => {
     // 14 characters, but accented Latin characters keep it at 17 UTF-8 bytes.
     const memo = "café ñandú hi";
     const errors = validateEntries([{ address: VALID_ADDR, amount: "1", asset: "", memo } ]);
@@ -117,7 +158,7 @@ describe("validateEntries — validation rules", () => {
   });
 });
 
-describe("BatchPaymentProcessor UI render tests", () => {
+describe("BatchPaymentProcessor UI render tests (#743, #874)", () => {
   const VALID_CSV = `address,amount\n${VALID_ADDR},100\n${VALID_ADDR2},50\n`;
   const INVALID_CSV = "address,amount\nINVALID_ADDR,-50\n";
   let mockClient: SorokitClient;

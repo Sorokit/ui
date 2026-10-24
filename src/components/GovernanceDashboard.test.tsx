@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 import type { InvokeParams, SorokitClient } from "@/lib/client";
 
-import { GovernanceDashboard, type GovernanceProposal } from "./GovernanceDashboard";
+import { GovernanceDashboard, type GovernanceProposal, isVotingClosed } from "./GovernanceDashboard";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -47,7 +47,10 @@ function makeClient(overrides?: {
   delegate?: unknown;
   voteError?: string | null;
   delegateError?: string | null;
+  revokeError?: string | null;
+  voteThrows?: string;
 }) {
+  let currentDelegate = overrides?.delegate ?? null;
   const invokeContract = vi.fn(async (params: InvokeParams) => {
     switch (params.method) {
       case "get_proposals":
@@ -58,11 +61,19 @@ function makeClient(overrides?: {
         };
       case "get_delegate":
         return {
-          data: overrides?.delegate ?? null,
+          data: currentDelegate,
           error: null,
           status: "success" as const,
         };
+      case "revoke_delegation":
+        if (!overrides?.revokeError) currentDelegate = null;
+        return {
+          data: overrides?.revokeError ? null : { hash: "tx_revoke" },
+          error: overrides?.revokeError ?? null,
+          status: overrides?.revokeError ? ("error" as const) : ("success" as const),
+        };
       case "vote":
+        if (overrides?.voteThrows) throw new Error(overrides.voteThrows);
         return {
           data: overrides?.voteError ? null : { hash: "tx_vote" },
           error: overrides?.voteError ?? null,
@@ -94,7 +105,8 @@ function mockSorokit(client: SorokitClient, opts?: { isConnected?: boolean }) {
   } as unknown as ReturnType<typeof useSorokit>);
 }
 
-describe("GovernanceDashboard", () => {
+// Issue #866: Implement GovernanceDashboard — proposal list, vote casting, and delegation UI
+describe("GovernanceDashboard (#866)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -314,6 +326,206 @@ describe("GovernanceDashboard", () => {
       expect(invokeContract).not.toHaveBeenCalledWith(
         expect.objectContaining({ method: "delegate" }),
       );
+    });
+  });
+  // ─── Closed / executed proposals ───────────────────────────────────────────
+  describe("closed proposals", () => {
+    const withStatus = (id: string, status: string): GovernanceProposal => ({
+      id,
+      title: `Proposal ${status}`,
+      description: `A ${status} proposal.`,
+      status,
+      votesFor: 10,
+      votesAgainst: 5,
+      votesAbstain: 1,
+    });
+
+    it.each(["closed", "executed"])("disables every vote button for a %s proposal", async (status) => {
+      const { client, invokeContract } = makeClient({ proposals: [withStatus("9", status)] });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      const card = (await screen.findByText(`Proposal ${status}`)).closest('[role="listitem"]') as HTMLElement;
+      expect(within(card).getByText(status)).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: "Vote Yes" })).toBeDisabled();
+      expect(within(card).getByRole("button", { name: "Vote No" })).toBeDisabled();
+      expect(within(card).getByRole("button", { name: "Vote Abstain" })).toBeDisabled();
+      expect(within(card).getByTestId("voting-closed-note")).toHaveTextContent("Voting closed");
+
+      fireEvent.click(within(card).getByRole("button", { name: "Vote Yes" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(invokeContract).not.toHaveBeenCalledWith(expect.objectContaining({ method: "vote" }));
+    });
+
+    it("keeps voting enabled on an active proposal listed next to a closed one", async () => {
+      const { client } = makeClient({
+        proposals: [PROPOSALS[0], withStatus("9", "closed")],
+      });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByText("Proposal closed");
+      const [active, closed] = screen.getAllByRole("listitem");
+      expect(within(active).getByRole("button", { name: "Vote Yes" })).toBeEnabled();
+      expect(within(active).queryByTestId("voting-closed-note")).not.toBeInTheDocument();
+      expect(within(closed).getByRole("button", { name: "Vote Yes" })).toBeDisabled();
+    });
+  });
+
+  // ─── Vote failure feedback ─────────────────────────────────────────────────
+  describe("vote failures", () => {
+    async function openConfirm(client: SorokitClient) {
+      mockSorokit(client);
+      render(<GovernanceDashboard />);
+      await screen.findByText("Increase validator rewards");
+      fireEvent.click(within(screen.getAllByRole("listitem")[0]).getByRole("button", { name: "Vote Yes" }));
+      return screen.findByRole("dialog");
+    }
+
+    it("shows an error banner, no success notice, and allows retrying", async () => {
+      const { client, invokeContract } = makeClient({ voteError: "tx_failed" });
+      const dialog = await openConfirm(client);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /confirm vote/i }));
+
+      await waitFor(() => expect(within(dialog).getByRole("alert")).toBeInTheDocument());
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: /confirm vote/i })).toBeEnabled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /confirm vote/i }));
+      await waitFor(() =>
+        expect(invokeContract.mock.calls.filter(([p]) => p.method === "vote")).toHaveLength(2),
+      );
+    });
+
+    it("shows an error banner when the contract invocation throws", async () => {
+      const { client } = makeClient({ voteThrows: "network down" });
+      const dialog = await openConfirm(client);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /confirm vote/i }));
+
+      await waitFor(() => expect(within(dialog).getByRole("alert")).toBeInTheDocument());
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("button", { name: /confirm vote/i })).toBeEnabled();
+    });
+
+    it("clears the error when the dialog is cancelled and reopened", async () => {
+      const { client } = makeClient({ voteError: "tx_failed" });
+      const dialog = await openConfirm(client);
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /confirm vote/i }));
+      await waitFor(() => expect(within(dialog).getByRole("alert")).toBeInTheDocument());
+
+      fireEvent.click(within(dialog).getByRole("button", { name: /cancel/i }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+      fireEvent.click(within(screen.getAllByRole("listitem")[0]).getByRole("button", { name: "Vote No" }));
+      const reopened = await screen.findByRole("dialog");
+      expect(within(reopened).queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Delegation revocation ─────────────────────────────────────────────────
+  describe("delegation revocation", () => {
+    it("hides the revoke button when there is no delegate", async () => {
+      const { client } = makeClient({ delegate: null });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await screen.findByTestId("current-delegate");
+      expect(screen.queryByRole("button", { name: /revoke delegation/i })).not.toBeInTheDocument();
+    });
+
+    it("revokes the current delegate and returns to self-voting", async () => {
+      const user = userEvent.setup();
+      const { client, invokeContract } = makeClient({ delegate: VALID_ADDRESS });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("current-delegate")).toHaveAttribute("title", VALID_ADDRESS),
+      );
+      await user.click(screen.getByRole("button", { name: /revoke delegation/i }));
+
+      await waitFor(() =>
+        expect(invokeContract).toHaveBeenCalledWith(
+          expect.objectContaining({
+            method: "revoke_delegation",
+            sourceAccount: VALID_ADDRESS,
+          }),
+        ),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent(/delegation revoked/i),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("current-delegate")).toHaveTextContent(/none/i),
+      );
+      expect(screen.queryByRole("button", { name: /revoke delegation/i })).not.toBeInTheDocument();
+    });
+
+    it("shows an error and keeps the delegate when revocation fails", async () => {
+      const user = userEvent.setup();
+      const { client } = makeClient({ delegate: VALID_ADDRESS, revokeError: "tx_failed" });
+      mockSorokit(client);
+
+      render(<GovernanceDashboard />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("current-delegate")).toHaveAttribute("title", VALID_ADDRESS),
+      );
+      await user.click(screen.getByRole("button", { name: /revoke delegation/i }));
+
+      await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+      expect(screen.getByTestId("current-delegate")).toHaveAttribute("title", VALID_ADDRESS);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
+  // ─── Disconnect reset ─────────────────────────────────────────────────────
+  describe("disconnect reset", () => {
+    it("clears stale proposals and the delegate when the wallet disconnects", async () => {
+      const { client } = makeClient({
+        proposals: PROPOSALS,
+        delegate: VALID_ADDRESS,
+      });
+      mockSorokit(client);
+
+      const { rerender } = render(<GovernanceDashboard />);
+
+      expect(await screen.findByText(PROPOSALS[0].title)).toBeInTheDocument();
+      expect(screen.getByTestId("current-delegate")).toHaveAttribute(
+        "title",
+        VALID_ADDRESS,
+      );
+
+      mockSorokit(client, { isConnected: false });
+      rerender(<GovernanceDashboard />);
+
+      expect(screen.queryByText(PROPOSALS[0].title)).not.toBeInTheDocument();
+      expect(
+        screen.getByText(/connect your wallet to view proposals/i),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("current-delegate")).toHaveTextContent(
+        /none/i,
+      );
+    });
+  });
+
+  // ─── isVotingClosed helper ────────────────────────────────────────────────
+  describe("isVotingClosed", () => {
+    it("returns true only for terminal statuses", () => {
+      expect(isVotingClosed("active")).toBe(false);
+      expect(isVotingClosed("pending")).toBe(false);
+      expect(isVotingClosed("closed")).toBe(true);
+      expect(isVotingClosed("executed")).toBe(true);
+      expect(isVotingClosed("passed")).toBe(true);
+      expect(isVotingClosed("rejected")).toBe(true);
     });
   });
 });

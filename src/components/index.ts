@@ -41,7 +41,13 @@ export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";
 export { Separator } from "./ui/Separator";
-export { AssetRowSkeleton, Skeleton, SkeletonCard, SkeletonRow } from "./ui/Skeleton";
+export {
+  AssetRowSkeleton,
+  Skeleton,
+  SkeletonCard,
+  SkeletonRow,
+  SkeletonTable,
+} from "./ui/Skeleton";
 
 // Error handling
 export { ErrorBoundary } from "./ErrorBoundary";
@@ -145,13 +151,28 @@ export type { DelegationRowProps } from "./DelegationRow";
 export { DelegationRow } from "./DelegationRow";
 export { RebalancerHistory } from "./RebalancerHistory";
 export type { RewardHistoryProps } from "./RewardHistory";
-export { RewardHistory } from "./RewardHistory";
+export { generateRewardHistoryCsv, RewardHistory } from "./RewardHistory";
 export type { RewardsPanelProps } from "./RewardsPanel";
 export { RewardsPanel } from "./RewardsPanel";
 export type { StakingDashboardProps } from "./StakingDashboard";
 export { StakingDashboard } from "./StakingDashboard";
 export { SwapExecutionTracker } from "./SwapExecutionTracker";
-export { SwapRoute } from "./SwapRoute";
+export type {
+  NormalizedHop,
+  RouteHop,
+  RouteValidationResult,
+  SwapRouteProps,
+} from "./SwapRoute";
+export {
+  detectCircularRoutes,
+  formatFeeTier,
+  formatPoolDepth,
+  getIntermediateHops,
+  getSwapPath,
+  isCircularRoute,
+  SwapRoute,
+  validateSwapRoute,
+} from "./SwapRoute";
 export type { PieChartProps, PieSlice } from "./ui/PieChart";
 export { PieChart } from "./ui/PieChart";
 export type { ValidatorCardProps } from "./ValidatorCard";
@@ -210,8 +231,11 @@ export type {
 export {
   aggregateDailyRewards,
   createDefaultFilter,
+  DEFAULT_XLM_PRICE_USD,
   DELEGATION_BASE_FEE_STROOPS,
   estimateDelegationFeeXlm,
+  estimateHistoricalXlmPriceUsd,
+  estimateRewardUsdValue,
   filterValidators,
   /** @alias formatPct from staking lib */
   formatPct as formatStakingPct,

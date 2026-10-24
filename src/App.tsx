@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { NavSection } from './components/Sidebar';
 import { Button } from './components/ui/Button';
+import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
+import { ToastProvider, useToast } from './context/ToastContext';
 import { useSorokit } from './context/useSorokit';
 import type { SorokitClient } from './lib/client';
 import { isKnownPath,SECTION_PATHS, sectionForPath } from './lib/nav-routes';
@@ -69,6 +71,9 @@ function NotFoundCard({ onBackToDashboard }: { onBackToDashboard: () => void }) 
       </Button>
     </div>
   );
+function ToastRenderer() {
+  const { toasts, removeToast } = useToast();
+  return <ToastContainer toasts={toasts} onDismiss={removeToast} />;
 }
 
 function AppContent() {
@@ -138,7 +143,10 @@ function AppContent() {
 function App({ client }: AppProps) {
   return (
     <SorokitProvider client={client}>
-      <AppContent />
+      <ToastProvider>
+        <AppContent />
+        <ToastRenderer />
+      </ToastProvider>
     </SorokitProvider>
   );
 }

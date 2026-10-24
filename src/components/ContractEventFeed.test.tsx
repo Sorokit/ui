@@ -26,6 +26,7 @@ vi.mock("@/context/useSorokit", async () => {
 
 
 const CONTRACT_ID = "CAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+const FROM_LEDGER_STORAGE_PREFIX = "sorokit:contract-event-feed:fromLedger:";
 
 const MOCK_EVENT: ContractEvent = {
   id: "evt-1",
@@ -637,6 +638,68 @@ describe("ContractEventFeed", () => {
           10,
           MOCK_EVENT.ledger + 1,
         );
+      });
+    });
+
+    it("persists the next ledger under the contract-specific sessionStorage key", async () => {
+      mockGetEvents({ data: [MOCK_EVENT], error: null });
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() =>
+        expect(
+          window.sessionStorage.getItem(
+            `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+          ),
+        ).toBe(String(MOCK_EVENT.ledger + 1)),
+      );
+    });
+
+    it("removes the persisted ledger for the previous contract when contractId changes", async () => {
+      mockGetEvents({ data: [MOCK_EVENT], error: null });
+
+      const { rerender } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(
+          window.sessionStorage.getItem(
+            `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+          ),
+        ).not.toBeNull(),
+      );
+
+      const OTHER_ID = "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+      // Keep the new contract's fetch pending so no state update lands after
+      // the assertion below; the assertion only concerns the old key.
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents: vi.fn().mockReturnValue(new Promise(() => {})) },
+      } as unknown as SorokitClient);
+      rerender(<ContractEventFeed contractId={OTHER_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(
+        window.sessionStorage.getItem(
+          `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+        ),
+      ).toBeNull();
+    });
+
+    it("ignores a corrupted persisted ledger instead of passing NaN to getEvents", async () => {
+      window.sessionStorage.setItem(
+        `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+        "not-a-number",
+      );
+      const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined);
       });
     });
 

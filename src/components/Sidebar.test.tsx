@@ -148,6 +148,32 @@ describe("Sidebar", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("does not call onNavigate during initial mount when deep-linking to soroban (#850)", () => {
+    localStorage.setItem("sorokit-active-nav", "wallet");
+
+    render(
+      <Sidebar active="soroban" onNavigate={onNavigate} open={false} onClose={onClose} />,
+    );
+
+    expect(onNavigate).not.toHaveBeenCalled();
+    localStorage.removeItem("sorokit-active-nav");
+  });
+
+  it("initializes sidebar visual highlight from localStorage on initial render (#850)", () => {
+    localStorage.setItem("sorokit-active-nav", "soroban");
+
+    render(
+      <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
+    );
+
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /soroban/i })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    localStorage.removeItem("sorokit-active-nav");
+  });
+
   it("updates localStorage when navigating to a new section", () => {
     render(
       <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
@@ -276,6 +302,50 @@ describe("Sidebar", () => {
     });
   });
 
+  describe("issue #949 sidebar behavior", () => {
+    beforeEach(() => {
+      localStorage.setItem("sorokit-sidebar-collapsed", "true");
+    });
+
+    it("shows the collapsed navigation tooltip on pointer hover", async () => {
+      render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+      const transactions = screen.getByRole("button", { name: "Transactions" });
+
+      fireEvent.pointerMove(transactions, { pointerType: "mouse" });
+
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Transactions");
+    });
+
+    it("shows the collapsed navigation tooltip when focused by keyboard", async () => {
+      render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={false} onClose={onClose} />,
+      );
+      const transactions = screen.getByRole("button", { name: "Transactions" });
+
+      fireEvent.focus(transactions);
+
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("Transactions");
+      expect(transactions).toHaveAttribute("aria-describedby");
+    });
+
+    it("highlights the Transactions item for a nested transaction route", () => {
+      render(
+        <Sidebar
+          active="/transactions/123"
+          onNavigate={onNavigate}
+          open={false}
+          onClose={onClose}
+        />,
+      );
+
+      const transactions = screen.getByRole("button", { name: "Transactions" });
+      expect(transactions).toHaveAttribute("aria-current", "page");
+      expect(transactions.className).toContain("bg-surface-3");
+    });
+  });
+
   describe("nav semantics and keyboard access (#550)", () => {
     const NAV_ITEMS = [
       "Wallet",
@@ -345,7 +415,7 @@ describe("Sidebar", () => {
     });
   });
 
-  describe("distinct nav section icons (#744)", () => {
+  describe("distinct nav section icons (#744, #875)", () => {
     it("assigns a unique icon to every NavSection entry in NAV", () => {
       expect(NAV.length).toBeGreaterThan(0);
       const icons = NAV.map((item) => item.icon);

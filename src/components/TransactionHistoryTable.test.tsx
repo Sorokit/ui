@@ -223,6 +223,35 @@ describe("TransactionHistoryTable", () => {
     });
   });
 
+  it("renders an accessible copy-hash button for each transaction", async () => {
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const copyButtons = screen.getAllByLabelText("Copy transaction hash");
+    expect(copyButtons.length).toBeGreaterThan(0);
+  });
+
+  it("copies the transaction hash to the clipboard when clicked", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const [copyButton] = screen.getAllByLabelText("Copy transaction hash");
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+      const copiedHash = writeText.mock.calls[0][0];
+      expect(mockTransactions.some((tx) => tx.hash === copiedHash)).toBe(true);
+    });
+  });
+
   describe("CSV Export via onExport callback", () => {
     it("calls onExport callback with CSV content when export button clicked", async () => {
       const mockExport = vi.fn();

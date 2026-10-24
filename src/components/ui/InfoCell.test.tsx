@@ -64,12 +64,16 @@ describe("InfoCell", () => {
 
     it("renders copy button and copies value to clipboard on click", async () => {
       vi.useFakeTimers();
-      const writeTextMock = vi.fn().mockResolvedValue(undefined);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
-      });
+      if (!navigator.clipboard) {
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn() },
+          writable: true,
+          configurable: true,
+        });
+      }
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockResolvedValue(undefined);
 
       render(<InfoCell label="Public Key" value="GBRP123456" copyable />);
 
@@ -80,7 +84,7 @@ describe("InfoCell", () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("GBRP123456");
+      expect(writeTextSpy).toHaveBeenCalledWith("GBRP123456");
 
       // Verify copied feedback state
       expect(
@@ -120,12 +124,16 @@ describe("InfoCell", () => {
     });
 
     it("handles clipboard failure gracefully without throwing", async () => {
-      const writeTextMock = vi.fn().mockRejectedValue(new Error("Permission denied"));
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: writeTextMock },
-        writable: true,
-        configurable: true,
-      });
+      if (!navigator.clipboard) {
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: vi.fn() },
+          writable: true,
+          configurable: true,
+        });
+      }
+      const writeTextSpy = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockRejectedValue(new Error("Permission denied"));
 
       render(<InfoCell label="API Key" value="secret-123" copyable />);
 
@@ -135,7 +143,7 @@ describe("InfoCell", () => {
         fireEvent.click(copyBtn);
       });
 
-      expect(writeTextMock).toHaveBeenCalledWith("secret-123");
+      expect(writeTextSpy).toHaveBeenCalledWith("secret-123");
       // Button remains in uncopied state
       expect(screen.getByRole("button", { name: "Copy API Key" })).toBeInTheDocument();
       expect(successToast).not.toHaveBeenCalled();

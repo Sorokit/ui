@@ -1,5 +1,14 @@
-import { type ComponentType, lazy, Suspense, useCallback, useEffect, useState } from "react";
+import {
+  type ComponentType,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
+import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
@@ -146,13 +155,42 @@ export function Dashboard({
     setVisited((prev) => new Set(prev).add(active));
   }
 
+  // Move focus to the active section heading on navigation (#879).
+  const focusSectionHeading = useCallback((section: NavSection) => {
+    const wrapper = document.querySelector<HTMLElement>(
+      `[data-testid="screen-wrapper-${section}"]`,
+    );
+    if (!wrapper) return;
+    const heading = wrapper.querySelector<HTMLElement>(
+      "h1, h2, h3, h4, h5, h6, [role='heading']",
+    );
+    if (heading) {
+      if (!heading.hasAttribute("tabindex")) {
+        heading.setAttribute("tabindex", "-1");
+      }
+      heading.focus();
+    }
+  }, []);
+
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    focusSectionHeading(active);
+  }, [active, focusSectionHeading]);
+
   const handleNavigate = useCallback(
     (section: NavSection) => {
       // In controlled mode the parent decides what renders next; only report.
       if (!isControlled) setInternalActive(section);
       onSectionChange?.(section);
+      if (section === active) {
+        focusSectionHeading(section);
+      }
     },
-    [isControlled, onSectionChange],
+    [isControlled, onSectionChange, active, focusSectionHeading],
   );
 
   return (
@@ -175,6 +213,7 @@ export function Dashboard({
             className="mx-auto px-6 py-8 sm:px-10 sm:py-10 min-h-[300px]"
             style={{ maxWidth: maxContentWidth }}
           >
+            <DashboardOverview onNavigate={handleNavigate} />
             {[...visited].map((section) => {
               const Screen = SCREENS[section];
               return (

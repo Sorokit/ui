@@ -12,8 +12,13 @@ import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
 function getWalletButton(name: RegExp | string) {
-  const grid = screen.getByRole("grid", { name: /available wallets/i });
-  return within(grid).getByRole("button", { name });
+  const container =
+    screen.queryByRole("radiogroup", { name: /available wallets/i }) ??
+    screen.getByRole("grid", { name: /available wallets/i });
+  return (
+    within(container).queryByRole("radio", { name }) ??
+    within(container).getByRole("button", { name })
+  );
 }
 
 // The connected WalletConnectButton opens a management modal rather than

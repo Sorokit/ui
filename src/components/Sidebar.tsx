@@ -76,6 +76,8 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   const triggerRef = useRef<HTMLElement | null>(null);
   const initialActive = useRef(active);
 
+  // Initialize visual highlight from localStorage without firing onNavigate on mount (#850).
+  // Controlled activeSection navigation (e.g. deep-linking to /soroban) must not be overridden on initial render.
   const [visualActive, setVisualActive] = useState<NavSection | string>(() => {
     if (typeof localStorage === "undefined") return active;
     const saved = localStorage.getItem("sorokit-active-nav");

@@ -66,14 +66,14 @@ const STUB_PRICES: Record<string, number> = {
   ETH: 3200,
 };
 
-type PriceProvider = (codes: string[]) => Promise<Record<string, number>>;
+export type PriceProvider = (codes: string[]) => Promise<Record<string, number>>;
 
-const defaultPriceProvider: PriceProvider = async (codes) => {
+export const defaultPriceProvider: PriceProvider = async (codes) => {
   // Return stub prices for any known code; fall back to $1 for unknown assets.
   return Object.fromEntries(codes.map((c) => [c, STUB_PRICES[c] ?? 1.0]));
 };
 
-async function fetchPrices(
+export async function fetchPrices(
   codes: string[],
   priceProvider: PriceProvider = defaultPriceProvider,
 ): Promise<Record<string, number>> {

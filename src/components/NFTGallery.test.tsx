@@ -396,6 +396,91 @@ describe("NFTCard", () => {
   });
 });
 
+// ─── NFTCard — IPFS gateway resolution & fallback ────────────────────────────
+
+describe("NFTCard — IPFS gateway resolution", () => {
+  const CID_V0 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
+  const CID_V1 = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+
+  const renderCard = (image: string | undefined) =>
+    render(
+      <NFTCard
+        nft={makeNft({ metadata: { name: "Cool Cat #1", attributes: [], image } })}
+        selected={false}
+        bulkMode={false}
+        onSelect={vi.fn()}
+        onSend={vi.fn()}
+        onList={vi.fn()}
+      />
+    );
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it("converts an ipfs:// CIDv1 URI to the primary gateway URL", () => {
+    renderCard(`ipfs://${CID_V1}`);
+    expect(screen.getByAltText("Cool Cat #1")).toHaveAttribute("src", `https://ipfs.io/ipfs/${CID_V1}`);
+  });
+
+  it("converts an ipfs:// CIDv0 URI with a nested path", () => {
+    renderCard(`ipfs://${CID_V0}/images/1.png`);
+    expect(screen.getByAltText("Cool Cat #1")).toHaveAttribute(
+      "src",
+      `https://ipfs.io/ipfs/${CID_V0}/images/1.png`
+    );
+  });
+
+  it("handles the legacy ipfs://ipfs/<cid> form without duplicating the prefix", () => {
+    renderCard(`ipfs://ipfs/${CID_V1}/cat.png`);
+    expect(screen.getByAltText("Cool Cat #1")).toHaveAttribute(
+      "src",
+      `https://ipfs.io/ipfs/${CID_V1}/cat.png`
+    );
+  });
+
+  it("does not rewrite regular https image URLs", () => {
+    renderCard("https://example.com/cat1.png");
+    expect(screen.getByAltText("Cool Cat #1")).toHaveAttribute("src", "https://example.com/cat1.png");
+  });
+
+  it("does not retry other gateways for a failing non-IPFS image", () => {
+    renderCard("https://example.com/missing.png");
+    fireEvent.error(screen.getByAltText("Cool Cat #1"));
+    expect(screen.queryByAltText("Cool Cat #1")).not.toBeInTheDocument();
+    expect(screen.getByText("No image")).toBeInTheDocument();
+  });
+
+  it("falls back to the placeholder after every gateway fails (404 / network error)", () => {
+    renderCard(`ipfs://${CID_V1}`);
+
+    const expected = [
+      "https://ipfs.io/ipfs/",
+      "https://cloudflare-ipfs.com/ipfs/",
+      "https://gateway.pinata.cloud/ipfs/",
+      "https://dweb.link/ipfs/",
+    ];
+    for (const gateway of expected) {
+      const img = screen.getByAltText("Cool Cat #1");
+      expect(img).toHaveAttribute("src", `${gateway}${CID_V1}`);
+      fireEvent.error(img);
+    }
+
+    expect(screen.queryByAltText("Cool Cat #1")).not.toBeInTheDocument();
+    expect(screen.getByText("No image")).toBeInTheDocument();
+  });
+
+  it("keeps the image when a later gateway loads successfully", () => {
+    renderCard(`ipfs://${CID_V1}`);
+
+    fireEvent.error(screen.getByAltText("Cool Cat #1"));
+    const img = screen.getByAltText("Cool Cat #1");
+    expect(img).toHaveAttribute("src", `https://cloudflare-ipfs.com/ipfs/${CID_V1}`);
+
+    fireEvent.load(img);
+    expect(screen.getByAltText("Cool Cat #1")).toBeInTheDocument();
+    expect(screen.queryByText("No image")).not.toBeInTheDocument();
+  });
+});
+
 // ─── NFTGallery — wallet not connected ───────────────────────────────────────
 
 describe("NFTGallery — not connected", () => {
@@ -478,6 +563,17 @@ describe("NFTGallery — empty collection", () => {
     await waitFor(() => {
       expect(screen.getByText(/no nfts found in this wallet/i)).toBeInTheDocument();
     });
+  });
+
+  it("renders only the empty message — no cards, grid or skeletons", async () => {
+    render(<NFTGallery />);
+    await waitFor(() => {
+      expect(screen.getByText("No NFTs found in this wallet")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/no nfts match your filters/i)).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId("nft-card")).toHaveLength(0);
+    expect(screen.queryByRole("list", { name: /nft grid/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("nft-loading-skeleton")).not.toBeInTheDocument();
   });
 
   it("does not show Select button with empty collection", async () => {

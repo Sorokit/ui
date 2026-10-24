@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { ContractEventFeed } from "@/components/ContractEventFeed";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -7,6 +7,7 @@ import { useSorokit } from "@/context/useSorokit";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
 
 const CONTRACT_HISTORY_KEY = "sorokit-soroban-contract-history";
+const DEFAULT_MAX_HISTORY = 20;
 // A Soroban contract ID is a C-prefixed strkey (56 chars, base32-ish payload).
 const CONTRACT_ID_PATTERN = /^C[A-Z0-9]{55}$/;
 
@@ -57,16 +58,8 @@ function stellarExpertUrl(networkName: string | undefined, contractId: string): 
 export function SorobanScreen() {
   const { network } = useSorokit();
   const [contractId, setContractId] = useState(() => readRecentContract());
-  // Base list is read once on mount (GH #717 — avoids re-reading localStorage
-  // on every re-render). Mutations (remove, clear) update this state directly
-  // so the UI stays consistent without touching localStorage on every render.
-  const [savedContractsBase, setSavedContractsBase] = useState<string[]>(
-    () => readAllRecent(),
-  );
-  const [removed, setRemoved] = useState<Set<string>>(() => new Set());
+  const [savedContracts, setSavedContracts] = useState<string[]>(() => readAllRecent());
   const { title, sub } = SCREEN_LABELS.soroban;
-
-  const savedContracts = savedContractsBase.filter((id) => !removed.has(id));
 
   const validContractId = isValidContractId(contractId);
   const expertUrl = validContractId ? stellarExpertUrl(network?.name, contractId.trim()) : null;
@@ -75,17 +68,30 @@ export function SorobanScreen() {
     setContractId(id);
   }
 
+  const handleSaveContract = useCallback((idToSave?: string) => {
+    const targetId = (typeof idToSave === "string" ? idToSave : contractId).trim();
+    if (!isValidContractId(targetId)) return;
+    setSavedContracts((prev) => {
+      const next = [targetId, ...prev.filter((entry) => entry !== targetId)].slice(
+        0,
+        DEFAULT_MAX_HISTORY,
+      );
+      writeRecent(next);
+      return next;
+    });
+  }, [contractId]);
+
   function handleRemoveContract(id: string) {
-    const next = savedContractsBase.filter((entry) => entry !== id);
-    writeRecent(next);
-    setSavedContractsBase(next);
-    setRemoved((prev) => new Set(prev).add(id));
+    setSavedContracts((prev) => {
+      const next = prev.filter((entry) => entry !== id);
+      writeRecent(next);
+      return next;
+    });
   }
 
   function handleClearContracts() {
     writeRecent([]);
-    setSavedContractsBase([]);
-    setRemoved(new Set());
+    setSavedContracts([]);
   }
 
   return (
@@ -97,16 +103,27 @@ export function SorobanScreen() {
           </h2>
           <p className="text-[11px] text-ink-3 mt-0.5">{sub}</p>
         </div>
-        {expertUrl && (
-          <a
-            href={expertUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-[11px] text-brand hover:underline shrink-0"
-          >
-            Stellar Expert ↗
-          </a>
-        )}
+        <div className="flex items-center gap-3 shrink-0">
+          {validContractId && !savedContracts.includes(contractId.trim()) && (
+            <button
+              type="button"
+              onClick={() => handleSaveContract(contractId)}
+              className="text-[11px] font-medium text-brand hover:underline"
+            >
+              Save contract
+            </button>
+          )}
+          {expertUrl && (
+            <a
+              href={expertUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[11px] text-brand hover:underline"
+            >
+              Stellar Expert ↗
+            </a>
+          )}
+        </div>
       </div>
       {savedContracts.length > 0 && (
         <div className="rounded-lg border border-line bg-surface px-4 py-3">
@@ -155,7 +172,11 @@ export function SorobanScreen() {
         </div>
       )}
       <ErrorBoundary isolate>
-        <SorobanPanel contractId={contractId} onContractIdChange={setContractId} />
+        <SorobanPanel
+          contractId={contractId}
+          onContractIdChange={setContractId}
+          onContractSave={handleSaveContract}
+        />
       </ErrorBoundary>
       {contractId.trim() !== "" && (
         <ErrorBoundary isolate>

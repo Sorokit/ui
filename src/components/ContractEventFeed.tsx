@@ -81,13 +81,18 @@ function fromLedgerStorageKey(contractId: string): string {
 function readPersistedFromLedger(contractId: string): number | undefined {
   try {
     const raw = window.sessionStorage.getItem(fromLedgerStorageKey(contractId));
-    return raw === null ? undefined : Number(raw);
+    if (raw === null) return undefined;
+    const ledger = Number(raw);
+    // A corrupted or tampered value must not be forwarded to `getEvents` as
+    // NaN — fall back to the prop/default window instead.
+    return Number.isFinite(ledger) && ledger >= 0 ? ledger : undefined;
   } catch {
     return undefined;
   }
 }
 
 function persistFromLedger(contractId: string, ledger: number): void {
+  if (!Number.isFinite(ledger) || ledger < 0) return;
   try {
     window.sessionStorage.setItem(fromLedgerStorageKey(contractId), String(ledger));
   } catch {

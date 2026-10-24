@@ -14,6 +14,10 @@ export interface PoolReserves {
   toReserves: number;
 }
 
+/**
+ * Minimum total liquidity required to simulate price impact (#733, #864).
+ * Below this threshold, computation is skipped to avoid Infinity/NaN.
+ */
 export const MINIMUM_LIQUIDITY_THRESHOLD = 1;
 
 export const POOL_RESERVES: Record<string, PoolReserves> = {

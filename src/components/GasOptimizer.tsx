@@ -13,6 +13,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
+import { useFeeData } from "@/hooks/useFeeData";
 import type { SorobanResourceUsage } from "@/lib/client";
 import { parseContractPanic } from "@/lib/diagnostics";
 import { cn, toXLM } from "@/lib/utils";
@@ -249,6 +250,10 @@ export function GasOptimizer({
 }: GasOptimizerProps) {
   const { client, network, registerWatcher } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
+  // Shares FeeEstimator's polling interval and cache instead of fetching the
+  // base fee a second time: the hook dedupes concurrent callers down to one
+  // `estimateFee()` request per tick regardless of how many components use it.
+  const { fee: sharedFee } = useFeeData(refreshInterval, isVisible);
   const [gasPriceData, setGasPriceData] = useState<GasPriceData | null>(null);
   const [estimate, setEstimate] = useState<GasEstimate | null>(null);
   const [loading, setLoading] = useState(true);
@@ -438,7 +443,7 @@ export function GasOptimizer({
       gasMultiplier: customMultiplier,
       multiplier: customMultiplier,
       gasPrice: gasPriceData?.gasPrice ?? "100",
-      baseFee: gasPriceData?.baseFee ?? "100",
+      baseFee: sharedFee?.baseFee ?? gasPriceData?.baseFee ?? "100",
       baseReserve: gasPriceData?.baseReserve ?? "0.5",
       operations,
       resources: {
@@ -459,6 +464,7 @@ export function GasOptimizer({
     memoryBytes,
     customMultiplier,
     gasPriceData,
+    sharedFee,
     operations,
   ]);
 

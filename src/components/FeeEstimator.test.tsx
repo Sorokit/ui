@@ -545,7 +545,7 @@ describe("FeeEstimator — issue #670", () => {
       });
     });
 
-    it("clears polling interval on unmount even when useIsVisible reported false at unmount time", async () => {
+    it("clears polling interval on unmount even when useIsVisible reported false at unmount time (#861)", async () => {
       vi.useFakeTimers();
 
       let observerCallback: IntersectionObserverCallback | null = null;

@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type ReactNode,useEffect } from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
+import { ToastProvider, useToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 
 import { TopBar } from "./TopBar";
@@ -25,12 +27,23 @@ const defaultSorokit = {
   resetTransactionWatchers: vi.fn(),
 };
 
+function SeedNotifications({ children }: { children: ReactNode }) {
+  const { info } = useToast();
+  useEffect(() => {
+    info("Account updated");
+    info("Network connected");
+  }, [info]);
+  return children;
+}
+
 describe("TopBar", () => {
   const onMenuToggle = vi.fn();
   const clearError = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem("sorokit-theme");
+    document.documentElement.removeAttribute("data-theme");
     vi.mocked(useSorokit).mockReturnValue({
       ...defaultSorokit,
       clearError,
@@ -44,6 +57,50 @@ describe("TopBar", () => {
     } as ReturnType<typeof useSorokit>);
     render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
     expect(screen.getByRole("heading", { name: /wallet/i })).toBeInTheDocument();
+  });
+
+  it("truncates the title and exposes its full text in a tooltip", async () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    const heading = screen.getByRole("heading", { name: "Wallet" });
+    const tooltipTrigger = heading.parentElement!;
+
+    expect(heading).toHaveClass("truncate");
+    expect(tooltipTrigger).toHaveAttribute("title", "Wallet");
+    fireEvent.pointerMove(tooltipTrigger, { pointerType: "mouse" });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Wallet");
+  });
+
+  it("labels the theme toggle with its destination theme and switches themes", () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+
+    const toggle = screen.getByRole("button", { name: "Switch to light theme" });
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark theme" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+
+  it("clears the unread badge when notifications open without dismissing them", () => {
+    render(
+      <ToastProvider>
+        <SeedNotifications>
+          <TopBar active="wallet" onMenuToggle={onMenuToggle} />
+        </SeedNotifications>
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 unread" }));
+
+    expect(screen.getByRole("dialog", { name: "Notifications" })).toBeInTheDocument();
+    const notificationButton = document.querySelector<HTMLButtonElement>(
+      'button[title="Notifications"]',
+    );
+    expect(notificationButton).toHaveAttribute("aria-label", "Notifications");
+    expect(notificationButton?.querySelector(".bg-red")).not.toBeInTheDocument();
+    expect(screen.getByText("Account updated")).toBeInTheDocument();
+    expect(screen.getByText("Network connected")).toBeInTheDocument();
   });
 
   it("renders the correct title for different active sections", () => {

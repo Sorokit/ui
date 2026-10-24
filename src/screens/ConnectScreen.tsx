@@ -1,6 +1,6 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
@@ -14,9 +14,77 @@ const SUPPORTED_WALLETS = [
   { name: "Albedo", initial: "A", color: "#00B894" },
 ];
 
+/** Known `?provider=` query param values, matched case-insensitively. */
+const SUPPORTED_PROVIDER_IDS = SUPPORTED_WALLETS.map((w) => w.name.toLowerCase());
+
+/**
+ * Mobile wallets that ship an app with its own deep-link scheme, for users
+ * on a mobile browser where the desktop extensions in SUPPORTED_WALLETS
+ * can't be installed. Freighter and xBull are browser-extension-only today.
+ */
+const MOBILE_WALLET_DEEP_LINKS = [
+  { name: "Lobstr", href: "https://lobstr.co/" },
+  { name: "Albedo", href: "https://albedo.link/" },
+];
+
+/**
+ * Detects a mobile browser from the user agent. No mobile-detection utility
+ * exists elsewhere in this codebase yet (checked `src/lib/utils.ts` and
+ * every component under `src/`), so this is intentionally small and scoped
+ * to this screen rather than introducing a new shared utility module for a
+ * single call site.
+ */
+function isMobileUserAgent(userAgent: string): boolean {
+  return /android|iphone|ipad|ipod|mobile/i.test(userAgent);
+}
+
+/**
+ * Parses a raw wallet-connection error message into actionable
+ * troubleshooting guidance. Wallet extensions (Freighter, xBull, Albedo,
+ * Lobstr) don't share a single error-code standard, so this matches on the
+ * common substrings their rejection/lock/missing-extension errors use.
+ * Falls back to the raw message (still shown) when nothing matches, rather
+ * than hiding it.
+ */
+function connectionTroubleshooting(message: string): string | null {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("locked") ||
+    normalized.includes("unlock")
+  ) {
+    return "Unlock your wallet extension, then try connecting again.";
+  }
+
+  if (
+    normalized.includes("rejected") ||
+    normalized.includes("denied") ||
+    normalized.includes("cancelled") ||
+    normalized.includes("canceled") ||
+    normalized.includes("user declined")
+  ) {
+    return "The connection request was declined. Open your wallet extension and approve the connection request to continue.";
+  }
+
+  if (
+    normalized.includes("not installed") ||
+    normalized.includes("not found") ||
+    normalized.includes("no wallet")
+  ) {
+    return "No supported wallet extension was detected. Install one of the wallets below, then refresh this page.";
+  }
+
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return "The connection request timed out. Check that your wallet extension is responsive and try again.";
+  }
+
+  return null;
+}
+
 export function ConnectScreen() {
   const { connectWallet, isConnecting, error, clearError } = useSorokit();
   const connectButtonRef = useRef<HTMLButtonElement>(null);
+  const autoConnectAttempted = useRef(false);
 
   useEffect(() => {
     if (!isConnecting) {
@@ -30,6 +98,36 @@ export function ConnectScreen() {
   useEffect(() => {
     document.title = DISCONNECTED_TITLE;
   }, []);
+
+  // Auto-connect from a `?provider=<name>` query param (e.g.
+  // `/connect?provider=freighter`), e.g. a deep link shared from another
+  // part of the app or a docs/marketing page (#893). Only fires once per
+  // mount and only for a recognized provider id — connectWallet() itself has
+  // no way to target a specific wallet (it connects through whichever
+  // extension clientRef.current.wallet.connect() finds), so this triggers
+  // the same connection flow as clicking "Connect Wallet" rather than
+  // pretending to select a specific provider the underlying client can't
+  // actually target yet.
+  useEffect(() => {
+    if (autoConnectAttempted.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const providerParam = params.get("provider");
+    if (!providerParam) return;
+    autoConnectAttempted.current = true;
+    if (SUPPORTED_PROVIDER_IDS.includes(providerParam.toLowerCase())) {
+      void connectWallet();
+    }
+  }, [connectWallet]);
+
+  const troubleshooting = useMemo(
+    () => (error ? connectionTroubleshooting(error) : null),
+    [error],
+  );
+
+  const showMobileDeepLinks = useMemo(
+    () => isMobileUserAgent(window.navigator.userAgent),
+    [],
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-base px-4">
@@ -87,9 +185,16 @@ export function ConnectScreen() {
           <div className="px-5 py-5 flex flex-col gap-4">
             {error && (
               <div className="flex items-start justify-between gap-3 rounded-lg bg-error-dim-muted border border-error-dim px-4 py-3">
-                <p role="alert" className="text-[13px] text-red">
-                  {error}
-                </p>
+                <div className="flex flex-col gap-1">
+                  <p role="alert" className="text-[13px] text-red">
+                    {error}
+                  </p>
+                  {troubleshooting && (
+                    <p className="text-[12px] text-ink-2 leading-relaxed">
+                      {troubleshooting}
+                    </p>
+                  )}
+                </div>
 
                 <button
                   onClick={clearError}
@@ -154,6 +259,28 @@ export function ConnectScreen() {
                 ))}
               </div>
             </div>
+
+            {showMobileDeepLinks && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 text-center">
+                  Open in a mobile wallet app
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {MOBILE_WALLET_DEEP_LINKS.map((wallet) => (
+                    <Button
+                      key={wallet.name}
+                      variant="secondary"
+                      size="sm"
+                      href={wallet.href}
+                      aria-label={`Open ${wallet.name} app`}
+                      className="w-full justify-center"
+                    >
+                      {wallet.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <details className="group rounded-lg border border-line px-4 py-3 open:bg-surface-2">
               <summary className="text-[12px] font-medium text-ink-2 cursor-pointer select-none list-none flex items-center justify-between">

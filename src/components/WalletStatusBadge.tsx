@@ -18,34 +18,55 @@ const COPY_FEEDBACK_MS = 1600;
  * Network health overrides for the connected-state indicator. A healthy
  * ("online") or unknown status keeps the default green dot. Each state also
  * carries a text label so it is never conveyed by colour alone.
+ *
+ * Text tokens are calibrated to satisfy WCAG 2.1 AA (contrast ratio >= 4.5:1)
+ * against the badge surface (bg-surface-2 / #1c1c1c).
  */
-const networkStatusStyles = {
+export const STATUS_STYLES = {
+  connecting: {
+    dot: "bg-yellow-400 motion-safe:animate-pulse",
+    text: "text-yellow-400",
+    label: "Reconnecting...",
+  },
   degraded: {
     dot: "bg-orange motion-safe:animate-pulse",
-    text: "text-orange",
+    text: "text-warning",
     label: "Degraded",
   },
   offline: {
     dot: "bg-red",
-    text: "text-red",
+    text: "text-red-400",
     label: "Offline",
+  },
+  error: {
+    dot: "bg-red",
+    text: "text-red-400",
+    label: "Error",
   },
 } as const;
 
-type IndicatedNetworkStatus = keyof typeof networkStatusStyles;
+export const networkStatusStyles = STATUS_STYLES;
 
-function isIndicatedStatus(
+export type IndicatedNetworkStatus = keyof typeof STATUS_STYLES;
+
+export function isIndicatedStatus(
   status: string | undefined,
 ): status is IndicatedNetworkStatus {
-  return status === "degraded" || status === "offline";
+  return typeof status === "string" && status in STATUS_STYLES;
 }
 
 export function WalletStatusBadge({
   className,
   onOpen,
 }: WalletStatusBadgeProps) {
-  const { address, walletName, isConnected, isConnecting, network } =
-    useSorokit();
+  const {
+    address,
+    walletName,
+    isConnected,
+    isConnecting,
+    network,
+    isSwitchingNetwork,
+  } = useSorokit();
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,9 +92,9 @@ export function WalletStatusBadge({
           data-testid="wallet-status-dot"
           // motion-safe: the pulse only runs when the user has not asked the
           // OS to reduce motion — it also stops burning frames for them.
-          className="w-2 h-2 rounded-full bg-orange motion-safe:animate-pulse shrink-0"
+          className="w-2 h-2 rounded-full bg-yellow-400 motion-safe:animate-pulse shrink-0"
         />
-        <span className="text-[12px] text-ink-3">Connecting…</span>
+        <span className="text-[12px] text-ink-2">Connecting…</span>
       </div>
     );
   }
@@ -92,13 +113,18 @@ export function WalletStatusBadge({
           data-testid="wallet-status-dot"
           className="w-2 h-2 rounded-full bg-ink-4 shrink-0"
         />
-        <span className="text-[12px] text-ink-3">Disconnected</span>
+        <span className="text-[12px] text-ink-2">Disconnected</span>
       </div>
     );
   }
 
-  const networkStatus = isIndicatedStatus(network?.status)
-    ? networkStatusStyles[network.status]
+  const effectiveNetworkStatus =
+    network?.status === "connecting" || isSwitchingNetwork
+      ? "connecting"
+      : network?.status;
+
+  const networkStatus = isIndicatedStatus(effectiveNetworkStatus)
+    ? STATUS_STYLES[effectiveNetworkStatus]
     : null;
 
   const handleClick = async () => {
@@ -116,7 +142,7 @@ export function WalletStatusBadge({
   };
 
   const networkLabel = networkStatus
-    ? ` Network ${networkStatus.label.toLowerCase()}.`
+    ? ` Network ${networkStatus.label.toLowerCase().replace(/\.+$/, "")}.`
     : "";
 
   return (
@@ -165,7 +191,7 @@ export function WalletStatusBadge({
             <span className="hidden sm:inline">Copied</span>
           </span>
         ) : (
-          <span className="text-[12px] text-ink-3 font-mono hidden sm:inline">
+          <span className="text-[12px] text-ink-2 font-mono hidden sm:inline">
             {truncateAddress(address)}
           </span>
         )}
