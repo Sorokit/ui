@@ -300,10 +300,14 @@ describe("WalletScreen", () => {
 
       const copyButtons = screen.getAllByRole("button", { name: /copy address/i });
       await act(async () => {
-        fireEvent.click(copyButtons[0]);
+        fireEvent.click(copyButtons[1]);
       });
 
       expect(writeTextMock).toHaveBeenCalledWith("GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFTGOBJZOTMr123456789");
+      expect(successToast).toHaveBeenCalledTimes(1);
+      expect(successToast).toHaveBeenCalledWith("Address Copied", {
+        message: "The address has been copied to your clipboard.",
+      });
     });
   });
 });
