@@ -1,8 +1,94 @@
-import { describe, expect,it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { SorokitClient } from '../client';
 import { deterministicMock,DeterministicMockData } from '../deterministic-mock';
 import { createMockClient,MOCK_ADDRESS } from '../mock-client';
+import { fetchWithRetry, formatStellarError } from '../rpc';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('RPC retry behavior', () => {
+  it('retries network dropouts with exponential backoff and jitter', async () => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockRejectedValueOnce(new TypeError('Network request failed'))
+      .mockResolvedValueOnce({ status: 200 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.25,
+      wait,
+    });
+
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      75,
+      150,
+    ]);
+  });
+
+  it.each([429, 502, 503, 504])('retries HTTP %i responses', async (status) => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ status } as Response)
+      .mockResolvedValueOnce({ status: 200 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.5,
+      wait,
+    });
+
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(100, undefined);
+  });
+
+  it('stops after three retries when the endpoint remains unavailable', async () => {
+    const wait = vi.fn(async (_milliseconds: number, _signal?: AbortSignal) =>
+      Promise.resolve(),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({ status: 503 } as Response);
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await fetchWithRetry('https://rpc.example', undefined, {
+      baseDelayMs: 100,
+      random: () => 0.5,
+      wait,
+    });
+
+    expect(result.status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(wait.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+      100,
+      200,
+      400,
+    ]);
+  });
+
+  it('exposes Horizon operation result codes alongside the detail', () => {
+    expect(
+      formatStellarError({
+        detail: 'Transaction failed',
+        extras: {
+          result_codes: {
+            operations: ['op_underfunded', 'op_bad_auth'],
+          },
+        },
+      }),
+    ).toBe(
+      'Transaction failed (operation codes: op_underfunded, op_bad_auth)',
+    );
+  });
+});
 
 describe('Mock Client - Issue #30 Fixes', () => {
   describe('Fix 1: Valid MOCK_ADDRESS', () => {
@@ -122,6 +208,51 @@ describe('Mock Client - Issue #30 Fixes', () => {
       };
 
       expect(snapshot1).toEqual(snapshot2);
+    });
+
+    it('produces identical responses from separately created clients with the same seed', async () => {
+      const client1 = createMockClient({ seed: 8128 });
+      const client2 = createMockClient({ seed: 8128 });
+
+      const [response1, history1, response2, history2] = await Promise.all([
+        client1.transaction.submit(),
+        client1.transaction.getHistory(MOCK_ADDRESS),
+        client2.transaction.submit(),
+        client2.transaction.getHistory(MOCK_ADDRESS),
+      ]);
+
+      expect(response1).toEqual(response2);
+      expect(history1).toEqual(history2);
+    });
+
+    it('advances mock ledger timestamps without using real time', async () => {
+      const client = createMockClient();
+      const before = await client.transaction.getHistory(MOCK_ADDRESS, 1, 1);
+      const initialTimestamp = Date.parse(before.data![0].createdAt);
+
+      expect(client.advanceTime(60_000)).toBe(1700000060000);
+
+      const after = await client.transaction.getHistory(MOCK_ADDRESS, 1, 1);
+      expect(Date.parse(after.data![0].createdAt)).toBe(initialTimestamp + 60_000);
+    });
+  });
+
+  describe('Mock operation failure injection', () => {
+    it('plays through sequential errors before allowing the operation to succeed', async () => {
+      const client = createMockClient();
+      const firstError = new Error('temporary failure 1');
+      const secondError = new Error('temporary failure 2');
+      client.setFailureSequence(
+        [firstError, secondError, 'success'],
+        'transaction.submit',
+      );
+
+      await expect(client.transaction.submit()).rejects.toBe(firstError);
+      await expect(client.transaction.submit()).rejects.toBe(secondError);
+      const result = await client.transaction.submit();
+
+      expect(result.error).toBeNull();
+      expect(result.data).not.toBeNull();
     });
   });
 

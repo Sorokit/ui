@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useSorokit } from "@/context/useSorokit";
 import { useOutsideClick } from "@/hooks/useOutsideClick";
 import type { NetworkInfo, NetworkName } from "@/lib/client";
+import { fetchWithRetry, formatStellarError } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 
 export interface NetworkPreset {
@@ -129,22 +130,27 @@ export async function checkRpcHealth(
   signal?.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const res = await fetch(rpcUrl.trim(), {
+    const res = await fetchWithRetry(rpcUrl.trim(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }),
       signal: controller.signal,
     });
     if (!res.ok) {
-      throw new Error(`RPC endpoint responded with HTTP ${res.status}.`);
+      const body: unknown = await res.json().catch(() => null);
+      const detail = formatStellarError(body);
+      throw new Error(
+        `RPC endpoint responded with HTTP ${res.status}${detail ? `: ${detail}` : ""}.`,
+      );
     }
     const body = (await res.json()) as {
       result?: { status?: string };
       error?: { message?: string };
     };
     if (body.error) {
+      const detail = formatStellarError(body);
       throw new Error(
-        `RPC endpoint returned an error: ${body.error.message ?? "unknown error"}.`,
+        `RPC endpoint returned an error: ${detail ?? body.error.message ?? "unknown error"}.`,
       );
     }
     if (body.result?.status && body.result.status !== "healthy") {
@@ -154,6 +160,7 @@ export async function checkRpcHealth(
     if (timedOut) {
       const error = new Error(
         `RPC endpoint did not respond within ${Math.round(timeoutMs / 1000)}s.`,
+        { cause: err },
       );
       (error as Error & { cause?: unknown }).cause = err;
       throw error;
@@ -162,6 +169,7 @@ export async function checkRpcHealth(
     if (err instanceof TypeError) {
       const error = new Error(
         "Could not reach the RPC endpoint. It may be offline or may not allow requests from this origin (CORS).",
+        { cause: err },
       );
       (error as Error & { cause?: unknown }).cause = err;
       throw error;

@@ -9,6 +9,12 @@ describe('ClientAdapter', () => {
     adapter = createClientAdapter();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   describe('Connection', () => {
     it('should return error when no wallet is available', async () => {
       const result = await adapter.connect();
@@ -20,6 +26,85 @@ describe('ClientAdapter', () => {
     it('should not use hardcoded mock address', async () => {
       const result = await adapter.connect();
       expect(result.data).not.toBe('GBAMQXTQ7IQKPZXJKZJQZJQ...');
+    });
+
+    it('times out an unresponsive hardware wallet after 15 seconds', async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal('window', {
+        freighter: {
+          requestAccess: vi.fn(() => new Promise(() => {})),
+          getPublicKey: vi.fn(),
+        },
+      });
+
+      try {
+        const resultPromise = adapter.connect();
+        await vi.advanceTimersByTimeAsync(15_000);
+        const result = await resultPromise;
+
+        expect(result.status).toBe('error');
+        expect(result.error).toContain('timed out after 15 seconds');
+        expect(result.error).toContain('open the Stellar app');
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('backs off exponentially between failed extension connection attempts', async () => {
+      vi.useFakeTimers();
+      vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      const requestAccess = vi.fn()
+        .mockRejectedValueOnce(new Error('Temporary wallet transport failure'))
+        .mockRejectedValueOnce(new Error('Temporary wallet transport failure'))
+        .mockResolvedValueOnce({});
+      vi.stubGlobal('window', {
+        freighter: {
+          requestAccess,
+          getPublicKey: vi.fn().mockResolvedValue('GTESTADDRESS'),
+        },
+      });
+
+      try {
+        const resultPromise = adapter.connect();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(requestAccess).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(249);
+        expect(requestAccess).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(requestAccess).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(499);
+        expect(requestAccess).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(1);
+
+        const result = await resultPromise;
+        expect(result.status).toBe('success');
+        expect(requestAccess).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('translates Ledger app-not-open error codes into actionable guidance', async () => {
+      const requestAccess = vi.fn().mockRejectedValue(new Error('Device returned 0x6804'));
+      vi.stubGlobal('window', {
+        freighter: {
+          requestAccess,
+          getPublicKey: vi.fn(),
+        },
+      });
+
+      const result = await adapter.connect();
+
+      expect(result.status).toBe('error');
+      expect(result.error).toContain('Open the Stellar app on your Ledger');
+      expect(result.error).toContain('unlock the device');
+      expect(requestAccess).toHaveBeenCalledTimes(1);
+      vi.unstubAllGlobals();
     });
   });
 

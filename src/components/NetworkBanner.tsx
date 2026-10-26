@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 
 import type { NavSection } from "@/components/Sidebar";
 import { useSorokit } from "@/context/useSorokit";
+import { fetchWithRetry } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 
 export interface BannerConfig {
@@ -155,7 +156,7 @@ function useRpcLatency(
       controller = new AbortController();
       const started = performance.now();
       try {
-        const res = await fetch(rpcUrl, {
+        const res = await fetchWithRetry(rpcUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }),
