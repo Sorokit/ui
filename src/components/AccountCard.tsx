@@ -251,7 +251,7 @@ export function AccountCard() {
               View on Stellar Expert →
             </a>
             {account && (
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-5">
                 <LabelledValue label="Sequence" labelId={sequenceLabelId}>
                   <div className="flex items-center gap-1.5">
                     <span className="font-mono text-[12px] text-ink-2">

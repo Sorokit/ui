@@ -305,6 +305,15 @@ export function truncateToUtf8ByteLength(text: string, maxBytes: number): string
   return result;
 }
 
+/** Whether a raw submission error indicates the account's sequence number is stale. */
+export function isSequenceError(message: string): boolean {
+  const normalizedMessage = message.trim().toLowerCase();
+  return (
+    normalizedMessage.includes("tx_bad_seq") ||
+    normalizedMessage.includes("bad sequence")
+  );
+}
+
 export function friendlyError(message: string): string {
   const normalizedMessage = message.trim().toLowerCase();
 
@@ -316,11 +325,8 @@ export function friendlyError(message: string): string {
     return "Insufficient balance to submit this transaction. Add more XLM and try again.";
   }
 
-  if (
-    normalizedMessage.includes("tx_bad_seq") ||
-    normalizedMessage.includes("bad sequence")
-  ) {
-    return "Your account sequence is out of date. Refresh and try again.";
+  if (isSequenceError(message)) {
+    return "Your account sequence is out of date. Refreshing and trying again may help.";
   }
 
   if (

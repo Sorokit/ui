@@ -3,9 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InfoCell } from "./InfoCell";
 
+const successToast = vi.fn();
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({ success: successToast }),
+}));
+
 describe("InfoCell", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    successToast.mockReset();
   });
 
   afterEach(() => {
@@ -97,6 +103,26 @@ describe("InfoCell", () => {
       expect(screen.getByTitle("Copy Public Key")).toBeInTheDocument();
     });
 
+    it("shows a success toast confirmation after copying", async () => {
+      const writeTextMock = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: writeTextMock },
+        writable: true,
+        configurable: true,
+      });
+
+      render(<InfoCell label="Public Key" value="GBRP123456" copyable />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy Public Key" }));
+      });
+
+      expect(successToast).toHaveBeenCalledWith(
+        "Public Key Copied",
+        expect.objectContaining({ message: expect.stringContaining("clipboard") }),
+      );
+    });
+
     it("handles clipboard failure gracefully without throwing", async () => {
       if (!navigator.clipboard) {
         Object.defineProperty(navigator, "clipboard", {
@@ -120,6 +146,7 @@ describe("InfoCell", () => {
       expect(writeTextSpy).toHaveBeenCalledWith("secret-123");
       // Button remains in uncopied state
       expect(screen.getByRole("button", { name: "Copy API Key" })).toBeInTheDocument();
+      expect(successToast).not.toHaveBeenCalled();
     });
   });
 
@@ -183,6 +210,27 @@ describe("InfoCell", () => {
       await waitFor(() => {
         expect(screen.getByText("Unreachable")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("responsive wrapping (#964)", () => {
+    it("allows the label to wrap instead of overflowing its container", () => {
+      render(
+        <InfoCell
+          label="A Very Long Label That Should Wrap On Narrow Screens"
+          value="some value"
+        />,
+      );
+
+      const label = screen.getByText(
+        "A Very Long Label That Should Wrap On Narrow Screens",
+      );
+      expect(label.className).toContain("break-words");
+    });
+
+    it("constrains the root container so it can shrink below its content's intrinsic width", () => {
+      const { container } = render(<InfoCell label="Network" value="Testnet" />);
+      expect(container.firstChild).toHaveClass("min-w-0");
     });
   });
 });
