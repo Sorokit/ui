@@ -7,6 +7,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
+import { useToast } from "@/context/ToastContext";
 import { cn } from "@/lib/utils";
 
 type ProbeState = "idle" | "testing" | "online" | "offline";
@@ -30,11 +31,15 @@ export function InfoCell({
 }: InfoCellProps) {
   const [copied, setCopied] = useState(false);
   const [probe, setProbe] = useState<ProbeState>("idle");
+  const { success } = useToast();
 
   async function copy() {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
+      success(`${label} Copied`, {
+        message: "The value has been copied to your clipboard.",
+      });
       setTimeout(() => setCopied(false), 2000);
     } catch {
       /* fallback */
@@ -56,14 +61,14 @@ export function InfoCell({
   }
 
   return (
-    <div className={cn("px-6 py-4 flex flex-col gap-1.5", className)}>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+    <div className={cn("px-6 py-4 flex flex-col gap-1.5 min-w-0", className)}>
+      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 break-words">
         {label}
       </span>
-      <div className="flex items-start gap-2 group">
+      <div className="flex items-start gap-2 group min-w-0">
         <span
           className={cn(
-            "text-[13px] text-ink-2 break-all flex-1",
+            "text-[13px] text-ink-2 break-all flex-1 min-w-0",
             mono && "font-mono text-[12px]",
           )}
         >

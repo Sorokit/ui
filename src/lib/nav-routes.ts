@@ -28,3 +28,7 @@ const PATH_TO_SECTION: Record<string, NavSection> = Object.fromEntries(
 export function sectionForPath(pathname: string): NavSection {
   return PATH_TO_SECTION[pathname] ?? "wallet";
 }
+
+export function isKnownPath(pathname: string): boolean {
+  return pathname in PATH_TO_SECTION;
+}

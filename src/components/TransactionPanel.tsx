@@ -13,6 +13,7 @@ import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
   friendlyError,
+  isSequenceError,
   truncateAddress,
   truncateToUtf8ByteLength,
   utf8ByteLength,
@@ -75,6 +76,7 @@ export function TransactionPanel({
     isLoadingAccount,
     isConnected,
     balances = [],
+    refreshAccount,
   } = useSorokit();
   const [dest, setDest] = useState(defaultDestination);
   const [destDirty, setDestDirty] = useState(false);
@@ -117,6 +119,32 @@ export function TransactionPanel({
       active = false;
     };
   }, [client, isConnected]);
+
+  // A draft payment form is tied to the account that was active when the
+  // user started filling it in. This app has no in-place "switch account"
+  // primitive — the only way `address` changes is disconnect (-> null) then
+  // reconnecting as a (possibly different) account, so any change away from
+  // the address the draft was started under, including through a disconnect,
+  // clears the draft rather than risking it getting submitted from a
+  // different account.
+  const prevAddressRef = useRef(address);
+  useEffect(() => {
+    const prevAddress = prevAddressRef.current;
+    prevAddressRef.current = address;
+    if (prevAddress !== address) {
+      setDest("");
+      setDestDirty(false);
+      setAmount("");
+      setAmountDirty(false);
+      setMemo("");
+      setMemoType("text");
+      setAsset("XLM");
+      setPreview(null);
+      setResult(null);
+      setError(null);
+      setState("idle");
+    }
+  }, [address]);
 
   const assetOptions = balances ?? [];
 
@@ -203,6 +231,12 @@ export function TransactionPanel({
         setError(message);
         setState("error");
         onError?.(message);
+        // A stale sequence number is auto-recoverable: refetch the account so
+        // its sequence is current before the user retries, rather than
+        // leaving them to guess at a manual "Refresh" elsewhere in the app.
+        if (isSequenceError(err)) {
+          refreshAccount();
+        }
         return;
       }
       setResult(data);
@@ -220,6 +254,9 @@ export function TransactionPanel({
         setError(message);
         setState("error");
         onError?.(message);
+        if (isSequenceError(msg)) {
+          refreshAccount();
+        }
       }
     } finally {
       setPreview(null);

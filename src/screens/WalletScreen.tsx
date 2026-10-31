@@ -1,4 +1,7 @@
+import { Refresh01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { AddressDisplay } from "@/components/AddressDisplay";
@@ -8,6 +11,7 @@ import { Button } from "@/components/ui/Button";
 import { InfoCell } from "@/components/ui/InfoCell";
 import { useToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
+import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 
 /**
  * Full-screen QR code for scanning. Built on Radix Dialog so it traps focus,
@@ -18,13 +22,16 @@ function QRModal({
   open,
   onOpenChange,
   address,
+  trigger,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   address: string;
+  trigger: ReactNode;
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Trigger asChild>{trigger}</Dialog.Trigger>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60" />
         <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-[calc(100%-2rem)] max-w-xs -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-surface p-6 flex flex-col items-center gap-4 focus:outline-none">
@@ -51,11 +58,30 @@ function QRModal({
 }
 
 export function WalletScreen() {
-  const { address, isConnected, disconnectWallet, network, account } = useSorokit();
+  const {
+    address,
+    isConnected,
+    disconnectWallet,
+    network,
+    account,
+    isLoadingAccount,
+    refreshAccount,
+  } = useSorokit();
   const { success } = useToast();
   const [isConfirming, setIsConfirming] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const timeoutRef = useRef<number | null>(null);
+
+  const handleRefresh = async () => {
+    await refreshAccount();
+  };
+
+  const {
+    ref: pullContainerRef,
+    pullDistance,
+    isRefreshing,
+    threshold: pullThreshold,
+  } = usePullToRefresh<HTMLDivElement>(handleRefresh, { enabled: isConnected });
 
   const handleDisconnect = () => {
     if (isConfirming) {
@@ -94,8 +120,40 @@ export function WalletScreen() {
       ? createdAtDate.getFullYear().toString()
       : null;
 
+  const showPullIndicator = pullDistance > 0 || isRefreshing;
+
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      ref={pullContainerRef}
+      className="flex flex-col gap-6 overflow-y-auto"
+      data-testid="wallet-screen-scroll-container"
+    >
+      {showPullIndicator && (
+        <div
+          className="flex items-center justify-center text-[12px] text-ink-3 transition-[height] overflow-hidden"
+          style={{
+            height: isRefreshing ? 40 : Math.min(pullDistance, pullThreshold * 1.5),
+          }}
+          data-testid="pull-to-refresh-indicator"
+          role="status"
+          aria-live="polite"
+        >
+          <HugeiconsIcon
+            icon={Refresh01Icon}
+            size={14}
+            strokeWidth={1.5}
+            className={isRefreshing ? "animate-spin" : undefined}
+          />
+          <span className="ml-1.5">
+            {isRefreshing
+              ? "Refreshing…"
+              : pullDistance >= pullThreshold
+                ? "Release to refresh"
+                : "Pull to refresh"}
+          </span>
+        </div>
+      )}
+
       <div className="rounded-xl border border-line bg-surface overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-line">
@@ -118,13 +176,25 @@ export function WalletScreen() {
             </div>
           </div>
           {isConnected && (
-            <Button
-              variant={isConfirming ? "destructive" : "secondary"}
-              size="sm"
-              onClick={handleDisconnect}
-            >
-              {isConfirming ? "Disconnect?" : "Disconnect"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={isLoadingAccount}
+                onClick={handleRefresh}
+                aria-label="Refresh account data"
+              >
+                <HugeiconsIcon icon={Refresh01Icon} size={14} strokeWidth={1.5} />
+                Refresh
+              </Button>
+              <Button
+                variant={isConfirming ? "destructive" : "secondary"}
+                size="sm"
+                onClick={handleDisconnect}
+              >
+                {isConfirming ? "Disconnect?" : "Disconnect"}
+              </Button>
+            </div>
           )}
         </div>
 
@@ -163,13 +233,16 @@ export function WalletScreen() {
                 className="shrink-0"
                 ariaLabel={`QR code to receive funds at address ${address}`}
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setQrModalOpen(true)}
-              >
-                Show QR
-              </Button>
+              <QRModal
+                open={qrModalOpen}
+                onOpenChange={setQrModalOpen}
+                address={address}
+                trigger={
+                  <Button variant="secondary" size="sm">
+                    Show QR
+                  </Button>
+                }
+              />
             </div>
             <div className="flex-1 min-w-0 w-full flex flex-col justify-center gap-1 sm:h-[164px]">
               <AddressDisplay
@@ -186,12 +259,6 @@ export function WalletScreen() {
           </div>
         </div>
       )}
-
-      <QRModal
-        open={qrModalOpen}
-        onOpenChange={setQrModalOpen}
-        address={address || ""}
-      />
     </div>
   );
 }

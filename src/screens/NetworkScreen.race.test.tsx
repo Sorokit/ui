@@ -9,6 +9,10 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
 
+vi.mock("@/context/ToastContext", () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+}));
+
 vi.mock("@hugeicons/react", () => ({
   HugeiconsIcon: "div",
   Loading01Icon: "div",
