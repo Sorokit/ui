@@ -1,6 +1,11 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { SorokitClient } from '../client';
+import {
+  decodeHorizonError,
+  SorobanClient,
+  type SorokitClient,
+  withRpcRetry,
+} from '../client';
 import { deterministicMock,DeterministicMockData } from '../deterministic-mock';
 import { createMockClient,MOCK_ADDRESS } from '../mock-client';
 
@@ -145,6 +150,69 @@ describe('Mock Client - Issue #30 Fixes', () => {
       const page1Ids = page1.data?.map(t => t.hash);
       const page2Ids = page2.data?.map(t => t.hash);
       expect(page1Ids).not.toEqual(page2Ids);
+    });
+  });
+
+  describe('Fix 5: Exponential backoff retry and Horizon error decoder (Issue #974)', () => {
+    it('retries transient HTTP 429 and 503 RPC errors up to 3 times with exponential backoff', async () => {
+      const delays: number[] = [];
+      let calls = 0;
+
+      const result = await withRpcRetry(
+        async () => {
+          calls += 1;
+          if (calls === 1) throw { status: 429, detail: 'Rate limit exceeded' };
+          if (calls === 2) throw { status: 503, detail: 'Service unavailable' };
+          if (calls === 3) throw { status: 502, detail: 'Bad gateway' };
+          return { ledger: 999 };
+        },
+        {
+          maxRetries: 3,
+          baseDelayMs: 100,
+          jitterRatio: 0,
+          onRetry: (_attempt, delayMs) => {
+            delays.push(delayMs);
+          },
+        },
+      );
+
+      expect(result).toEqual({ ledger: 999 });
+      expect(calls).toBe(4);
+      expect(delays).toEqual([100, 200, 400]);
+    });
+
+    it('decodes Horizon extras.result_codes including op_underfunded and op_bad_auth', () => {
+      const decoded = decodeHorizonError({
+        status: 400,
+        detail: 'The transaction failed when submitted to the stellar network.',
+        extras: {
+          result_codes: {
+            transaction: 'tx_failed',
+            operations: ['op_success', 'op_underfunded', 'op_bad_auth'],
+          },
+        },
+      });
+
+      expect(decoded.transactionCode).toBe('tx_failed');
+      expect(decoded.operationCodes).toEqual(['op_success', 'op_underfunded', 'op_bad_auth']);
+      expect(decoded.message).toContain('op_underfunded');
+      expect(decoded.message).toContain('op_bad_auth');
+    });
+
+    it('SorobanClient retries transient network dropouts and formats non-retryable Horizon errors', async () => {
+      const requestMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('503 Service Unavailable'))
+        .mockResolvedValueOnce({ status: 'SUCCESS' });
+
+      const rpc = new SorobanClient(
+        { request: requestMock },
+        { maxRetries: 3, baseDelayMs: 10, jitterRatio: 0, onRetry: () => {} },
+      );
+
+      const ok = await rpc.call('getHealth');
+      expect(ok).toEqual({ status: 'SUCCESS' });
+      expect(requestMock).toHaveBeenCalledTimes(2);
     });
   });
 });
