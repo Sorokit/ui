@@ -6,6 +6,7 @@ import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import { DISCONNECTED_TITLE } from "@/lib/nav-labels";
+import { cn } from "@/lib/utils";
 
 const SUPPORTED_WALLETS = [
   { name: "Freighter", initial: "F", color: "#7B61FF" },
@@ -82,9 +83,16 @@ function connectionTroubleshooting(message: string): string | null {
 }
 
 export function ConnectScreen() {
-  const { connectWallet, isConnecting, error, clearError } = useSorokit();
+  const {
+    connectWallet,
+    isConnecting,
+    error,
+    errorSeverity = "error",
+    clearError,
+  } = useSorokit();
   const connectButtonRef = useRef<HTMLButtonElement>(null);
   const autoConnectAttempted = useRef(false);
+  const isInfo = errorSeverity === "info";
 
   useEffect(() => {
     if (!isConnecting) {
@@ -184,9 +192,23 @@ export function ConnectScreen() {
 
           <div className="px-5 py-5 flex flex-col gap-4">
             {error && (
-              <div className="flex items-start justify-between gap-3 rounded-lg bg-error-dim-muted border border-error-dim px-4 py-3">
+              <div
+                data-severity={errorSeverity}
+                className={cn(
+                  "flex items-start justify-between gap-3 rounded-lg border px-4 py-3",
+                  isInfo
+                    ? "bg-warning-dim border-warning-dim"
+                    : "bg-error-dim-muted border-error-dim",
+                )}
+              >
                 <div className="flex flex-col gap-1">
-                  <p role="alert" className="text-[13px] text-red">
+                  <p
+                    role="alert"
+                    className={cn(
+                      "text-[13px]",
+                      isInfo ? "text-warning" : "text-red",
+                    )}
+                  >
                     {error}
                   </p>
                   {troubleshooting && (
@@ -199,7 +221,10 @@ export function ConnectScreen() {
                 <button
                   onClick={clearError}
                   aria-label="Dismiss error"
-                  className="text-red opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition-opacity"
+                  className={cn(
+                    "opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition-opacity",
+                    isInfo ? "text-warning" : "text-red",
+                  )}
                 >
                   <HugeiconsIcon
                     icon={Cancel01Icon}
