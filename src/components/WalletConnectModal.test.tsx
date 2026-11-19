@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -21,7 +21,7 @@ function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) 
     address: null,
     isConnected: false,
     isConnecting: false,
-    connectWallet: vi.fn(),
+    connectWallet: vi.fn(() => Promise.resolve()),
     disconnectWallet: vi.fn(),
     account: null,
     balances: [],
@@ -36,12 +36,16 @@ function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) 
 }
 
 describe("WalletConnectModal", () => {
-  const mockConnect = vi.fn();
+  const mockConnect = vi.fn(() => Promise.resolve());
   const mockClearError = vi.fn();
   const mockOnClose = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    const win = window as unknown as Record<string, unknown>;
+    for (const key of ["freighter", "isFreighter", "xbull", "xBull", "albedo", "lobstr"]) {
+      delete win[key];
+    }
   });
 
   it("renders nothing when closed", () => {
@@ -120,7 +124,7 @@ describe("WalletConnectModal", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Connection rejected by user");
 
     fireEvent.click(screen.getByRole("button", { name: /try again/i }));
-    expect(mockClearError).toHaveBeenCalledTimes(1);
+    expect(mockClearError).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("dialog", { name: /connect a wallet/i })).toBeInTheDocument();
   });
 
@@ -217,6 +221,133 @@ describe("WalletConnectModal", () => {
         value: originalUserAgent,
         configurable: true,
       });
+    });
+
+    it("picks up extensions injected after the modal opens via events", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+      expect(screen.queryByTestId("installed-badge")).not.toBeInTheDocument();
+
+      act(() => {
+        (window as unknown as Record<string, unknown>).freighter = {};
+        window.dispatchEvent(new Event("stellar#initialized"));
+      });
+
+      expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
+    });
+
+    it("re-checks injected extensions on a polling fallback", () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+        render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+        expect(screen.queryByTestId("installed-badge")).not.toBeInTheDocument();
+
+        act(() => {
+          (window as unknown as Record<string, unknown>).freighter = {};
+          vi.advanceTimersByTime(250);
+        });
+
+        expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("re-checks installed extensions every time the modal opens", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      const { rerender } = render(
+        <WalletConnectModal open={false} onClose={mockOnClose} />,
+      );
+      expect(screen.queryByTestId("installed-badge")).not.toBeInTheDocument();
+
+      (window as unknown as Record<string, unknown>).freighter = {};
+      rerender(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
+    });
+
+    it("detects mobile via maxTouchPoints when iPadOS Safari reports a desktop user agent", () => {
+      const originalUserAgent = navigator.userAgent;
+      const originalTouchDescriptor = Object.getOwnPropertyDescriptor(
+        navigator,
+        "maxTouchPoints",
+      );
+      Object.defineProperty(navigator, "userAgent", {
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+        configurable: true,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        value: 5,
+        configurable: true,
+      });
+
+      try {
+        vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+        render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+        expect(screen.getAllByTestId("mobile-deep-link-option").length).toBeGreaterThan(0);
+      } finally {
+        Object.defineProperty(navigator, "userAgent", {
+          value: originalUserAgent,
+          configurable: true,
+        });
+        if (originalTouchDescriptor) {
+          Object.defineProperty(navigator, "maxTouchPoints", originalTouchDescriptor);
+        } else {
+          delete (navigator as unknown as Record<string, unknown>).maxTouchPoints;
+        }
+      }
+    });
+  });
+
+  describe("Error Severity & Clear Error", () => {
+    it("clears a stale context error as soon as the modal opens", () => {
+      const clearError = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ error: "Previous attempt failed", clearError }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+      expect(clearError).toHaveBeenCalledTimes(1);
+    });
+
+    it("shows the context error inline below the wallet options", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          error: "Connection was cancelled. Please try again.",
+          errorSeverity: "info",
+        }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      const inline = screen.getByTestId("wallet-connect-inline-error");
+      expect(inline).toHaveTextContent("Connection was cancelled");
+      expect(inline).toHaveAttribute("data-severity", "info");
+      expect(inline).toHaveClass("text-warning");
+    });
+
+    it("uses a soft No wallet selected state for info-severity errors", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          connectWallet: mockConnect,
+          isConnecting: false,
+          error: "Connection was cancelled. Please try again.",
+          errorSeverity: "info",
+        }),
+      );
+      render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      fireEvent.click(getWalletButton(/Freighter/i));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog", { name: /no wallet selected/i }),
+        ).toBeInTheDocument(),
+      );
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveAttribute("data-severity", "info");
+      expect(alert).toHaveClass("text-warning");
+      expect(alert).not.toHaveClass("text-red");
     });
   });
 
