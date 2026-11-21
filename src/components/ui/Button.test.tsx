@@ -126,6 +126,77 @@ describe("Button component", () => {
     });
   });
 
+  describe("loading width lock (#498)", () => {
+    // jsdom reports offsetWidth 0 for every element, so the rendered width the
+    // component snapshots has to be defined on the node before loading flips.
+    function withRenderedWidth(node: HTMLElement, width: number) {
+      Object.defineProperty(node, "offsetWidth", {
+        configurable: true,
+        value: width,
+      });
+    }
+
+    it("locks the button width when transitioning to loading so the layout does not jump", () => {
+      const { rerender, container } = render(<Button>Connect Wallet</Button>);
+      withRenderedWidth(container.querySelector("button")!, 140);
+
+      rerender(<Button loading>Connecting…</Button>);
+
+      expect(container.querySelector("button")!.style.minWidth).toBe("140px");
+    });
+
+    it("releases the width lock once loading ends", () => {
+      const { rerender, container } = render(
+        <Button loading>Connecting…</Button>,
+      );
+
+      rerender(<Button>Connect Wallet</Button>);
+
+      expect(container.querySelector("button")!.style.minWidth).toBe("");
+    });
+
+    it("merges the locked minWidth with any user-specified style", () => {
+      const { rerender, container } = render(
+        <Button style={{ color: "red" }}>Connect Wallet</Button>,
+      );
+      withRenderedWidth(container.querySelector("button")!, 140);
+
+      rerender(
+        <Button loading style={{ color: "red" }}>
+          Connecting…
+        </Button>,
+      );
+
+      const button = container.querySelector("button")!;
+      expect(button.style.minWidth).toBe("140px");
+      expect(button.style.color).toBe("red");
+    });
+
+    it("applies the width lock to every variant", () => {
+      const variants = [
+        "primary",
+        "secondary",
+        "outline",
+        "ghost",
+        "destructive",
+      ] as const;
+      for (const variant of variants) {
+        const { rerender, container } = render(
+          <Button variant={variant}>Connect Wallet</Button>,
+        );
+        withRenderedWidth(container.querySelector("button")!, 140);
+
+        rerender(
+          <Button variant={variant} loading>
+            Connecting…
+          </Button>,
+        );
+
+        expect(container.querySelector("button")!.style.minWidth).toBe("140px");
+      }
+    });
+  });
+
   describe("disabled state", () => {
     it("is not clickable and prevents onClick when disabled={true}", async () => {
       const handleClick = vi.fn();

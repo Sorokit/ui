@@ -1,5 +1,12 @@
 import { Slot } from "@radix-ui/react-slot";
-import { forwardRef, type ReactNode, useState } from "react";
+import {
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -82,6 +89,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       onBlur,
       onKeyDown,
       onKeyDownCapture,
+      style,
       "aria-disabled": ariaDisabled,
       ...props
     },
@@ -93,6 +101,35 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const [armed, setArmed] = useState(false);
     const isInert = !!disabled || !!loading;
     const isAriaDisabled = ariaDisabled === true || ariaDisabled === "true";
+
+    // When loading flips on, snapshot the rendered width so the layout stays
+    // stable even when the spinner replaces a wider or narrower label.
+    const elRef = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
+    const [loadingWidth, setLoadingWidth] = useState<number | null>(null);
+    const prevLoading = useRef(loading);
+
+    useEffect(() => {
+      if (loading && !prevLoading.current && elRef.current) {
+        setLoadingWidth(elRef.current.offsetWidth);
+      } else if (!loading) {
+        setLoadingWidth(null);
+      }
+      prevLoading.current = loading;
+    }, [loading]);
+
+    const mergedRef = useCallback(
+      (node: HTMLButtonElement | HTMLAnchorElement | null) => {
+        elRef.current = node;
+        if (typeof ref === "function") {
+          ref(node);
+        } else if (ref) {
+          (
+            ref as React.MutableRefObject<HTMLButtonElement | null>
+          ).current = node;
+        }
+      },
+      [ref],
+    );
 
     // Runs in the capture phase, before any onClick — including one that a
     // slotted `asChild` child carries itself, which Slot would otherwise invoke
@@ -209,10 +246,14 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       </>
     );
 
+    // Merge the caller's style with the locked min-width so neither is lost.
+    const mergedStyle =
+      loading && loadingWidth ? { ...style, minWidth: loadingWidth } : style;
+
     if (isLink) {
       return (
         <a
-          ref={ref as React.Ref<HTMLAnchorElement>}
+          ref={mergedRef}
           // Dropping href while inert keeps the link out of the tab order and
           // makes the disabled state real rather than cosmetic.
           href={isInert ? undefined : href}
@@ -221,6 +262,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           aria-disabled={isInert || ariaDisabled || undefined}
           aria-busy={loading || undefined}
           className={classes}
+          style={mergedStyle}
           onClickCapture={handleClickCapture as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onClick={handleClick as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onBlur={handleBlur as unknown as React.FocusEventHandler<HTMLAnchorElement>}
@@ -235,7 +277,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 
     return (
       <Comp
-        ref={ref}
+        ref={mergedRef}
         disabled={disabled || loading}
         // A slotted <a>/<div> has no native disabled state, so announce it.
         aria-disabled={
@@ -243,6 +285,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         }
         aria-busy={loading || undefined}
         className={classes}
+        style={mergedStyle}
         onClickCapture={handleClickCapture}
         onClick={handleClick}
         onBlur={handleBlur}

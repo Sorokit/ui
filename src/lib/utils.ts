@@ -1,8 +1,28 @@
-import { type ClassValue,clsx } from "clsx";
+import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
+
+import type { NetworkName } from "@/lib/client";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+/**
+ * Build a Stellar Expert block explorer URL for a given network and transaction hash.
+ * Returns `null` for unrecognised networks so callers can fall back to plain text.
+ */
+export function getExplorerUrl(
+  networkName: NetworkName | undefined | null,
+  txHash: string,
+): string | null {
+  const segment =
+    networkName === "mainnet"
+      ? "public"
+      : networkName === "testnet"
+        ? "testnet"
+        : null;
+  if (!segment) return null;
+  return `https://stellar.expert/explorer/${segment}/tx/${txHash}`;
 }
 
 /**
