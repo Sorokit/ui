@@ -684,6 +684,9 @@ describe("SwapSimulator", () => {
       const { unmount } = render(<SwapSimulator />);
       unmount();
       expect(disconnect).toHaveBeenCalled();
+    });
+  });
+
   // ---- Extreme Price Impact Scenarios ----
 
   describe("extreme price impact scenarios", () => {
