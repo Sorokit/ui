@@ -6,6 +6,7 @@ import type {
   BatchEntryResult,
   BatchProgress,
   BatchResult,
+  ClaimableBalance,
   GasEstimate,
   GasPriceData,
   GroupedTransaction,
@@ -16,6 +17,7 @@ import type {
   SorokitClient,
   TimelineGroup,
   TimelineParams,
+  Transaction,
   TxResult,
   TxStatus,
 } from "./client";
@@ -247,13 +249,29 @@ const MOCK_ALLOWANCES: AllowanceEntry[] = [
  * - Proper pagination support: getHistory slices deterministic transaction records by
  *   page and limit, providing distinct pages and accurate total count for TransactionHistory.
  */
+export interface MockClientOptions {
+  networkName?: string;
+  balances?: Balance[];
+  history?: Transaction[];
+  account?: AccountData | null;
+  claimableBalances?: ClaimableBalance[];
+}
+
 export function createMockClient(): SorokitClient;
 export function createMockClient(
   networkName: string,
 ): SorokitClient | { data: null; error: string };
 export function createMockClient(
-  networkName?: string,
+  options: MockClientOptions,
+): SorokitClient;
+export function createMockClient(
+  networkOrOptions?: string | MockClientOptions,
 ): SorokitClient | { data: null; error: string } {
+  const options =
+    typeof networkOrOptions === "object" && networkOrOptions !== null
+      ? networkOrOptions
+      : { networkName: networkOrOptions };
+  const networkName = options.networkName;
   let activeNetwork =
     networkName && networkName in NETWORKS ? networkName : "testnet";
   const connectedAddress = MOCK_ADDRESS;
@@ -267,6 +285,11 @@ export function createMockClient(
     };
   }
 
+  const customBalances = options.balances;
+  const customHistory = options.history;
+  const customAccount = options.account;
+  const customClaimables = options.claimableBalances;
+
   return {
     wallet: {
       connect: async () => ({
@@ -278,15 +301,34 @@ export function createMockClient(
       getAddress: async () => ({ data: connectedAddress, error: null }),
     },
     account: {
-      getAccount: async () => ({
-        data: MOCK_ACCOUNT,
-        error: null,
-        status: "success" as const,
-      }),
-      getBalances: async () => ({ data: MOCK_BALANCES, error: null }),
-      getClaimableBalances: async () => ({ data: [], error: null }),
+      getAccount: async (address?: string) => {
+        if (address === "GNOTFOUND" || customAccount === null) {
+          return { data: null, error: "Account not found", status: "error" as const };
+        }
+        return {
+          data: customAccount ?? MOCK_ACCOUNT,
+          error: null,
+          status: "success" as const,
+        };
+      },
+      getBalances: async (address?: string) => {
+        if (address === "GZERO" || address === "EMPTY") {
+          return { data: [], error: null };
+        }
+        if (address === "GZEROBALANCE") {
+          return {
+            data: [{ asset: "XLM", balance: "0.0000000", assetType: "native" }],
+            error: null,
+          };
+        }
+        return { data: customBalances ?? MOCK_BALANCES, error: null };
+      },
+      getClaimableBalances: async (address?: string) => {
+        if (!address) return { data: [], error: null };
+        return { data: customClaimables ?? [], error: null };
+      },
       claimBalance: async (
-        balanceId: string,
+        balanceId?: string,
       ): Promise<{ data: TxResult | null; error: string | null }> => {
         if (!balanceId || balanceId === "invalid" || balanceId === "error") {
           return { data: null, error: `Invalid claimable balance ID: ${balanceId || "empty"}` };
@@ -313,17 +355,24 @@ export function createMockClient(
       }),
       getStatus: async () => ({ data: "success" as TxStatus, error: null }),
       getHistory: async (
-        _address: string,
+        address?: string,
         page: number = 1,
         limit?: number,
       ) => {
+        if (address === "GEMPTY") {
+          return { data: [], error: null, total: 0 };
+        }
+        const sourceHistory = customHistory ?? MOCK_HISTORY;
         const safePage = Math.max(1, page || 1);
         const pageSize =
-          limit !== undefined && limit > 0 ? limit : MOCK_HISTORY.length;
-        const total = MOCK_HISTORY.length;
+          limit !== undefined && limit > 0 ? limit : sourceHistory.length;
+        const total = sourceHistory.length;
+        if (total === 0 || limit === 0) {
+          return { data: [], error: null, total: 0 };
+        }
         const start = (safePage - 1) * pageSize;
         const end = start + pageSize;
-        const history = MOCK_HISTORY.slice(start, end);
+        const history = sourceHistory.slice(start, end);
         return { data: history, error: null, total };
       },
       estimateFee: async () => ({
@@ -506,7 +555,8 @@ export function createMockClient(
       }),
     },
     operation: {
-      getOperations: async (txHash: string) => {
+      getOperations: async (txHash?: string) => {
+        if (!txHash) return { data: null, error: null };
         const ops = MOCK_TIMELINE_GROUPS.flatMap((g) =>
           g.transactions.flatMap((tx) =>
             tx.operations.filter((op) => op.txHash === txHash),
@@ -514,8 +564,8 @@ export function createMockClient(
         );
         return { data: ops.length > 0 ? ops : null, error: null };
       },
-      getTimeline: async (params: TimelineParams) => {
-        const { page = 1, limit = 10, filters } = params;
+      getTimeline: async (params?: TimelineParams) => {
+        const { page = 1, limit = 10, filters } = params ?? {};
         let filtered = [...MOCK_TIMELINE_GROUPS];
         if (filters?.operationType && filters.operationType !== "all") {
           filtered = filtered
