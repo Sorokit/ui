@@ -1,4 +1,4 @@
-import { Loader01Icon } from "@hugeicons/core-free-icons";
+import { Loading01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
@@ -46,11 +46,19 @@ const NETWORKS: {
 ];
 
 export function NetworkScreen() {
-  const { network, switchNetwork } = useSorokit();
+  // #537 — `isSwitchingNetwork` is the provider-wide in-flight flag. It
+  // defaults to `false` so tests that mock a partial context keep working.
+  const {
+    network,
+    switchNetwork,
+    isSwitchingNetwork = false,
+    customNetworks = [],
+    clearCustomNetworks,
+  } = useSorokit();
   const [switching, setSwitching] = useState<string | null>(null);
+  const [resetError, setResetError] = useState("");
   const activeCardRef = useRef<HTMLButtonElement | null>(null);
 
-  // Scroll active card into view on mount
   useEffect(() => {
     if (activeCardRef.current) {
       activeCardRef.current.scrollIntoView({ block: "nearest" });
@@ -59,6 +67,10 @@ export function NetworkScreen() {
 
   async function handleSwitchNetwork(networkName: string) {
     if (network?.name === networkName) return;
+    // #537 — a switch started from the other surface (NetworkSwitcher) sets
+    // the provider flag; ignore clicks while it is in flight so the two
+    // components can never fire overlapping `switchNetwork` calls.
+    if (isSwitchingNetwork) return;
     setSwitching(networkName);
     try {
       await switchNetwork(networkName);
@@ -67,9 +79,22 @@ export function NetworkScreen() {
     }
   }
 
+  function handleResetToDefaults() {
+    if (!clearCustomNetworks) return;
+    try {
+      clearCustomNetworks();
+      setResetError("");
+    } catch (error) {
+      setResetError(
+        error instanceof Error
+          ? error.message
+          : "Failed to clear custom networks",
+      );
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
-      {/* Active network info */}
       {network && (
         <div className="rounded-xl border border-line bg-surface overflow-hidden">
           <div className="px-6 py-4 border-b border-line">
@@ -124,7 +149,6 @@ export function NetworkScreen() {
         </div>
       )}
 
-      {/* Selector */}
       <div className="flex flex-col gap-3">
         {NETWORKS.map((net) => {
           const isActive = network?.name === net.name;
@@ -136,7 +160,8 @@ export function NetworkScreen() {
               onClick={() => {
                 if (!isActive) handleSwitchNetwork(net.name);
               }}
-              disabled={isActive || isSwitching}
+              disabled={isActive || isSwitching || isSwitchingNetwork}
+              aria-busy={isSwitching}
               className={cn(
                 "w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3",
                 isActive
@@ -160,12 +185,16 @@ export function NetworkScreen() {
                 </div>
                 {isSwitching ? (
                   <HugeiconsIcon
-                    icon={Loader01Icon}
+                    icon={Loading01Icon}
                     size={20}
                     color="currentColor"
                     className="text-brand animate-spin"
                     strokeWidth={1.5}
                   />
+                ) : isSwitchingNetwork ? (
+                  // #537 — a switch is in flight from another surface: dim the
+                  // option so the disabled state is visible while it settles.
+                  <span className="h-5 w-5 rounded-full bg-ink-3/40" aria-hidden="true" />
                 ) : (
                   isActive && (
                     <Badge variant={net.badge} dot>
@@ -178,117 +207,20 @@ export function NetworkScreen() {
           );
         })}
       </div>
-    </div>
-  );
-}
 
-type ProbeState = "idle" | "testing" | "online" | "offline";
-
-function InfoCell({
-  label,
-  value,
-  mono,
-  copyable,
-  testable,
-  className,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  copyable?: boolean;
-  testable?: boolean;
-  className?: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [probe, setProbe] = useState<ProbeState>("idle");
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* fallback */
-    }
-  }
-
-  async function testConnection() {
-    setProbe("testing");
-    try {
-      await fetch(value, {
-        method: "HEAD",
-        mode: "no-cors",
-        signal: AbortSignal.timeout(3000),
-      });
-      setProbe("online");
-    } catch {
-      setProbe("offline");
-    }
-  }
-
-  return (
-    <div className={cn("px-6 py-4 flex flex-col gap-1.5", className)}>
-      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
-        {label}
-      </span>
-      <div className="flex items-start gap-2 group">
-        <span
-          className={cn(
-            "text-[13px] text-ink-2 break-all flex-1",
-            mono && "font-mono text-[12px]",
-          )}
-        >
-          {value}
-        </span>
-        {copyable && (
-          <button
-            onClick={copy}
-            aria-label={copied ? `${label} copied` : `Copy ${label}`}
-            className={cn(
-              "shrink-0 p-1 rounded-md transition-all mt-0.5",
-              copied
-                ? "text-green bg-success-dim"
-                : "text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100",
-            )}
-            title={copied ? "Copied!" : `Copy ${label}`}
-          >
-            <HugeiconsIcon
-              icon={copied ? Tick01Icon : Copy01Icon}
-              size={12}
-              color="currentColor"
-              strokeWidth={2}
-            />
-          </button>
-        )}
-      </div>
-      {testable && (
-        <div className="flex items-center gap-2 mt-0.5">
+      {customNetworks.length > 0 && (
+        <div className="flex flex-col items-start gap-2">
           <button
             type="button"
-            onClick={testConnection}
-            disabled={probe === "testing"}
-            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 hover:bg-surface-3 hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            onClick={handleResetToDefaults}
+            className="rounded-lg border border-line px-4 py-2 text-[13px] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
           >
-            {probe === "testing" ? (
-              <HugeiconsIcon
-                icon={Loader01Icon}
-                size={12}
-                color="currentColor"
-                strokeWidth={2}
-                className="animate-spin"
-              />
-            ) : null}
-            {probe === "testing" ? "Testing…" : "Test connection"}
+            Reset to Defaults
           </button>
-          {probe === "online" && (
-            <Badge variant="success" dot>
-              Reachable
-            </Badge>
-          )}
-          {probe === "offline" && (
-            <Badge variant="default" dot>
-              Unreachable
-            </Badge>
+          {resetError && (
+            <p role="alert" className="text-[12px] text-red">
+              {resetError}
+            </p>
           )}
         </div>
       )}

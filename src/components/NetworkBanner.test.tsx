@@ -1,113 +1,426 @@
-import { screen, waitFor } from "@testing-library/react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { renderWithProvider } from "@/__tests__/utils";
-import type { NetworkInfo, NetworkName } from "@/lib/client";
-import { createMockClient } from "@/lib/mock-client";
+import { useSorokit } from "@/context/useSorokit";
+import type { NetworkInfo } from "@/lib/client";
 
 import { NetworkBanner } from "./NetworkBanner";
 
-function networkInfo(name: NetworkName): NetworkInfo {
-  return {
-    name,
-    passphrase: `${name} passphrase`,
-    rpcUrl: `https://${name}.example/rpc`,
-    horizonUrl: `https://${name}.example/horizon`,
-  };
+vi.mock("@/context/useSorokit", () => ({
+  useSorokit: vi.fn(),
+}));
+
+function mockNetwork(network: NetworkInfo | null) {
+  vi.mocked(useSorokit).mockReturnValue({
+    network,
+  } as unknown as ReturnType<typeof useSorokit>);
 }
 
-function clientWithNetwork(name: NetworkName | null) {
-  const client = createMockClient();
-  client.network.getNetwork = vi.fn().mockResolvedValue({
-    data: name ? networkInfo(name) : null,
-    error: null,
-  });
-  return client;
-}
+const MAINNET_NETWORK: NetworkInfo = {
+  name: "mainnet",
+  rpcUrl: "https://soroban.stellar.org",
+  passphrase: "Public Global Stellar Network ; September 2015",
+  horizonUrl: "https://horizon.stellar.org",
+};
 
-function renderWithNetwork(name: NetworkName | null, ui = <NetworkBanner />) {
-  const client = clientWithNetwork(name);
-  return {
-    client,
-    ...renderWithProvider(ui, { client }),
-  };
-}
+const TESTNET_NETWORK: NetworkInfo = {
+  name: "testnet",
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  passphrase: "Test SDF Network ; September 2015",
+  horizonUrl: "https://horizon-testnet.stellar.org",
+};
+
+const FUTURENET_NETWORK: NetworkInfo = {
+  name: "futurenet",
+  rpcUrl: "https://rpc-futurenet.stellar.org",
+  passphrase: "Test SDF Future Network ; October 2022",
+  horizonUrl: "https://horizon-futurenet.stellar.org",
+};
+
+const LOCALNET_NETWORK: NetworkInfo = {
+  name: "localnet",
+  rpcUrl: "http://localhost:8000/soroban/rpc",
+  passphrase: "Standalone Network ; February 2017",
+  horizonUrl: "http://localhost:8000",
+};
+
+const STANDALONE_NETWORK: NetworkInfo = {
+  name: "standalone",
+  rpcUrl: "http://localhost:8000/soroban/rpc",
+  passphrase: "Standalone Network ; February 2017",
+  horizonUrl: "http://localhost:8000",
+};
+
+const CUSTOM_NETWORK: NetworkInfo = {
+  name: "custom-net",
+  rpcUrl: "http://custom-rpc:8000",
+  passphrase: "Custom Network ; 2026",
+  horizonUrl: "http://custom-horizon:8000",
+};
 
 describe("NetworkBanner", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    window.sessionStorage.clear();
+    document.documentElement.style.removeProperty("--banner-height");
   });
 
-  it("renders nothing when network is null", async () => {
-    const { client, container } = renderWithNetwork(null);
-    await waitFor(() => {
-      expect(client.network.getNetwork).toHaveBeenCalled();
-    });
+  it("renders nothing when network is null", () => {
+    mockNetwork(null);
+    const { container } = render(<NetworkBanner />);
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("is hidden on mainnet by default (alwaysShow = false)", async () => {
-    const { container } = renderWithNetwork("mainnet");
-    await waitFor(() => {
-      expect(container).toBeEmptyDOMElement();
-    });
+  it("renders nothing when active section is 'network'", () => {
+    mockNetwork(TESTNET_NETWORK);
+    const { container } = render(<NetworkBanner active="network" />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("shows on mainnet when alwaysShow is true", async () => {
-    renderWithNetwork("mainnet", <NetworkBanner alwaysShow />);
-    expect(await screen.findByText(/mainnet/i)).toBeInTheDocument();
+  it("renders nothing on mainnet by default", () => {
+    mockNetwork(MAINNET_NETWORK);
+    const { container } = render(<NetworkBanner />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders the testnet banner by default", async () => {
-    renderWithNetwork("testnet");
-    expect(await screen.findByText(/testnet/i)).toBeInTheDocument();
+  it("renders a visible banner on testnet with the correct label and disclaimer", () => {
+    mockNetwork(TESTNET_NETWORK);
+    const { container } = render(<NetworkBanner />);
+
+    expect(screen.getByText("Testnet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/You are on/i),
+    ).toHaveTextContent("You are on Testnet — transactions use test funds only");
+
+    const dot = container.querySelector(".rounded-full");
+    expect(dot).toHaveClass("bg-orange");
+
+    const textSpan = container.querySelector(".text-orange");
+    expect(textSpan).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("renders a visible banner on futurenet", () => {
+    mockNetwork(FUTURENET_NETWORK);
+    const { container } = render(<NetworkBanner />);
+
+    expect(screen.getByText("Futurenet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/You are on/i),
+    ).toHaveTextContent("You are on Futurenet — transactions use test funds only");
+
+    const dot = container.querySelector(".rounded-full");
+    expect(dot).toHaveClass("bg-purple");
+
+    const textSpan = container.querySelector(".text-purple");
+    expect(textSpan).toBeInTheDocument();
+  });
+
+  it("renders a visible banner on localnet", () => {
+    mockNetwork(LOCALNET_NETWORK);
+    const { container } = render(<NetworkBanner />);
+
+    expect(screen.getByText("Localnet")).toBeInTheDocument();
+    expect(
+      screen.getByText(/You are on/i),
+    ).toHaveTextContent("You are on Localnet — transactions use test funds only");
+
+    const dot = container.querySelector(".rounded-full");
+    expect(dot).toHaveClass("bg-ink-3");
+  });
+
+  it("renders custom network name and test funds disclaimer for custom networks", () => {
+    mockNetwork(CUSTOM_NETWORK);
+    render(<NetworkBanner />);
+
+    expect(screen.getByText("custom-net")).toBeInTheDocument();
+    expect(
+      screen.getByText(/You are on/i),
+    ).toHaveTextContent("You are on custom-net — transactions use test funds only");
+  });
+
+  it("merges per-network config overrides with the defaults", () => {
+    mockNetwork(TESTNET_NETWORK);
+    render(
+      <NetworkBanner config={{ testnet: { label: "Staging" } }} />,
+    );
+    expect(screen.getByText("Staging")).toBeInTheDocument();
     expect(screen.getByText(/test funds only/i)).toBeInTheDocument();
   });
 
-  it("applies orange styling for testnet", async () => {
-    const { container } = renderWithNetwork("testnet");
-    // The dot span should carry the testnet orange class
-    await waitFor(() => {
-      expect(container.querySelector(".bg-orange")).toBeInTheDocument();
+  it("shows a generic non-mainnet banner for unknown networks", () => {
+    mockNetwork({
+      name: "private-testnet",
+      rpcUrl: "http://private-rpc:8000",
+      passphrase: "Private Test Network",
+      horizonUrl: "http://private-horizon:8000",
     });
+    render(<NetworkBanner />);
+    expect(screen.getByText("private-testnet")).toBeInTheDocument();
+    expect(screen.getByText(/test funds only/i)).toBeInTheDocument();
   });
 
-  it("renders the futurenet banner by default", async () => {
-    renderWithNetwork("futurenet");
-    expect(await screen.findByText(/futurenet/i)).toBeInTheDocument();
-  });
-
-  it("applies purple styling for futurenet", async () => {
-    const { container } = renderWithNetwork("futurenet");
-    await waitFor(() => {
-      expect(container.querySelector(".bg-purple")).toBeInTheDocument();
-    });
-  });
-
-  it("renders the localnet banner by default", async () => {
-    renderWithNetwork("localnet");
-    expect(await screen.findByText(/localnet/i)).toBeInTheDocument();
-  });
-
-  it("does not render when active section is 'network'", async () => {
-    const { client, container } = renderWithNetwork(
-      "testnet",
+  it("does not render when active section is 'network'", () => {
+    mockNetwork(TESTNET_NETWORK);
+    const { container } = render(
       <NetworkBanner active="network" />,
     );
-    await waitFor(() => {
-      expect(client.network.getNetwork).toHaveBeenCalled();
-    });
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("accepts a custom className", async () => {
-    const { container } = renderWithNetwork(
-      "testnet",
-      <NetworkBanner className="my-class" />,
-    );
-    await waitFor(() => {
-      const banner = container.firstElementChild;
-      expect(banner?.classList.contains("my-class")).toBe(true);
+  it("merges custom className when supplied", () => {
+    mockNetwork(TESTNET_NETWORK);
+    const { container } = render(<NetworkBanner className="custom-banner-class" />);
+    expect(container.firstChild).toHaveClass("custom-banner-class");
+  });
+
+  describe("Layout offset and positioning", () => {
+    it("uses relative positioning by default to prevent overlapping top-level navigation", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { container } = render(<NetworkBanner />);
+      expect(container.firstChild).toHaveClass("relative");
+      expect(container.firstChild).not.toHaveClass("fixed");
+    });
+
+    it("supports sticky and fixed positioning strategies via position prop", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { container: stickyContainer } = render(
+        <NetworkBanner position="sticky" />,
+      );
+      expect(stickyContainer.firstChild).toHaveClass("sticky");
+
+      const { container: fixedContainer } = render(
+        <NetworkBanner position="fixed" />,
+      );
+      expect(fixedContainer.firstChild).toHaveClass("fixed");
+    });
+
+    it("injects --banner-height CSS custom property on documentElement when rendered", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner />);
+      const height = document.documentElement.style.getPropertyValue("--banner-height");
+      expect(height).toBeTruthy();
+      expect(height).toMatch(/^\d+px$/);
+    });
+
+    it("resets --banner-height to 0px when unmounted", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const { unmount } = render(<NetworkBanner />);
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).not.toBe("0px");
+
+      unmount();
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+
+    it("sets --banner-height via fallback when ResizeObserver is unavailable", () => {
+      const originalResizeObserver = global.ResizeObserver;
+      // @ts-expect-error - ResizeObserver is being set to undefined to test fallback behaviour
+      global.ResizeObserver = undefined;
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        render(<NetworkBanner />);
+        const height = document.documentElement.style.getPropertyValue("--banner-height");
+        expect(height).toBeTruthy();
+        expect(height).toMatch(/^\d+px$/);
+      } finally {
+        global.ResizeObserver = originalResizeObserver;
+      }
+    });
+  });
+
+  describe("Session dismiss behavior", () => {
+    it("renders dismiss button by default", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner />);
+      expect(
+        screen.getByRole("button", { name: /dismiss banner/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("hides banner and persists to sessionStorage when dismiss button is clicked", () => {
+      mockNetwork(TESTNET_NETWORK);
+      const onDismiss = vi.fn();
+      render(<NetworkBanner onDismiss={onDismiss} />);
+
+      const button = screen.getByRole("button", { name: /dismiss banner/i });
+      fireEvent.click(button);
+
+      expect(screen.queryByText("Testnet")).not.toBeInTheDocument();
+      expect(onDismiss).toHaveBeenCalledTimes(1);
+      expect(window.sessionStorage.getItem("sorokit-banner-dismissed-testnet")).toBe("true");
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+
+    it("does not render when banner has been dismissed in current session", () => {
+      window.sessionStorage.setItem("sorokit-banner-dismissed-testnet", "true");
+      mockNetwork(TESTNET_NETWORK);
+      const { container } = render(<NetworkBanner />);
+
+      expect(container).toBeEmptyDOMElement();
+      expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
+    });
+
+    it("supports custom storageKey for session dismissal", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner storageKey="custom-dismiss-key" />);
+
+      const button = screen.getByRole("button", { name: /dismiss banner/i });
+      fireEvent.click(button);
+
+      expect(window.sessionStorage.getItem("custom-dismiss-key")).toBe("true");
+    });
+
+    it("does not render dismiss button when dismissible is false", () => {
+      mockNetwork(TESTNET_NETWORK);
+      render(<NetworkBanner dismissible={false} />);
+      expect(
+        screen.queryByRole("button", { name: /dismiss banner/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("dismissing one network does not dismiss another network in same session", () => {
+      window.sessionStorage.setItem("sorokit-banner-dismissed-testnet", "true");
+      mockNetwork(FUTURENET_NETWORK);
+      render(<NetworkBanner />);
+
+      expect(screen.getByText("Futurenet")).toBeInTheDocument();
+    });
+  });
+
+  describe("Standalone mode and configurable colors", () => {
+    it("renders standalone network banner with default Standalone label", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      render(<NetworkBanner />);
+
+      expect(screen.getByText("Standalone")).toBeInTheDocument();
+      expect(
+        screen.getByText(/transactions use test funds only/i),
+      ).toBeInTheDocument();
+    });
+
+    it("supports configurable background and border colors via direct props", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      const { container } = render(
+        <NetworkBanner
+          backgroundColor="#1e293b"
+          borderColor="#334155"
+          textColor="#f8fafc"
+          dotColor="#38bdf8"
+        />,
+      );
+
+      const banner = container.firstChild as HTMLElement;
+      expect(banner.style.backgroundColor).toBe("rgb(30, 41, 59)");
+      expect(banner.style.borderColor).toBe("rgb(51, 65, 85)");
+
+      const dot = screen.getByTestId("network-banner-dot");
+      expect(dot.style.backgroundColor).toBe("rgb(56, 189, 248)");
+    });
+
+    it("supports configurable colors and labels via config prop for standalone and localnet", () => {
+      mockNetwork(STANDALONE_NETWORK);
+      const { container } = render(
+        <NetworkBanner
+          config={{
+            standalone: {
+              label: "Private Sandbox",
+              backgroundColor: "#0f172a",
+              borderColor: "#1e293b",
+            },
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Private Sandbox")).toBeInTheDocument();
+      const banner = container.firstChild as HTMLElement;
+      expect(banner.style.backgroundColor).toBe("rgb(15, 23, 42)");
+      expect(banner.style.borderColor).toBe("rgb(30, 41, 59)");
+    });
+  });
+
+  describe("ResizeObserver teardown (#768)", () => {
+    it("disconnects the ResizeObserver on unmount", () => {
+      const disconnectSpy = vi.fn();
+      const observeSpy = vi.fn();
+      const unobserveSpy = vi.fn();
+
+      const MockResizeObserver = vi.fn().mockImplementation(() => ({
+        observe: observeSpy,
+        unobserve: unobserveSpy,
+        disconnect: disconnectSpy,
+      }));
+
+      vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+      mockNetwork(TESTNET_NETWORK);
+      const { unmount } = render(<NetworkBanner />);
+
+      expect(MockResizeObserver).toHaveBeenCalled();
+
+      unmount();
+
+      expect(disconnectSpy).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("no-ResizeObserver fallback (#876)", () => {
+    it("sets --banner-height using getBoundingClientRect fallback when ResizeObserver is undefined", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      const spyGetBoundingClientRect = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          height: 44,
+          width: 800,
+          top: 0,
+          left: 0,
+          bottom: 44,
+          right: 800,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        });
+
+      try {
+        render(<NetworkBanner />);
+
+        // --banner-height should be set to 44px even without ResizeObserver
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("44px");
+      } finally {
+        spyGetBoundingClientRect.mockRestore();
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    });
+
+    it("resets --banner-height to 0px when banner is hidden without ResizeObserver", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      try {
+        const { rerender } = render(<NetworkBanner />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBeTruthy();
+
+        // Navigate to active="network" which hides the banner
+        rerender(<NetworkBanner active="network" />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("0px");
+      } finally {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
     });
   });
 });

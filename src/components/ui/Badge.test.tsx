@@ -1,4 +1,6 @@
 import { render, screen } from "@testing-library/react";
+import fs from "fs";
+import path from "path";
 import { describe, expect,it } from "vitest";
 
 import { Badge } from "./Badge";
@@ -121,6 +123,115 @@ describe("Badge", () => {
       const badge = container.firstChild as HTMLElement;
       expect(badge.className).toContain("my-dot");
       expect(badge).toHaveAttribute("data-testid", "standalone");
+    });
+  });
+
+  describe("warning contrast (#694)", () => {
+    // WCAG 2.x relative luminance / contrast ratio.
+    type RGB = [number, number, number];
+
+    function parseColor(value: string): { rgb: RGB; alpha: number } {
+      const hex = value.match(/^#([0-9a-f]{6})$/i);
+      if (hex) {
+        const n = parseInt(hex[1], 16);
+        return { rgb: [(n >> 16) & 255, (n >> 8) & 255, n & 255], alpha: 1 };
+      }
+      const rgba = value.match(/^rgba?\(([^)]+)\)$/);
+      if (!rgba) throw new Error(`Unsupported colour: ${value}`);
+      const [r, g, b, a = "1"] = rgba[1].split(",").map((p) => p.trim());
+      return { rgb: [+r, +g, +b], alpha: +a };
+    }
+
+    function over(fg: string, bg: RGB): RGB {
+      const { rgb, alpha } = parseColor(fg);
+      return rgb.map((c, i) => alpha * c + (1 - alpha) * bg[i]) as RGB;
+    }
+
+    function luminance([r, g, b]: RGB): number {
+      const lin = (c: number) => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    }
+
+    function contrast(a: RGB, b: RGB): number {
+      const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    }
+
+    const css = fs.readFileSync(
+      path.resolve(__dirname, "../../styles.css"),
+      "utf8",
+    );
+
+    function tokens(selector: string): Record<string, string> {
+      const start = css.indexOf(`${selector} {`);
+      const block = css.slice(start, css.indexOf("}", start));
+      return Object.fromEntries(
+        [...block.matchAll(/(--color-[\w-]+):\s*([^;]+);/g)].map((m) => [
+          m[1],
+          m[2].trim(),
+        ]),
+      );
+    }
+
+    const dark = tokens(":root");
+    const light = { ...dark, ...tokens('html[data-theme="light"]') };
+
+    it("uses the theme-aware warning tokens rather than raw orange", () => {
+      render(<Badge variant="warning">Pending</Badge>);
+      const badge = screen.getByText("Pending");
+      expect(badge).toHaveClass(
+        "text-warning",
+        "bg-warning-dim",
+        "border-warning-dim",
+      );
+      expect(badge).not.toHaveClass("text-orange");
+    });
+
+    it("keeps the warning dot on the orange accent", () => {
+      const { container } = render(
+        <Badge variant="warning" dot>
+          Pending
+        </Badge>,
+      );
+      expect(container.querySelector('[aria-hidden="true"]')).toHaveClass(
+        "bg-orange",
+      );
+    });
+
+    it.each([
+      ["dark", dark],
+      ["light", light],
+    ])(
+      "warning text meets WCAG AA (4.5:1) on every %s surface",
+      (_theme, t) => {
+        for (const surface of [
+          "--color-base",
+          "--color-surface",
+          "--color-surface-2",
+        ]) {
+          const page = parseColor(t[surface]).rgb;
+          const pill = over(t["--color-warning-bg"], page);
+          const text = over(t["--color-warning-fg"], pill);
+          expect(contrast(text, pill)).toBeGreaterThanOrEqual(4.5);
+        }
+      },
+    );
+
+    it("differs per theme so the light theme does not reuse the dark foreground", () => {
+      expect(light["--color-warning-fg"]).not.toBe(dark["--color-warning-fg"]);
+    });
+
+    it("keeps the dev stylesheet (index.css) in sync with styles.css", () => {
+      const indexCss = fs.readFileSync(
+        path.resolve(__dirname, "../../index.css"),
+        "utf8",
+      );
+      for (const value of [dark["--color-warning-fg"], light["--color-warning-fg"]]) {
+        expect(indexCss).toContain(`--color-warning-fg: ${value};`);
+      }
     });
   });
 });

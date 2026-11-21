@@ -20,6 +20,11 @@
 import "../styles.css";
 
 // UI primitives
+//
+// Card, Separator, and SkeletonCard are adopted primitives (not raw div +
+// Tailwind) — see SwapSimulator/RecoveryScreen/ChartingScreen/YieldFarmingScreen
+// /BudgetScreen for Card, WalletConnectModal for Separator, and
+// ClaimableBalanceCard for SkeletonCard.
 export { Badge } from "./ui/Badge";
 export type { ButtonGroupProps } from "./ui/Button";
 export { Button, ButtonGroup } from "./ui/Button";
@@ -31,10 +36,18 @@ export {
   CardHeader,
   CardTitle,
 } from "./ui/Card";
+export type { InfoCellProps } from "./ui/InfoCell";
 export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";
-export { AssetRowSkeleton, Skeleton, SkeletonCard, SkeletonRow } from "./ui/Skeleton";
+export { Separator } from "./ui/Separator";
+export {
+  AssetRowSkeleton,
+  Skeleton,
+  SkeletonCard,
+  SkeletonRow,
+  SkeletonTable,
+} from "./ui/Skeleton";
 
 // Error handling
 export { ErrorBoundary } from "./ErrorBoundary";
@@ -52,7 +65,17 @@ export {
 } from "./WalletConnectModal";
 
 // Assets
-export { AssetBadge, AssetPill, isKnownAsset } from "./AssetBadge";
+export type {
+  AssetBadgeProps,
+  AssetPillProps,
+} from "./AssetBadge";
+export {
+  ASSET_COLORS,
+  AssetBadge,
+  AssetPill,
+  getAssetColor,
+  isKnownAsset,
+} from "./AssetBadge";
 export type { AssetItem, AssetMeta, SortKey, VerifiedFilter } from "./AssetFilter";
 export { AssetFilter, AssetFilterSkeleton } from "./AssetFilter";
 
@@ -60,7 +83,8 @@ export { AssetFilter, AssetFilterSkeleton } from "./AssetFilter";
 export { AddressDisplay } from "./AddressDisplay";
 
 // Network
-export { NetworkBanner } from "./NetworkBanner";
+export type { BannerConfig, NetworkBannerProps } from "./NetworkBanner";
+export { BANNER_CONFIG, NetworkBanner } from "./NetworkBanner";
 export { NetworkSwitcher } from "./NetworkSwitcher";
 
 // Allowances
@@ -70,7 +94,25 @@ export { AllowanceManager } from "./AllowanceManager";
 export { ActivityTimeline } from "./ActivityTimeline";
 export { ClaimableBalanceCard } from "./ClaimableBalanceCard";
 export { FeeCell,FeeEstimator } from "./FeeEstimator";
-export { GasOptimizer } from "./GasOptimizer";
+export type {
+  GasOptimizerConfig,
+  GasOptimizerProps,
+  GasPresetConfig,
+  GasPresetName,
+} from "./GasOptimizer";
+export {
+  GAS_PRESETS,
+  GasOptimizer,
+  MAX_CPU_INSTRUCTIONS,
+  MAX_MEMORY_BYTES,
+  MIN_CPU_INSTRUCTIONS,
+  MIN_MEMORY_BYTES,
+  SOROBAN_MAX_INSTRUCTIONS,
+  SOROBAN_MAX_MEMORY,
+  SOROBAN_MIN_INSTRUCTIONS,
+  SOROBAN_MIN_MEMORY,
+  SOROBAN_PROTOCOL_LIMITS,
+} from "./GasOptimizer";
 export { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
 export type {
   TransactionConfirmModalProps,
@@ -109,13 +151,28 @@ export type { DelegationRowProps } from "./DelegationRow";
 export { DelegationRow } from "./DelegationRow";
 export { RebalancerHistory } from "./RebalancerHistory";
 export type { RewardHistoryProps } from "./RewardHistory";
-export { RewardHistory } from "./RewardHistory";
+export { generateRewardHistoryCsv, RewardHistory } from "./RewardHistory";
 export type { RewardsPanelProps } from "./RewardsPanel";
 export { RewardsPanel } from "./RewardsPanel";
 export type { StakingDashboardProps } from "./StakingDashboard";
 export { StakingDashboard } from "./StakingDashboard";
 export { SwapExecutionTracker } from "./SwapExecutionTracker";
-export { SwapRoute } from "./SwapRoute";
+export type {
+  NormalizedHop,
+  RouteHop,
+  RouteValidationResult,
+  SwapRouteProps,
+} from "./SwapRoute";
+export {
+  detectCircularRoutes,
+  formatFeeTier,
+  formatPoolDepth,
+  getIntermediateHops,
+  getSwapPath,
+  isCircularRoute,
+  SwapRoute,
+  validateSwapRoute,
+} from "./SwapRoute";
 export type { PieChartProps, PieSlice } from "./ui/PieChart";
 export { PieChart } from "./ui/PieChart";
 export type { ValidatorCardProps } from "./ValidatorCard";
@@ -165,7 +222,7 @@ export type {
   DelegationChangeResult,
   RewardEvent,
   RewardScheduleEntry,
-  SortDirection,
+  SortDirection as StakingSortDirection,
   Validator,
   ValidatorFilter,
   ValidatorSortField,
@@ -174,8 +231,11 @@ export type {
 export {
   aggregateDailyRewards,
   createDefaultFilter,
+  DEFAULT_XLM_PRICE_USD,
   DELEGATION_BASE_FEE_STROOPS,
   estimateDelegationFeeXlm,
+  estimateHistoricalXlmPriceUsd,
+  estimateRewardUsdValue,
   filterValidators,
   /** @alias formatPct from staking lib */
   formatPct as formatStakingPct,
@@ -203,6 +263,15 @@ export { TransactionFeeCalculator } from "./TransactionFeeCalculator";
 // Contract Interaction Builder
 export type { ContractSpec } from "./ContractInteractionBuilder";
 export { ContractInteractionBuilder } from "./ContractInteractionBuilder";
+
+// Governance
+export type {
+  GovernanceDashboardProps,
+  GovernanceProposal,
+  ProposalStatus,
+  VoteChoice,
+} from "./GovernanceDashboard";
+export { GovernanceDashboard } from "./GovernanceDashboard";
 
 // Account Balance Chart
 export { AccountBalanceChart } from "./AccountBalanceChart";

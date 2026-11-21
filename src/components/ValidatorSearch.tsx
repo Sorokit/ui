@@ -4,11 +4,13 @@
  */
 
 import {
+  Cancel01Icon,
   FilterHorizontalIcon,
   Search01Icon,
   SortingAZ01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import type { ValidatorFilter, ValidatorSortField } from "@/lib/staking";
@@ -53,6 +55,35 @@ export function ValidatorSearch({
     patch({ sortDirection: filter.sortDirection === "desc" ? "asc" : "desc" });
   }
 
+  const [localQuery, setLocalQuery] = useState(filter.query);
+  const [previousQuery, setPreviousQuery] = useState(filter.query);
+  const debounceTimerRef = useRef<number | null>(null);
+
+  // During-render sync: when the controlled filter.query changes externally,
+  // update localQuery immediately without going through an effect.
+  if (filter.query !== previousQuery) {
+    setPreviousQuery(filter.query);
+    setLocalQuery(filter.query);
+  }
+
+  function handleQueryChange(value: string) {
+    setLocalQuery(value);
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+    }
+    debounceTimerRef.current = window.setTimeout(() => {
+      patch({ query: value.trim() });
+    }, 300);
+  }
+
+  function handleClearQuery() {
+    setLocalQuery("");
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current);
+    }
+    patch({ query: "" });
+  }
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       {/* ── Search bar ──────────────────────────────────────────────────────── */}
@@ -70,8 +101,8 @@ export function ValidatorSearch({
         </span>
         <input
           type="search"
-          value={filter.query}
-          onChange={(e) => patch({ query: e.target.value })}
+          value={localQuery}
+          onChange={(e) => handleQueryChange(e.target.value)}
           placeholder="Search validators…"
           aria-label="Search validators"
           className={cn(
@@ -79,8 +110,28 @@ export function ValidatorSearch({
             "text-[13px] text-ink placeholder:text-ink-4",
             "outline-none transition-colors",
             "focus:border-line-2 focus:ring-1 focus:ring-brand-dim",
+            localQuery.length > 0 && "pr-9",
           )}
         />
+        {localQuery.length > 0 && (
+          <button
+            type="button"
+            onClick={handleClearQuery}
+            aria-label="Clear search"
+            className={cn(
+              "absolute right-2.5 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded",
+              "text-ink-3 hover:text-ink-2 transition-colors",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand",
+            )}
+          >
+            <HugeiconsIcon
+              icon={Cancel01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </button>
+        )}
       </div>
 
       {/* ── Filter + sort row ───────────────────────────────────────────────── */}

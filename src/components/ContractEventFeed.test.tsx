@@ -10,7 +10,23 @@ vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
 }));
 
+// Issue #442 / context refactor: the components read their client from
+// SorokitContext, so the hook is routed at the same `getClient` mock every test
+// below configures. Without this the mocked client never reaches the component.
+vi.mock("@/context/useSorokit", async () => {
+  const { getClient } = await import("@/lib/client");
+  return {
+    useSorokit: () => ({
+      client: getClient(),
+      isConnected: true,
+      address: "GTEST",
+    }),
+  };
+});
+
+
 const CONTRACT_ID = "CAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+const FROM_LEDGER_STORAGE_PREFIX = "sorokit:contract-event-feed:fromLedger:";
 
 const MOCK_EVENT: ContractEvent = {
   id: "evt-1",
@@ -38,6 +54,9 @@ describe("ContractEventFeed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Issue #732: fromLedger persistence uses sessionStorage, which otherwise
+    // leaks the last-seen ledger from one test's CONTRACT_ID into the next.
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -67,6 +86,21 @@ describe("ContractEventFeed", () => {
     await waitFor(() => {
       expect(screen.getByText("transfer")).toBeInTheDocument();
     });
+  });
+
+  it("fetches events on mount with the contractId and the default limit", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined);
+    });
+    expect(getEvents).toHaveBeenCalledTimes(1);
   });
 
   it("renders 'No events found' when the events array is empty", async () => {
@@ -125,6 +159,42 @@ describe("ContractEventFeed", () => {
     // Advance well past interval — no new calls should happen
     act(() => { vi.advanceTimersByTime(1500); });
     expect(getEvents).toHaveBeenCalledTimes(callsAfterPause);
+  });
+
+  it("restarts polling when the Live/Paused toggle is turned back on", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+    // Pause polling.
+    fireEvent.click(screen.getByRole("button", { name: /live/i }));
+    const callsAfterPause = getEvents.mock.calls.length;
+
+    act(() => { vi.advanceTimersByTime(1500); });
+    expect(getEvents).toHaveBeenCalledTimes(callsAfterPause);
+
+    // Resume polling — a fresh interval starts, so one more call fires per
+    // poll interval.
+    fireEvent.click(screen.getByRole("button", { name: /paused/i }));
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(getEvents).toHaveBeenCalledTimes(callsAfterPause + 1);
+
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(getEvents).toHaveBeenCalledTimes(callsAfterPause + 2);
   });
 
   it("triggers a new load when contractId changes", async () => {
@@ -400,7 +470,7 @@ describe("ContractEventFeed", () => {
       act(() => { vi.advanceTimersByTime(0); });
 
       await waitFor(() => {
-        expect(screen.getByRole("button", { name: /export json/i })).toBeDisabled();
+        expect(screen.getByRole("button", { name: /export/i })).toBeDisabled();
       });
     });
 
@@ -410,7 +480,7 @@ describe("ContractEventFeed", () => {
       act(() => { vi.advanceTimersByTime(0); });
       await waitFor(() => screen.getByText("transfer"));
 
-      fireEvent.click(screen.getByRole("button", { name: /export json/i }));
+      fireEvent.click(screen.getByRole("button", { name: /export/i }));
 
       expect(mockCreateObjectURL).toHaveBeenCalledTimes(1);
       const blob = mockCreateObjectURL.mock.calls[0]![0] as Blob;
@@ -433,7 +503,7 @@ describe("ContractEventFeed", () => {
           downloadName = this.download;
         });
 
-      fireEvent.click(screen.getByRole("button", { name: /export json/i }));
+      fireEvent.click(screen.getByRole("button", { name: /export/i }));
 
       expect(clickSpy).toHaveBeenCalledTimes(1);
       expect(downloadName).toBe(`contract-events-${CONTRACT_ID}.json`);
@@ -543,6 +613,177 @@ describe("ContractEventFeed", () => {
     });
   });
 
+  // ── fromLedger persists across unmount/remount (#732) ─────────────────────
+  describe("fromLedger persistence across remount (#732)", () => {
+    it("resumes from the last-seen ledger instead of the prop default after an unmount/remount", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(
+          CONTRACT_ID,
+          10,
+          MOCK_EVENT.ledger + 1,
+        );
+      });
+    });
+
+    it("persists the next ledger under the contract-specific sessionStorage key", async () => {
+      mockGetEvents({ data: [MOCK_EVENT], error: null });
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() =>
+        expect(
+          window.sessionStorage.getItem(
+            `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+          ),
+        ).toBe(String(MOCK_EVENT.ledger + 1)),
+      );
+    });
+
+    it("removes the persisted ledger for the previous contract when contractId changes", async () => {
+      mockGetEvents({ data: [MOCK_EVENT], error: null });
+
+      const { rerender } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(
+          window.sessionStorage.getItem(
+            `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+          ),
+        ).not.toBeNull(),
+      );
+
+      const OTHER_ID = "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+      // Keep the new contract's fetch pending so no state update lands after
+      // the assertion below; the assertion only concerns the old key.
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents: vi.fn().mockReturnValue(new Promise(() => {})) },
+      } as unknown as SorokitClient);
+      rerender(<ContractEventFeed contractId={OTHER_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(
+        window.sessionStorage.getItem(
+          `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+        ),
+      ).toBeNull();
+    });
+
+    it("ignores a corrupted persisted ledger instead of passing NaN to getEvents", async () => {
+      window.sessionStorage.setItem(
+        `${FROM_LEDGER_STORAGE_PREFIX}${CONTRACT_ID}`,
+        "not-a-number",
+      );
+      const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined);
+      });
+    });
+
+    it("keeps resuming across further remounts as later events raise the persisted ledger", async () => {
+      const laterEvent = { ...MOCK_EVENT, id: "evt-2", ledger: MOCK_EVENT.ledger + 50 };
+      const getEvents = vi.fn().mockResolvedValue({ data: [laterEvent], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+      unmount();
+
+      const { unmount: unmount2 } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(
+          CONTRACT_ID,
+          10,
+          laterEvent.ledger + 1,
+        ),
+      );
+      unmount2();
+    });
+
+    it("clears the persisted ledger when contractId changes, so a later remount for the original contract starts fresh", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { rerender, unmount } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+
+      const OTHER_ID = "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+      rerender(<ContractEventFeed contractId={OTHER_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(OTHER_ID, 10, undefined),
+      );
+
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, undefined);
+      });
+    });
+
+    it("an explicit fromLedger prop still overrides a persisted ledger after remount", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenCalledWith(CONTRACT_ID, 10, undefined),
+      );
+      unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} fromLedger={5} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, 5);
+      });
+    });
+  });
+
   describe("stale events and loading recovery", () => {
     const OTHER_CONTRACT_ID =
       "CBBZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNB";
@@ -617,6 +858,515 @@ describe("ContractEventFeed", () => {
 
       await waitFor(() =>
         expect(container.querySelector(".animate-pulse")).not.toBeInTheDocument(),
+      );
+    });
+  });
+
+  // ── Polling stale-closure regression (#582) ──────────────────────────────
+  // The polling interval used to close over the `load` instance captured when
+  // the effect first ran, so changing the `contractId` prop kept polling the
+  // OLD contract. These tests pin the fixed behaviour: the interval restarts
+  // with the current contractId.
+  describe("polling contractId switching (#582)", () => {
+    const NEW_ID =
+      "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+
+    it("restarts polling for the new contractId after the prop changes", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      const { rerender } = render(
+        <ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+      expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, undefined);
+
+      rerender(<ContractEventFeed contractId={NEW_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      // The restarted effect loads the new contract immediately, then keeps
+      // polling it. Capture the call count here so the stale-closure check
+      // only examines calls made *after* the switch.
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenLastCalledWith(NEW_ID, 10, undefined);
+      });
+      const callsAfterSwitch = getEvents.mock.calls.length;
+
+      // Advance past one full poll interval. The stale-closure bug (#582)
+      // would keep calling with the OLD contractId here; the fixed code must
+      // use NEW_ID for every poll after the switch.
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() => {
+        expect(getEvents.mock.calls.length).toBeGreaterThan(callsAfterSwitch);
+      });
+
+      const postSwitchIds = getEvents.mock.calls
+        .slice(callsAfterSwitch)
+        .map(([id]) => id);
+      expect(postSwitchIds).not.toContain(CONTRACT_ID);
+      expect(postSwitchIds.every((id) => id === NEW_ID)).toBe(true);
+    });
+
+    it("resumes polling for the current contract when Live is toggled back on", async () => {
+      const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { getEvents },
+      } as unknown as SorokitClient);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+      fireEvent.click(screen.getByRole("button", { name: /live/i }));
+      const pausedCount = getEvents.mock.calls.length;
+      act(() => { vi.advanceTimersByTime(1500); });
+      expect(getEvents).toHaveBeenCalledTimes(pausedCount);
+
+      fireEvent.click(screen.getByRole("button", { name: /paused/i }));
+      act(() => { vi.advanceTimersByTime(500); });
+
+      await waitFor(() => {
+        expect(getEvents).toHaveBeenCalledTimes(pausedCount + 1);
+      });
+      expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, undefined);
+    });
+  });
+});
+
+// ── Issue #442: stale closures, single mount fetch, runtime poll changes ─────
+describe("ContractEventFeed — issue #442", () => {
+  const OTHER_ID = "CBBB4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
+
+  function mockEvents(getEvents: ReturnType<typeof vi.fn>) {
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+  }
+
+  function evt(id: string, topic: string): ContractEvent {
+    return { ...MOCK_EVENT, id, topics: [topic] };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Issue #732: fromLedger persistence uses sessionStorage, which otherwise
+    // leaks the last-seen ledger from one test's CONTRACT_ID into the next.
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires exactly one request on mount, even with polling enabled", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+    mockEvents(getEvents);
+
+    render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+    // Well short of the first poll — the polling effect must not have fetched.
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    expect(getEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts polling when pollInterval goes from 0 to a positive value at runtime", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+    mockEvents(getEvents);
+
+    const { rerender } = render(
+      <ContractEventFeed contractId={CONTRACT_ID} pollInterval={0} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(getEvents).toHaveBeenCalledTimes(1);
+
+    rerender(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+  });
+
+  it("re-arms the timer at the new period when pollInterval changes", async () => {
+    const getEvents = vi.fn().mockResolvedValue({ data: [], error: null });
+    mockEvents(getEvents);
+
+    const { rerender } = render(
+      <ContractEventFeed contractId={CONTRACT_ID} pollInterval={1000} />,
+    );
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+
+    rerender(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={5000} />);
+
+    // The old 1s timer must be gone…
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(getEvents).toHaveBeenCalledTimes(2);
+
+    // …and the new 5s one armed.
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(3));
+  });
+
+  it("discards an in-flight response belonging to the previous contractId", async () => {
+    let resolveOld!: (value: {
+      data: ContractEvent[] | null;
+      error: string | null;
+    }) => void;
+    const oldPending = new Promise<{
+      data: ContractEvent[] | null;
+      error: string | null;
+    }>((resolve) => {
+      resolveOld = resolve;
+    });
+
+    const getEvents = vi
+      .fn()
+      .mockReturnValueOnce(oldPending)
+      .mockResolvedValue({ data: [evt("evt-new", "NEW-EVT")], error: null });
+    mockEvents(getEvents);
+
+    const { rerender } = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+
+    // Switch contracts while the first request is still in flight.
+    rerender(<ContractEventFeed contractId={OTHER_ID} />);
+    act(() => {
+      vi.advanceTimersByTime(0);
+    });
+    await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("NEW-EVT")).toBeInTheDocument();
+
+    // The stale response lands late and must be dropped.
+    await act(async () => {
+      resolveOld({ data: [evt("evt-old", "OLD-EVT")], error: null });
+    });
+
+    expect(screen.queryByText("OLD-EVT")).not.toBeInTheDocument();
+    expect(screen.getByText("NEW-EVT")).toBeInTheDocument();
+  });
+});
+
+// ── Issue #911: topic filtering, reconnect recovery, ledger cursor paging ────
+describe("ContractEventFeed — issue #911", () => {
+  function mockEvents(getEvents: ReturnType<typeof vi.fn>) {
+    vi.mocked(getClient).mockReturnValue({
+      soroban: { getEvents },
+    } as unknown as SorokitClient);
+  }
+
+  function evt(
+    id: string,
+    overrides: Partial<ContractEvent> = {},
+  ): ContractEvent {
+    return { ...MOCK_EVENT, id, ...overrides };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    window.sessionStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("topic filtering", () => {
+    // A topic-filtered stream fixture: two events share the "swap" topic,
+    // one only carries "deposit".
+    const TOPIC_STREAM: ContractEvent[] = [
+      evt("t-1", { type: "transfer", topics: ["swap", "pool-a"] }),
+      evt("t-2", { type: "mint", topics: ["deposit", "pool-b"] }),
+      evt("t-3", { type: "burn", topics: ["pool-c", "swap"] }),
+    ];
+
+    it("only renders events carrying a matching topic name", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["swap"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-a")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+      expect(screen.queryByText("pool-b")).not.toBeInTheDocument();
+      expect(screen.queryByText("deposit")).not.toBeInTheDocument();
+    });
+
+    it("matches any of several topic names", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(
+        <ContractEventFeed
+          contractId={CONTRACT_ID}
+          filterTopics={["deposit", "pool-c"]}
+        />,
+      );
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-b")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+      expect(screen.queryByText("pool-a")).not.toBeInTheDocument();
+    });
+
+    it("counts type toggles over the topic-filtered events only", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["swap"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByRole("button", { name: "transfer (1)" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "burn (1)" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^mint/ })).not.toBeInTheDocument();
+    });
+
+    it("shows the no-match message when no event carries the topic", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={["withdraw"]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(
+        await screen.findByText("No events match the selected filters"),
+      ).toBeInTheDocument();
+    });
+
+    it("shows every event when filterTopics is empty", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: TOPIC_STREAM, error: null }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} filterTopics={[]} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("pool-a")).toBeInTheDocument();
+      expect(screen.getByText("pool-b")).toBeInTheDocument();
+      expect(screen.getByText("pool-c")).toBeInTheDocument();
+    });
+  });
+
+  describe("disconnect and reconnect", () => {
+    it("shows a Reconnecting badge when a poll fails and clears it once the stream recovers", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValueOnce({ data: null, error: "RPC disconnected" })
+        .mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+
+      // Poll #2 — the stream drops.
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+      // The last good events stay visible instead of the hard error state.
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+      expect(screen.queryByText("RPC disconnected")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+      // Poll #3 — the stream recovers on its own.
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() =>
+        expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument(),
+      );
+      expect(getEvents).toHaveBeenCalledTimes(3);
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+    });
+
+    it("treats a rejected poll (network drop) as a reconnect, not a hard error", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockRejectedValueOnce(new Error("socket closed"))
+        .mockResolvedValue({ data: [MOCK_EVENT], error: null });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+      expect(screen.queryByText("socket closed")).not.toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() =>
+        expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument(),
+      );
+    });
+
+    it("keeps the badge up across consecutive failed polls", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValue({ data: null, error: "RPC disconnected" });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+
+      act(() => { vi.advanceTimersByTime(500); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(3));
+      expect(screen.getByText("Reconnecting…")).toBeInTheDocument();
+      expect(screen.getByText("transfer")).toBeInTheDocument();
+    });
+
+    it("shows the error state, not the badge, when the very first load fails", async () => {
+      mockEvents(vi.fn().mockResolvedValue({ data: null, error: "RPC disconnected" }));
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} pollInterval={500} />);
+      act(() => { vi.advanceTimersByTime(0); });
+
+      expect(await screen.findByText("RPC disconnected")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    });
+
+    it("shows the error state, not the badge, when polling is off", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [MOCK_EVENT], error: null })
+        .mockResolvedValue({ data: null, error: "RPC disconnected" });
+      mockEvents(getEvents);
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      expect(await screen.findByText("transfer")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      expect(await screen.findByText("RPC disconnected")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("ledger cursor pagination", () => {
+    it("advances the cursor past each page across consecutive ledgers", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [evt("p1-a", { ledger: 100 }), evt("p1-b", { ledger: 101 })],
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: [evt("p2-a", { ledger: 102 }), evt("p2-b", { ledger: 103 })],
+          error: null,
+        })
+        .mockResolvedValueOnce({
+          data: [evt("p3-a", { ledger: 104 })],
+          error: null,
+        });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(1, CONTRACT_ID, 10, undefined),
+      );
+      expect(await screen.findByText("101")).toBeInTheDocument();
+      first.unmount();
+
+      const second = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(2, CONTRACT_ID, 10, 102),
+      );
+      expect(await screen.findByText("103")).toBeInTheDocument();
+      second.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(3, CONTRACT_ID, 10, 104),
+      );
+      expect(await screen.findByText("104")).toBeInTheDocument();
+    });
+
+    it("advances to the highest ledger in a page even when events arrive out of order", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({
+          data: [
+            evt("o-a", { ledger: 205 }),
+            evt("o-b", { ledger: 200 }),
+            evt("o-c", { ledger: 203 }),
+          ],
+          error: null,
+        })
+        .mockResolvedValue({ data: [], error: null });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() => expect(getEvents).toHaveBeenCalledTimes(1));
+      await screen.findByText("205");
+      first.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenLastCalledWith(CONTRACT_ID, 10, 206),
+      );
+    });
+
+    it("does not move the cursor when a page comes back empty", async () => {
+      const getEvents = vi
+        .fn()
+        .mockResolvedValueOnce({ data: [evt("e-a", { ledger: 300 })], error: null })
+        .mockResolvedValue({ data: [], error: null });
+      mockEvents(getEvents);
+
+      const first = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await screen.findByText("300");
+      first.unmount();
+
+      const second = render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(2, CONTRACT_ID, 10, 301),
+      );
+      await screen.findByText("No events found");
+      second.unmount();
+
+      render(<ContractEventFeed contractId={CONTRACT_ID} />);
+      act(() => { vi.advanceTimersByTime(0); });
+      await waitFor(() =>
+        expect(getEvents).toHaveBeenNthCalledWith(3, CONTRACT_ID, 10, 301),
       );
     });
   });

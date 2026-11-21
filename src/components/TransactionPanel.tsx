@@ -3,14 +3,21 @@ import {
   CheckmarkCircle01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient, type NetworkInfo, type TxResult } from "@/lib/client";
-import { cn, truncateAddress } from "@/lib/utils";
+import { type NetworkInfo, type TxResult } from "@/lib/client";
+import {
+  cn,
+  friendlyError,
+  truncateAddress,
+  truncateToUtf8ByteLength,
+  utf8ByteLength,
+  validateStellarAddress,
+} from "@/lib/utils";
 
 import {
   TransactionConfirmModal,
@@ -20,57 +27,55 @@ import { TransactionStatusTracker } from "./TransactionStatusTracker";
 
 type State = "idle" | "loading" | "success" | "error";
 
-type MemoType = "none" | "text" | "id";
+/** Stellar's MEMO_TEXT limit is 28 bytes (UTF-8 encoded), not 28 characters. */
+const MEMO_TEXT_MAX_BYTES = 28;
 
-const MEMO_TYPES: { value: MemoType; label: string }[] = [
-  { value: "text", label: "Text" },
-  { value: "id", label: "ID" },
-  { value: "none", label: "None" },
+const STROOPS_PER_XLM = 10_000_000;
+
+export type MemoType = "none" | "text" | "id" | "hash" | "return";
+
+export const MEMO_TYPES: { value: MemoType; label: string }[] = [
+  { value: "none", label: "No memo" },
+  { value: "text", label: "Text memo" },
+  { value: "id", label: "Memo ID" },
+  { value: "hash", label: "Memo hash" },
+  { value: "return", label: "Memo return" },
 ];
 
-/**
- * Maps a Stellar network to its Stellar Expert explorer URL segment.
- * Returns `null` for networks Stellar Expert does not index (e.g. futurenet,
- * localnet), in which case the hash is shown as plain text.
- */
-function explorerTxUrl(
-  network: NetworkInfo | null,
-  hash: string,
-): string | null {
-  if (!network) return null;
-  const segment =
-    network.name === "mainnet"
-      ? "public"
-      : network.name === "testnet"
-        ? "testnet"
-        : null;
-  if (!segment) return null;
-  return `https://stellar.expert/explorer/${segment}/tx/${hash}`;
-}
+/** MEMO_HASH and MEMO_RETURN are both a raw 32-byte value, hex-encoded. */
+const MEMO_HASH_HEX_LENGTH = 64;
+const MEMO_HASH_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 
 export interface TransactionPanelProps {
   defaultDestination?: string;
   defaultAmount?: string;
   defaultMemo?: string;
+  previewMode?: boolean;
+  decimals?: number;
   onSuccess?: (result: TxResult) => void;
   onError?: (error: string) => void;
-  /**
-   * When true (the default), the footer button opens a confirmation modal
-   * showing transaction details before `submitTransaction` runs. Pass
-   * `false` to submit immediately on click, skipping the preview step.
-   */
-  previewMode?: boolean;
+  className?: string;
 }
 
 export function TransactionPanel({
   defaultDestination = "",
   defaultAmount = "",
   defaultMemo = "",
+  previewMode = true,
+  decimals = 7,
   onSuccess,
   onError,
-  previewMode = true,
+  className,
 }: TransactionPanelProps = {}) {
-  const { address, isConnected, balances, isLoadingAccount, network, account } = useSorokit();
+  const {
+    address,
+    client,
+    account,
+    network,
+    isLoadingAccount,
+    isConnected,
+    balances = [],
+  } = useSorokit();
   const [dest, setDest] = useState(defaultDestination);
   const [destDirty, setDestDirty] = useState(false);
   const [amount, setAmount] = useState(defaultAmount);
@@ -83,7 +88,35 @@ export function TransactionPanel({
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TransactionPreviewData | null>(null);
   const [isBuildingPreview, setIsBuildingPreview] = useState(false);
+  const [estimatedFeeXlm, setEstimatedFeeXlm] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isSubmittingRef = useRef(false);
+  const formId = useId();
+
+  // Fetch the current network fee estimate once a wallet is connected so the
+  // balance check below can warn the user before they submit, rather than
+  // only after Horizon rejects an underfunded transaction.
+  useEffect(() => {
+    if (!client || !isConnected) return;
+    let active = true;
+    client.transaction
+      .estimateFee()
+      .then(({ data }) => {
+        if (!active || !data) return;
+        const stroops = parseFloat(data.recommended ?? data.baseFee);
+        if (Number.isFinite(stroops)) {
+          setEstimatedFeeXlm(stroops / STROOPS_PER_XLM);
+        }
+      })
+      .catch(() => {
+        // Fee estimation is a soft enhancement to the balance warning; if it
+        // fails, fall back to treating the fee as negligible rather than
+        // blocking the form.
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, isConnected]);
 
   const assetOptions = balances ?? [];
 
@@ -94,39 +127,56 @@ export function TransactionPanel({
       ? asset
       : assetOptions[0].asset;
 
-  const isDestValid = /^G[A-Z2-7]{55}$/.test(dest.trim());
+  const isDestValid = validateStellarAddress(dest);
   const isSelfPayment = dest.trim() === address;
   const parsedAmount = parseFloat(amount);
-  const isAmountValid = !isNaN(parsedAmount) && parsedAmount >= 0.0000001;
+  const amountStr = amount.trim();
+  const decimalParts = amountStr.includes(".") ? amountStr.split(".")[1] : "";
+  const exceedsDecimals = decimalParts.length > decimals;
+  const isAmountValid = !isNaN(parsedAmount) && parsedAmount >= 0.0000001 && !exceedsDecimals;
   const isMemoIdValid =
     memoType !== "id" || (memo.trim() !== "" && /^\d+$/.test(memo.trim()));
+  const isMemoHashType = memoType === "hash" || memoType === "return";
+  const isMemoHashValid =
+    !isMemoHashType || (memo.trim() !== "" && MEMO_HASH_HEX_PATTERN.test(memo.trim()));
 
-  // Check 7-decimal precision limit
-  const decimalPlaces = amount.includes(".") ? amount.split(".")[1]?.length ?? 0 : 0;
-  const isDecimalPrecisionValid = decimalPlaces <= 7;
-
-  // Check if user has sufficient balance for the selected asset
+  // Get XLM balance from balances array
+  const xlmBalance = balances.find((b) => b.asset === "XLM")?.balance || "0";
+  const xlmBalanceNumber = parseFloat(xlmBalance);
   const selectedAssetBalance = assetOptions.find((b) => b.asset === selectedAsset);
-  const insufficientBalance =
-    selectedAssetBalance && parsedAmount > parseFloat(selectedAssetBalance.balance);
+
+  // The network fee is always paid in XLM regardless of which asset is being
+  // sent, so a payment in XLM must leave room for both the amount and the
+  // fee, while a payment in another asset only needs the fee reserved out of
+  // the separate XLM balance.
+  const isSendingXlm = selectedAsset === "XLM";
+  const spendableXlm = xlmBalanceNumber - estimatedFeeXlm;
+  const hasSufficientBalance =
+    !isNaN(parsedAmount) &&
+    (isSendingXlm
+      ? parsedAmount <= spendableXlm
+      : parsedAmount <= (selectedAssetBalance ? parseFloat(selectedAssetBalance.balance) : 0));
+  const exceedsSpendableBalance =
+    isSendingXlm && !isNaN(parsedAmount) && parsedAmount > 0 && parsedAmount > spendableXlm;
 
   const canSubmit =
     isConnected &&
     isDestValid &&
     amount.trim() !== "" &&
     isAmountValid &&
+    hasSufficientBalance &&
     isMemoIdValid &&
-    isDecimalPrecisionValid &&
-    !insufficientBalance;
+    isMemoHashValid;
 
   /** The actual submission — only ever called from the confirm modal. */
   async function submitTransaction() {
-    if (state === "loading") return;
-    if (!address) {
+    if (state === "loading" || isSubmittingRef.current) return;
+    if (!address || !client) {
       setError("Wallet not connected");
       setState("error");
       return;
     }
+    isSubmittingRef.current = true;
 
     // Cancel previous requests
     abortControllerRef.current?.abort();
@@ -137,20 +187,22 @@ export function TransactionPanel({
     setError(null);
     setResult(null);
     try {
-      const { data, error: err } = await getClient().transaction.submit({
+      const { data, error: err } = await client.transaction.submit({
         source: address,
         destination: dest.trim(),
         amount: amount.trim(),
         asset: selectedAsset,
+        assetIssuer: selectedAssetBalance?.assetIssuer,
         memoType,
         memo:
           memoType !== "none" && memo.trim() !== "" ? memo.trim() : undefined,
       });
       if (signal.aborted) return;
       if (err) {
-        setError(err);
+        const message = friendlyError(err);
+        setError(message);
         setState("error");
-        onError?.(err);
+        onError?.(message);
         return;
       }
       setResult(data);
@@ -164,24 +216,25 @@ export function TransactionPanel({
     } catch (e) {
       if (!signal.aborted) {
         const msg = e instanceof Error ? e.message : "Unknown error";
-        setError(msg);
+        const message = friendlyError(msg);
+        setError(message);
         setState("error");
-        onError?.(msg);
+        onError?.(message);
       }
     } finally {
       setPreview(null);
+      isSubmittingRef.current = false;
     }
   }
 
   /** Builds a preview of the transaction and opens the confirmation modal. */
-  async function handleReview(e?: React.FormEvent) {
-    if (e) e.preventDefault();
-    if (state === "loading") return;
-    if (!address || !canSubmit) return;
-
+  async function buildPreview() {
+    const sourceAddress = address;
+    if (!sourceAddress || isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
     setIsBuildingPreview(true);
     try {
-      const { data: feeData } = await getClient().transaction.estimateFee();
+      const { data: feeData } = client ? await client.transaction.estimateFee() : { data: null };
       const memoSuffix =
         memoType !== "none" && memo.trim() !== "" ? ` — memo: "${memo.trim()}"` : "";
       setPreview({
@@ -196,27 +249,36 @@ export function TransactionPanel({
           baseFeeStroops: feeData?.baseFee ?? "100",
           totalStroops: feeData?.recommended ?? feeData?.baseFee ?? "100",
         },
-        sourceAccount: address,
+        sourceAccount: sourceAddress,
         sequenceNumber: account?.sequence,
       });
     } finally {
       setIsBuildingPreview(false);
+      isSubmittingRef.current = false;
     }
   }
 
-  const handleSendClick = () => {
-    if (state === "loading" || !address || !canSubmit) return;
+  /** Form submit handler — fires on Send button click and Enter key press. */
+  function handleFormSubmit(e: React.SyntheticEvent) {
+    e.preventDefault();
+    if (state === "loading" || !address || !canSubmit || isSubmittingRef.current)
+      return;
     if (previewMode) {
-      void handleReview();
+      void buildPreview();
     } else {
       void submitTransaction();
     }
-  };
+  }
 
   const explorerUrl = result ? explorerTxUrl(network, result.hash) : null;
 
   return (
-    <div className="rounded-xl border border-line bg-surface overflow-hidden">
+    <div
+      className={cn(
+        "rounded-xl border border-line bg-surface overflow-hidden",
+        className,
+      )}
+    >
       <div className="px-5 py-4 border-b border-line">
         <h3 className="text-[14px] font-semibold text-ink">Send Payment</h3>
         <p className="text-[12px] text-ink-3 mt-0.5">
@@ -262,9 +324,10 @@ export function TransactionPanel({
                   href={explorerUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  aria-label={`View transaction ${result.hash} on Stellar Expert (opens in a new tab)`}
                   className="break-all leading-relaxed text-brand hover:underline inline-flex items-start gap-1.5"
                 >
-                  <span>{result.hash}</span>
+                  <span aria-hidden="true">{result.hash}</span>
                   <ExternalLinkIcon className="mt-[3px] shrink-0 opacity-70" />
                 </a>
               ) : (
@@ -281,6 +344,7 @@ export function TransactionPanel({
                     href={explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    aria-label={`View on Stellar Expert: transaction ${result.hash} (opens in a new tab)`}
                     className="text-[11px] text-brand hover:underline"
                   >
                     View on Stellar Expert
@@ -309,7 +373,16 @@ export function TransactionPanel({
             </div>
           </div>
         ) : (
-          <form onSubmit={handleReview} className="flex flex-col gap-5">
+          <form
+            id={formId}
+            onSubmit={handleFormSubmit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+                handleFormSubmit(e);
+              }
+            }}
+            className="flex flex-col gap-5"
+          >
             <Input
               label="Destination Address"
               placeholder="G..."
@@ -321,7 +394,9 @@ export function TransactionPanel({
               error={
                 destDirty
                   ? !isDestValid
-                    ? "Invalid Stellar address"
+                    ? !dest.trim().startsWith("G")
+                      ? "Stellar address must start with 'G'"
+                      : "Stellar address must be 56 characters"
                     : isSelfPayment
                       ? "Destination is the same as your wallet address"
                       : undefined
@@ -333,12 +408,10 @@ export function TransactionPanel({
               label="Asset"
               value={selectedAsset}
               onChange={(e) => setAsset(e.target.value)}
-              disabled={state === "loading" || isLoadingAccount}
+              disabled={state === "loading" || isLoadingAccount || assetOptions.length === 0}
             >
-              {isLoadingAccount ? (
+              {isLoadingAccount || assetOptions.length === 0 ? (
                 <option value="">Loading assets…</option>
-              ) : assetOptions.length === 0 ? (
-                <option value="XLM">XLM</option>
               ) : (
                 assetOptions.map((b) => (
                   <option key={b.asset} value={b.asset}>
@@ -352,13 +425,25 @@ export function TransactionPanel({
               type="number"
               placeholder="0.00"
               min="0.0000001"
+              max={xlmBalanceNumber || undefined}
               step="0.0000001"
               value={amount}
               onChange={(e) => {
+                // Keep exactly what the user typed: truncating here would make
+                // `exceedsDecimals` unreachable, so an 8th decimal would be silently
+                // dropped instead of surfacing the error below.
                 setAmount(e.target.value);
                 setAmountDirty(true);
               }}
+              hint={
+                selectedAssetBalance
+                  ? `Balance: ${selectedAssetBalance.balance} ${selectedAsset}`
+                  : undefined
+              }
               error={
+                // A sub-minimum amount can only be written with more decimal
+                // places than the asset allows, so the minimum check is reported
+                // first: it is the constraint the user has to act on.
                 amountDirty
                   ? amount.trim() === ""
                     ? "Amount is required"
@@ -366,22 +451,27 @@ export function TransactionPanel({
                       ? "Amount must be greater than 0"
                       : parsedAmount < 0.0000001
                         ? "Minimum amount is 0.0000001 XLM"
-                        : !isDecimalPrecisionValid
-                          ? "Maximum 7 decimal places allowed"
-                          : insufficientBalance
-                            ? `Insufficient balance. Maximum: ${selectedAssetBalance?.balance ?? "0"}`
+                        : exceedsDecimals
+                          ? `Amount cannot exceed ${decimals} decimal places`
+                          : !hasSufficientBalance
+                            ? isSendingXlm && estimatedFeeXlm > 0
+                              ? "Insufficient balance (amount + network fee exceeds available balance)"
+                              : "Insufficient balance"
                             : undefined
                   : undefined
               }
               disabled={state === "loading"}
             />
+            {amountDirty && exceedsSpendableBalance && (
+              <Badge variant="error" dot live data-testid="balance-warning-badge">
+                Exceeds spendable balance (amount + est. fee of {estimatedFeeXlm.toFixed(7)}{" "}
+                XLM)
+              </Badge>
+            )}
             <Select
-              label="Memo Type"
+              label="Memo type"
               value={memoType}
-              onChange={(e) => {
-                setMemoType(e.target.value as MemoType);
-                setMemo("");
-              }}
+              onChange={(e) => setMemoType(e.target.value as MemoType)}
               disabled={state === "loading"}
             >
               {MEMO_TYPES.map((m) => (
@@ -393,27 +483,54 @@ export function TransactionPanel({
             {memoType !== "none" && (
               <div className="flex flex-col gap-1.5">
                 <Input
-                  label={memoType === "id" ? "Memo ID" : "Memo (optional)"}
-                  placeholder={memoType === "id" ? "1234567890" : "Text memo"}
+                  label={
+                    memoType === "id"
+                      ? "Memo ID"
+                      : memoType === "hash"
+                        ? "Memo hash"
+                        : memoType === "return"
+                          ? "Memo return"
+                          : "Memo (optional)"
+                  }
+                  placeholder={
+                    memoType === "id"
+                      ? "1234567890"
+                      : isMemoHashType
+                        ? "64-character hex string"
+                        : "Text memo"
+                  }
                   inputMode={memoType === "id" ? "numeric" : undefined}
                   value={memo}
-                  onChange={(e) => setMemo(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    // MEMO_TEXT is a 28-byte (UTF-8) limit, not 28 characters —
+                    // truncate on every keystroke so the value can never exceed
+                    // what Horizon will accept, rather than only warning about it.
+                    setMemo(
+                      memoType === "text"
+                        ? truncateToUtf8ByteLength(next, MEMO_TEXT_MAX_BYTES)
+                        : next,
+                    );
+                  }}
                   error={
                     memoType === "id" && memo.trim() !== "" && !isMemoIdValid
                       ? "Memo ID must be an unsigned integer"
-                      : undefined
+                      : isMemoHashType && memo.trim() !== "" && !isMemoHashValid
+                        ? `Memo must be a ${MEMO_HASH_HEX_LENGTH}-character hex string`
+                        : undefined
                   }
                   disabled={state === "loading"}
                 />
                 {memoType === "text" && (
                   <span
-                    className={`text-[10px] text-right ${memo.length >= 28 ? "text-red" : "text-ink-3"}`}
+                    className={`text-[10px] text-right ${utf8ByteLength(memo) >= MEMO_TEXT_MAX_BYTES ? "text-red" : "text-ink-3"}`}
                   >
-                    {memo.length}/28
+                    {utf8ByteLength(memo)}/{MEMO_TEXT_MAX_BYTES} bytes
                   </span>
                 )}
               </div>
             )}
+
           </form>
         )}
       </div>
@@ -435,10 +552,12 @@ export function TransactionPanel({
           </Button>
         ) : (
           <Button
+            type="submit"
+            form={formId}
             size="md"
             loading={state === "loading" || isBuildingPreview}
             disabled={!canSubmit}
-            onClick={handleSendClick}
+            data-testid="submit-transaction"
           >
             {state === "loading"
               ? "Submitting…"
@@ -514,4 +633,15 @@ function ExternalLinkIcon({ className }: { className?: string }) {
       <path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
     </svg>
   );
+}
+
+function explorerTxUrl(network: NetworkInfo | null, hash: string): string | null {
+  if (!network) return null;
+  const isTestnet =
+    network.name === "testnet" ||
+    (network.passphrase?.toLowerCase().includes("testnet") ?? false);
+  const prefix = isTestnet
+    ? "https://testnet.stellar.expert/explorer/public/tx/"
+    : "https://stellar.expert/explorer/public/tx/";
+  return `${prefix}${hash}`;
 }

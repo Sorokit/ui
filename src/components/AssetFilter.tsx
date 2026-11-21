@@ -66,7 +66,7 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 // ────────────────────────────────────────────────────────────────────────────
 
 function getAssetCode(asset: AssetItem): string {
-  if (asset.assetType === "native") return "XLM";
+  if (asset.assetType === "native" && !asset.assetCode && !asset.asset) return "XLM";
   return asset.assetCode ?? asset.asset;
 }
 
@@ -76,7 +76,14 @@ function getAssetKey(asset: AssetItem): string {
 }
 
 function getAssetName(asset: AssetItem): string {
-  if (asset.assetType === "native") return "Stellar Lumens";
+  if (
+    asset.assetType === "native" &&
+    (!asset.assetCode || asset.assetCode === "XLM") &&
+    (!asset.asset || asset.asset === "XLM") &&
+    !asset.displayName
+  ) {
+    return "Stellar Lumens";
+  }
   return asset.displayName ?? asset.assetCode ?? asset.asset;
 }
 
@@ -173,7 +180,7 @@ interface DefaultAssetRowProps {
   asset: AssetItem;
   isFavorite: boolean;
   onFavoriteToggle: (asset: AssetItem) => void;
-  onSelect: (asset: AssetItem) => void;
+  onSelect?: (asset: AssetItem) => void;
   isFocused: boolean;
 }
 
@@ -190,13 +197,20 @@ function DefaultAssetRow({
   const shortCode = code.slice(0, 2).toUpperCase();
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       className={cn(
-        "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors",
+        "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors cursor-pointer",
         isFocused ? "bg-surface-2" : "hover:bg-surface-2",
       )}
-      onClick={() => onSelect(asset)}
+      onClick={() => onSelect?.(asset)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(asset);
+        }
+      }}
       data-asset-row={getAssetKey(asset)}
     >
       <button
@@ -250,7 +264,7 @@ function DefaultAssetRow({
           </span>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -315,6 +329,8 @@ interface AssetFilterProps {
   showNetworkFilter?: boolean;
   allowCustomAssets?: boolean;
   renderRow?: (asset: AssetItem, isFavorite: boolean) => ReactNode;
+  /** Called whenever a filter changes (or is cleared) so the parent can reset its page index. */
+  onPageReset?: () => void;
 }
 
 function AssetFilter({
@@ -325,6 +341,7 @@ function AssetFilter({
   className,
   countLabel,
   renderRow,
+  onPageReset,
 }: AssetFilterProps) {
   // ── State ──────────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -340,6 +357,24 @@ function AssetFilter({
   const [addingCustom, setAddingCustom] = useState(false);
   const [customCode, setCustomCode] = useState("");
   const [customIssuer, setCustomIssuer] = useState("");
+
+  // Issue #664: clearing or changing filters must reset the parent's page index.
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    verifiedFilter !== "all" ||
+    networkFilter !== null ||
+    showFavoritesOnly ||
+    sortKey !== "default";
+
+  const clearFilters = useCallback(() => {
+    setSearch("");
+    setVerifiedFilter("all");
+    setNetworkFilter(null);
+    setShowFavoritesOnly(false);
+    setSortKey("default");
+    setFocusedIndex(0);
+    onPageReset?.();
+  }, [onPageReset]);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const inputRef = useRef<HTMLInputElement>(null);
@@ -450,7 +485,7 @@ function AssetFilter({
       asset: code,
       assetCode: code,
       assetIssuer: issuer,
-      assetType: issuer ? "credit_alphanum4" : "native",
+      assetType: code === "XLM" && !issuer ? "native" : "credit_alphanum4",
       balance: "0",
       isVerified: false,
     };
@@ -462,6 +497,12 @@ function AssetFilter({
     setAddingCustom(false);
   }, [customCode, customIssuer, customAssets]);
 
+  // ── Derived focused index clamped to filtered list ─────────────────────────
+  const effectiveFocusedIndex =
+    filtered.length === 0
+      ? -1
+      : Math.max(-1, Math.min(focusedIndex, filtered.length - 1));
+
   // ── Keyboard navigation ────────────────────────────────────────────────────
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -471,7 +512,7 @@ function AssetFilter({
         if (!listRef.current) return;
         const rows = listRef.current.querySelectorAll("[data-asset-row]");
         const row = rows[index] as HTMLElement | undefined;
-        if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (row) row.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
       };
 
       const clamp = (i: number) => Math.max(0, Math.min(i, filtered.length - 1));
@@ -479,13 +520,21 @@ function AssetFilter({
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setFocusedIndex(clamp(focusedIndex + 1));
-          scrollIntoView(clamp(focusedIndex + 1));
+          setFocusedIndex((prev) => {
+            const current = effectiveFocusedIndex >= 0 ? effectiveFocusedIndex : prev;
+            const next = clamp(current + 1);
+            scrollIntoView(next);
+            return next;
+          });
           break;
         case "ArrowUp":
           e.preventDefault();
-          setFocusedIndex(clamp(focusedIndex - 1));
-          scrollIntoView(clamp(focusedIndex - 1));
+          setFocusedIndex((prev) => {
+            const current = effectiveFocusedIndex >= 0 ? effectiveFocusedIndex : prev;
+            const next = clamp(current - 1);
+            scrollIntoView(next);
+            return next;
+          });
           break;
         case "Home":
           e.preventDefault();
@@ -498,17 +547,65 @@ function AssetFilter({
           scrollIntoView(filtered.length - 1);
           break;
         case "Enter":
-          e.preventDefault();
-          if (filtered[focusedIndex]) {
-            onSelect(filtered[focusedIndex]);
+          if (effectiveFocusedIndex >= 0 && effectiveFocusedIndex < filtered.length) {
+            e.preventDefault();
+            onSelect?.(filtered[effectiveFocusedIndex]);
           }
-          return;
-        default:
-          return;
+          break;
+        case "Escape":
+          setSearch("");
+          setShowSortDropdown(false);
+          setFocusedIndex(-1);
+          break;
       }
     },
-    [filtered, focusedIndex, onSelect],
+    [filtered, effectiveFocusedIndex, onSelect],
   );
+
+  // Issue #664: move focus into the sort popover and trap Tab / Escape inside it.
+  useEffect(() => {
+    if (!showSortDropdown) return;
+    sortDropdownRef.current?.querySelector<HTMLElement>("button")?.focus();
+  }, [showSortDropdown]);
+
+  const handleDropdownKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setShowSortDropdown(false);
+      sortBtnRef.current?.focus();
+      return;
+    }
+    if (e.key !== "Tab") return;
+    const nodes = sortDropdownRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!nodes || nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        sortDropdownRef.current &&
+        !sortDropdownRef.current.contains(e.target as Node) &&
+        sortBtnRef.current &&
+        !sortBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowSortDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // ── Extract unique networks ────────────────────────────────────────────────
   const extractedNetworks = useMemo<string[]>(() => {
@@ -518,28 +615,6 @@ function AssetFilter({
     });
     return [...nets];
   }, [assets]);
-
-  // ── Click-outside for sort dropdown ────────────────────────────────────────
-  useEffect(() => {
-    if (!showSortDropdown) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        sortBtnRef.current &&
-        !sortBtnRef.current.contains(e.target as Node) &&
-        sortDropdownRef.current &&
-        !sortDropdownRef.current.contains(e.target as Node)
-      ) {
-        setShowSortDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showSortDropdown]);
-
-  // ── Reset focused index when filtered list changes ─────────────────────────
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setFocusedIndex(0); }, [filtered]);
-
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -555,7 +630,11 @@ function AssetFilter({
           ref={inputRef}
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setFocusedIndex(0);
+            onPageReset?.();
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Search assets…"
           className="w-full rounded-lg border border-line bg-surface-2 h-9 pl-9 pr-9 text-[13px] text-ink placeholder:text-ink-4 outline-none transition-colors focus:border-line-2 focus:ring-1 focus:ring-brand-dim"
@@ -563,10 +642,14 @@ function AssetFilter({
         {search && (
           <button
             type="button"
-            onClick={() => setSearch("")}
-            className="absolute right-6 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
+            onClick={() => {
+              setSearch("");
+              setFocusedIndex(0);
+            }}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
+            aria-label="Clear search"
           >
-            <HugeiconsIcon icon={Cancel01Icon} size={16} />
+            <HugeiconsIcon icon={Cancel01Icon} size={14} />
           </button>
         )}
       </div>
@@ -577,7 +660,11 @@ function AssetFilter({
           <button
             key={tab.key}
             type="button"
-            onClick={() => setVerifiedFilter(tab.key)}
+            onClick={() => {
+              setVerifiedFilter(tab.key);
+              setFocusedIndex(0);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
               verifiedFilter === tab.key
@@ -591,7 +678,11 @@ function AssetFilter({
         <div className="ml-auto flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setShowFavoritesOnly((p) => !p)}
+            onClick={() => {
+              setShowFavoritesOnly((p) => !p);
+              setFocusedIndex(0);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full p-1.5 transition-colors",
               showFavoritesOnly
@@ -605,6 +696,15 @@ function AssetFilter({
               size={14}
             />
           </button>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="rounded-full px-2.5 py-1 text-[11px] font-medium text-ink-4 hover:text-ink-2 transition-colors"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 
@@ -614,7 +714,11 @@ function AssetFilter({
         <div className="flex flex-wrap gap-1.5 px-4 pb-2">
           <button
             type="button"
-            onClick={() => setNetworkFilter(null)}
+            onClick={() => {
+              setNetworkFilter(null);
+              setFocusedIndex(0);
+              onPageReset?.();
+            }}
             className={cn(
               "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
               !networkFilter
@@ -628,7 +732,11 @@ function AssetFilter({
             <button
               key={net}
               type="button"
-              onClick={() => setNetworkFilter(net)}
+              onClick={() => {
+                setNetworkFilter(net);
+                setFocusedIndex(0);
+                onPageReset?.();
+              }}
               className={cn(
                 "rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors",
                 networkFilter === net
@@ -636,7 +744,7 @@ function AssetFilter({
                   : "bg-surface-3 text-ink-4 hover:text-ink-2",
               )}
             >
-              {net}
+              {net.charAt(0).toUpperCase() + net.slice(1)}
             </button>
           ))}
         </div>
@@ -656,12 +764,13 @@ function AssetFilter({
             onClick={() => setShowSortDropdown((p) => !p)}
             className="flex items-center gap-1 text-[12px] text-ink-4 hover:text-ink-2"
           >
-            {SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? "Sort"}
+            Sort: {SORT_OPTIONS.find((o) => o.key === sortKey)?.label ?? "Default"}
             <HugeiconsIcon icon={ArrowDown01Icon} className="h-3.5 w-3.5" />
           </button>
           {showSortDropdown && (
             <div
               ref={sortDropdownRef}
+              onKeyDown={handleDropdownKeyDown}
               className="absolute right-0 top-full z-10 mt-1 w-36 rounded-lg border border-line bg-surface shadow-lg"
             >
               {SORT_OPTIONS.map((opt) => (
@@ -671,6 +780,8 @@ function AssetFilter({
                   onClick={() => {
                     setSortKey(opt.key);
                     setShowSortDropdown(false);
+                    setFocusedIndex(0);
+                    onPageReset?.();
                   }}
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] transition-colors hover:bg-surface-2",
@@ -703,7 +814,10 @@ function AssetFilter({
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch("")}
+                onClick={() => {
+                  setSearch("");
+                  setFocusedIndex(0);
+                }}
                 className="mt-1 text-[12px] text-ink-4 underline hover:text-ink-2"
               >
                 Clear search
@@ -721,7 +835,7 @@ function AssetFilter({
                 isFavorite={isFav(asset)}
                 onFavoriteToggle={toggleFavorite}
                 onSelect={onSelect}
-                isFocused={index === focusedIndex}
+                isFocused={index === effectiveFocusedIndex}
               />
             ),
           )
@@ -790,5 +904,4 @@ function AssetFilter({
 }
 
 export { AssetFilter };
-export type { AssetItem, AssetMeta, SortKey, VerifiedFilter };
 

@@ -1,31 +1,26 @@
 import {
-  ArrowDown01Icon,
-  ArrowUp01Icon,
   CancelCircleIcon,
   CheckmarkCircle01Icon,
   CircleDotIcon,
+  CircleXIcon,
   ClockIcon,
   CloudDownloadIcon,
   DownloadIcon,
   FileSpreadsheetIcon,
   HashIcon,
-  LoaderIcon,
+  Loading01Icon,
   PauseIcon,
   PlayIcon,
-  RefreshCwIcon,
-  RotateCwIcon,
-  SettingsIcon,
   UploadIcon,
-  XCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
-import { type BatchEntry, BatchEntryResult, BatchProgress,BatchResult, getClient } from "@/lib/client";
+import { type BatchEntry, type BatchEntryResult, type BatchProgress } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const STATUS_BADGE: Record<BatchEntryResult["status"], { variant: "default" | "warning" | "primary" | "success" | "error"; label: string }> = {
@@ -40,18 +35,54 @@ const VALID_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 const VALID_AMOUNT_RE = /^\d+(\.\d+)?$/;
 const MAX_RETRY_OPTIONS = [1, 2, 3, 4, 5];
 
-function parseCSV(text: string): BatchEntry[] {
+function tokenizeCSVLine(line: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (i === line.length) {
+      // Only push a trailing empty token when the line genuinely ends with a comma
+      if (i > 0 && line[i - 1] === ",") tokens.push("");
+      break;
+    }
+    if (line[i] === '"') {
+      i++;
+      let field = "";
+      while (i < line.length) {
+        if (line[i] === '"' && line[i + 1] === '"') { field += '"'; i += 2; }
+        else if (line[i] === '"') { i++; break; }
+        else { field += line[i++]; }
+      }
+      tokens.push(field);
+      if (i < line.length && line[i] === ",") i++;
+    } else {
+      const start = i;
+      while (i < line.length && line[i] !== ",") i++;
+      tokens.push(line.slice(start, i).trim());
+      if (i < line.length) i++;
+    }
+  }
+  return tokens;
+}
+
+export function parseCSV(text: string): BatchEntry[] {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2) return [];
-  const header = lines[0].split(",").map((h) => h.trim().toLowerCase());
+  const header = tokenizeCSVLine(lines[0]).map((h) => h.toLowerCase());
   const addrIdx = header.indexOf("address");
   const amtIdx = header.indexOf("amount");
   if (addrIdx === -1 || amtIdx === -1) return [];
+  const assetIdx = header.indexOf("asset");
+  const memoIdx = header.indexOf("memo");
   return lines
     .slice(1)
     .map((line) => {
-      const cols = line.split(",");
-      return { address: (cols[addrIdx] ?? "").trim(), amount: (cols[amtIdx] ?? "").trim(), asset: "", memo: "" };
+      const cols = tokenizeCSVLine(line);
+      return {
+        address: cols[addrIdx] ?? "",
+        amount: cols[amtIdx] ?? "",
+        asset: assetIdx !== -1 ? (cols[assetIdx] ?? "") : "",
+        memo: memoIdx !== -1 ? (cols[memoIdx] ?? "") : "",
+      };
     })
     .filter((e) => e.address && e.amount);
 }
@@ -74,7 +105,7 @@ function parseJSON(text: string): BatchEntry[] {
   }
 }
 
-function validateEntries(entries: BatchEntry[]): string[] {
+export function validateEntries(entries: BatchEntry[]): string[] {
   const errors: string[] = [];
   entries.forEach((entry, i) => {
     if (!VALID_ADDRESS_RE.test(entry.address)) {
@@ -82,6 +113,10 @@ function validateEntries(entries: BatchEntry[]): string[] {
     }
     if (!VALID_AMOUNT_RE.test(entry.amount) || parseFloat(entry.amount) <= 0) {
       errors.push(`Row ${i + 2}: Invalid amount "${entry.amount}"`);
+    }
+    // Issue #862: enforce Stellar MEMO_TEXT limit of 28 UTF-8 bytes (not char length)
+    if (entry.memo && new TextEncoder().encode(entry.memo).length > 28) {
+      errors.push(`Row ${i + 2}: memo exceeds 28 bytes (Stellar MEMO_TEXT limit)`);
     }
   });
   const seen = new Set<string>();
@@ -92,6 +127,29 @@ function validateEntries(entries: BatchEntry[]): string[] {
     seen.add(entry.address);
   });
   return errors;
+}
+
+const STROOPS_PER_UNIT = BigInt(10_000_000);
+
+/** Sum Stellar amounts exactly using BigInt stroop arithmetic to avoid IEEE-754 drift. */
+export function sumAmountsStroops(amounts: string[]): string {
+  let total = BigInt(0);
+  for (const amt of amounts) {
+    const dot = amt.indexOf(".");
+    const whole = dot === -1 ? amt : amt.slice(0, dot);
+    const frac = dot === -1 ? "" : amt.slice(dot + 1);
+    const fracPadded = frac.padEnd(7, "0").slice(0, 7);
+    total += BigInt(whole || "0") * STROOPS_PER_UNIT + BigInt(fracPadded || "0");
+  }
+  const units = total / STROOPS_PER_UNIT;
+  const rem = total % STROOPS_PER_UNIT;
+  if (rem === BigInt(0)) return String(units);
+  return `${units}.${String(rem).padStart(7, "0").replace(/0+$/, "")}`;
+}
+
+function escapeCSVField(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
 }
 
 function generateCSVTemplate(): string {
@@ -112,7 +170,7 @@ interface BatchPaymentProcessorProps {
 }
 
 export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: BatchPaymentProcessorProps) {
-  const { isConnected, address } = useSorokit();
+  const { isConnected, address, client } = useSorokit();
   const [fileEntries, setFileEntries] = useState<BatchEntry[] | null>(null);
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string>("");
@@ -126,8 +184,6 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   const [reportFormat, setReportFormat] = useState<"csv" | "json">("csv");
   const [currentView, setCurrentView] = useState<"upload" | "results" | "progress">("upload");
   const pollRef = useRef<number | null>(null);
-
-  const csvTemplateBlob = useMemo(() => new Blob([generateCSVTemplate()], { type: "text/csv" }), []);
 
   const clearState = useCallback(() => {
     setFileEntries(null);
@@ -146,7 +202,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   }, []);
 
   const handleFileUpload = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
 
@@ -155,9 +211,20 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
       setBatchId(null);
       setProgress(null);
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
+      const readFileText = async (f: File): Promise<string> => {
+        if (typeof f.text === "function") {
+          return f.text();
+        }
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || "");
+          reader.onerror = reject;
+          reader.readAsText(f);
+        });
+      };
+
+      try {
+        const text = await readFileText(file);
         let entries: BatchEntry[];
         if (file.name.endsWith(".json")) {
           entries = parseJSON(text);
@@ -174,12 +241,10 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
         setFileEntries(entries);
         const errors = validateEntries(entries);
         setFileErrors(errors);
-
-        if (errors.length === 0 && entries.length > 0) {
-          setCurrentView("progress");
-        }
-      };
-      reader.readAsText(file);
+      } catch {
+        setFileEntries(null);
+        setFileErrors(["No valid entries found in file. Check format."]);
+      }
       event.target.value = "";
     },
     [],
@@ -192,7 +257,9 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
       if (!file) return;
       const input = document.createElement("input");
       input.type = "file";
-      input.files = [file];
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
       handleFileUpload({ target: input } as unknown as React.ChangeEvent<HTMLInputElement>);
     },
     [handleFileUpload],
@@ -203,11 +270,12 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   }, []);
 
   const downloadCSVReport = useCallback(
-    (reportEntries: BatchEntryResult[], totalFee: string) => {
+    (reportEntries: BatchEntryResult[], _totalFee: string) => {
       const header = "address,amount,status,txHash,error,retryCount";
-      const rows = reportEntries.map(
-        (r) =>
-          `${r.address},${r.amount},${r.status},${r.txHash ?? ""},${r.error ?? ""},${r.retryCount}`,
+      const rows = reportEntries.map((r) =>
+        [r.address, r.amount, r.status, r.txHash ?? "", r.error ?? "", String(r.retryCount)]
+          .map(escapeCSVField)
+          .join(","),
       );
       const csv = [header, ...rows].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
@@ -249,7 +317,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
     [batchId],
   );
 
-  const handleDownloadReport = useCallback(() => {
+  const handleExportReport = useCallback(() => {
     if (!results) return;
     const totalFee = feeEstimate ?? "0";
     if (reportFormat === "csv") {
@@ -260,13 +328,13 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   }, [results, feeEstimate, reportFormat, downloadCSVReport, downloadJSONReport]);
 
   const handleStartBatch = useCallback(async () => {
-    if (!fileEntries || fileEntries.length === 0 || !address) return;
+    if (!fileEntries || fileEntries.length === 0 || !address || !client) return;
 
     setIsProcessing(true);
     setCurrentView("progress");
 
     try {
-      const { data, error, batchId: bid } = await getClient().batch.submitBatch({
+      const { error, batchId: bid } = await client.batch.submitBatch({
         entries: fileEntries,
         sourceAccount: address,
         asset: defaultAsset,
@@ -280,6 +348,15 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
       }
 
       setBatchId(bid);
+      setProgress({
+        batchId: bid,
+        total: fileEntries.length,
+        completed: 0,
+        failed: 0,
+        status: "processing",
+        percentage: 0,
+      });
+
       setResults(
         fileEntries.map((e) => ({
           address: e.address,
@@ -289,16 +366,17 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
         })),
       );
 
-      const { data: feeData, error: feeErr } = await getClient().transaction.estimateFee();
-      if (!feeErr && feeData) {
-        setFeeEstimate(feeData.recommended);
+      if (client.transaction?.estimateFee) {
+        const { data: feeData, error: feeErr } = await client.transaction.estimateFee();
+        if (!feeErr && feeData) {
+          setFeeEstimate(feeData.recommended);
+        }
       }
     } catch (err: unknown) {
       setFileErrors([err instanceof Error ? err.message : "Batch submission failed"]);
-    } finally {
       setIsProcessing(false);
     }
-  }, [fileEntries, address, defaultAsset, maxRetries]);
+  }, [fileEntries, address, client, defaultAsset, maxRetries]);
 
   const handlePause = useCallback(() => {
     setIsPaused(true);
@@ -313,21 +391,21 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   }, []);
 
   const handleCancel = useCallback(async () => {
-    if (!batchId) return;
+    if (!batchId || !client) return;
+    await client.batch.cancelBatch(batchId);
     if (pollRef.current) {
       window.clearInterval(pollRef.current);
       pollRef.current = null;
     }
     setIsProcessing(false);
     setIsPaused(false);
-    await getClient().batch.cancelBatch(batchId);
-    clearState();
-  }, [batchId, clearState]);
+    setCurrentView("results");
+  }, [batchId, client]);
 
   const handleRetry = useCallback(async (index: number) => {
-    if (!batchId || !results) return;
+    if (!batchId || !results || !client) return;
     try {
-      const { data, error } = await getClient().batch.retryEntry({ batchId, entryIndex: index });
+      const { data, error } = await client.batch.retryEntry({ batchId, entryIndex: index });
       if (error) return;
       if (data) {
         const updated = [...results];
@@ -337,20 +415,27 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
     } catch {
       /* ignore */
     }
-  }, [batchId, results]);
+  }, [batchId, results, client]);
 
   const pollProgress = useCallback(async () => {
-    if (!batchId || isPaused) return;
+    if (!batchId || isPaused || !client) return;
     try {
-      const { data, error } = await getClient().batch.getBatchStatus(batchId);
+      const { data, error } = await client.batch.getBatchStatus(batchId);
       if (error || !data) return;
       setProgress(data);
+
+      if (
+        data.status === "completed" ||
+        data.status === "failed" ||
+        (data.total > 0 && data.completed + (data.failed ?? 0) >= data.total)
+      ) {
+        setIsProcessing(false);
+      }
 
       setResults((prev) => {
         if (!prev) return prev;
         const updated = [...prev];
         let changed = false;
-        data.completed;
         const completedCount = data.completed;
         for (let i = 0; i < updated.length; i++) {
           if (i < completedCount && updated[i].status === "queued") {
@@ -366,7 +451,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
     } catch {
       /* ignore network errors during polling */
     }
-  }, [batchId, isPaused]);
+  }, [batchId, isPaused, client]);
 
   useEffect(() => {
     if (batchId && isProcessing) {
@@ -385,15 +470,6 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   const totalEntries = results?.length ?? fileEntries?.length ?? 0;
   const percentage = progress?.percentage ?? (totalEntries > 0 ? Math.round((successfulCount / totalEntries) * 100) : 0);
   const etaSeconds = progress?.etaSeconds ?? 0;
-
-  const statusCounts = useMemo(() => {
-    if (!results) return null;
-    const counts: Record<string, number> = {};
-    results.forEach((r) => {
-      counts[r.status] = (counts[r.status] ?? 0) + 1;
-    });
-    return counts;
-  }, [results]);
 
   const hasFile = fileEntries !== null;
   const isValid = hasFile && fileErrors.length === 0;
@@ -418,7 +494,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             onClick={() => document.getElementById("batch-file-input")?.click()}
             className="border-2 border-dashed border-line rounded-xl p-8 flex flex-col items-center gap-3 text-center cursor-pointer hover:border-brand hover:bg-brand-dim/30 transition-colors"
           >
-            <UploadIcon size={32} className="text-ink-3" strokeWidth={1.5} />
+            <HugeiconsIcon icon={UploadIcon} size={32} className="text-ink-3" strokeWidth={1.5} />
             <div>
               <p className="text-[13px] font-medium text-ink">Drop a CSV or JSON file here</p>
               <p className="text-[11px] text-ink-3 mt-1">or click to browse — supports .csv and .json</p>
@@ -431,7 +507,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
           <div className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <FileSpreadsheetIcon size={14} strokeWidth={1.5} />
+                <HugeiconsIcon icon={FileSpreadsheetIcon} size={14} strokeWidth={1.5} />
                 {fileName}
               </span>
               <Button variant="ghost" size="sm" onClick={clearState}>
@@ -440,6 +516,26 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             </div>
             {fileEntries && (
               <p className="text-[12px] text-ink-3">{fileEntries.length} entries found</p>
+            )}
+            {fileEntries && fileEntries.length > 0 && (
+              <div
+                className="flex flex-col gap-1 max-h-48 overflow-y-auto"
+                data-testid="batch-entry-list"
+              >
+                {fileEntries.map((e, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-surface-2 text-[12px]"
+                  >
+                    <span className="font-mono text-ink truncate">
+                      {truncateAddress(e.address, 8, 4)}
+                    </span>
+                    <span className="text-ink-3">
+                      {e.amount} {e.asset || defaultAsset}
+                    </span>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -476,8 +572,13 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             </div>
 
             <div className="flex gap-2">
-              <Button variant="primary" onClick={handleStartBatch} disabled={!isValid}>
-                Start Batch ({fileEntries!.length} payments)
+              <Button
+                variant="primary"
+                onClick={handleStartBatch}
+                disabled={!isValid}
+                aria-label="Process Batch"
+              >
+                Process Batch ({fileEntries!.length} payments)
               </Button>
               <Button
                 variant="secondary"
@@ -566,7 +667,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
 
             {batchId && (
               <div className="flex items-center gap-2 text-[11px] text-ink-3">
-                <HashIcon size={12} strokeWidth={1.5} />
+                <HugeiconsIcon icon={HashIcon} size={12} strokeWidth={1.5} />
                 Batch ID: {truncateAddress(batchId, 8, 6)}
               </div>
             )}
@@ -588,9 +689,9 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
                         entry.status === "confirmed"
                           ? CheckmarkCircle01Icon
                           : entry.status === "failed"
-                            ? XCircleIcon
+                            ? CircleXIcon
                             : entry.status === "signing"
-                              ? LoaderIcon
+                              ? Loading01Icon
                               : CircleDotIcon
                       }
                       size={12}
@@ -649,7 +750,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             )}
 
             <div className="flex items-center gap-3">
-              <Button variant="primary" size="sm" onClick={handleDownloadReport}>
+              <Button variant="primary" size="sm" onClick={handleExportReport}>
                 <HugeiconsIcon icon={DownloadIcon} size={12} color="currentColor" strokeWidth={1.5} />
                 Download Report
               </Button>

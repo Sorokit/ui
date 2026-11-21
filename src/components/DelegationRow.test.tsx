@@ -200,7 +200,7 @@ describe("DelegationRow — undelegate", () => {
     expect(screen.getByText("Undelegate XLM")).toBeInTheDocument();
   });
 
-  it("calls onAdjust with 'undelegate' type", async () => {
+  it("opens confirmation modal before undelegating and submits on confirm", async () => {
     const { onAdjust } = renderRow();
     fireEvent.click(
       screen.getByRole("button", { name: /undelegate from alpha staking/i }),
@@ -209,12 +209,45 @@ describe("DelegationRow — undelegate", () => {
     fireEvent.change(input, { target: { value: "100" } });
     await waitFor(() => expect(screen.getByRole("checkbox")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("checkbox"));
+
+    // Click confirm in the panel - opens the confirmation modal
+    fireEvent.click(
+      screen.getByRole("button", { name: /confirm undelegation/i }),
+    );
+
+    // Modal is now open
+    expect(screen.getByRole("heading", { name: "Confirm Undelegation" })).toBeInTheDocument();
+    expect(screen.getByText(/21 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/Estimated Network Fee/i)).toBeInTheDocument();
+    expect(onAdjust).not.toHaveBeenCalled();
+
+    // Confirm in the modal
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole("button", { name: /confirm undelegation/i }),
-      );
+      fireEvent.click(screen.getByTestId("modal-confirm-undelegate"));
     });
+
     expect(onAdjust).toHaveBeenCalledWith(VALIDATOR.id, "undelegate", "100");
+  });
+
+  it("does not call onAdjust when undelegation modal is cancelled", async () => {
+    const { onAdjust } = renderRow();
+    fireEvent.click(
+      screen.getByRole("button", { name: /undelegate from alpha staking/i }),
+    );
+    const input = screen.getByRole("spinbutton");
+    fireEvent.change(input, { target: { value: "100" } });
+    await waitFor(() => expect(screen.getByRole("checkbox")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    // Open modal
+    fireEvent.click(
+      screen.getByRole("button", { name: /confirm undelegation/i }),
+    );
+    expect(screen.getByRole("heading", { name: "Confirm Undelegation" })).toBeInTheDocument();
+
+    // Click Cancel in modal
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onAdjust).not.toHaveBeenCalled();
   });
 
   it("shows error when undelegating more than delegated", async () => {
@@ -228,6 +261,65 @@ describe("DelegationRow — undelegate", () => {
       expect(screen.getByText(/exceeds delegated amount/i)).toBeInTheDocument();
     });
   });
+
+  it("cleanly removes entries with zero balance", () => {
+    const { container } = render(
+      <DelegationRow
+        delegation={{ ...DELEGATION, amount: "0" }}
+        validator={VALIDATOR}
+        availableXlm={10000}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+// ─── Redelegate & keyboard navigation flow ───────────────────────────────────
+
+describe("DelegationRow — redelegate & keyboard navigation", () => {
+  it("opens redelegate panel and supports keyboard navigation in validator dropdown", async () => {
+    const { onAdjust } = renderRow();
+    fireEvent.click(
+      screen.getByRole("button", { name: /redelegate from alpha staking/i }),
+    );
+    expect(screen.getByText("Redelegate XLM to another validator")).toBeInTheDocument();
+
+    const combobox = screen.getByRole("combobox", { name: /select target validator/i });
+    expect(combobox).toBeInTheDocument();
+
+    // Open dropdown via ArrowDown key
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+    expect(combobox).toHaveAttribute("aria-expanded", "true");
+
+    const listbox = screen.getByRole("listbox", { name: /target validators/i });
+    expect(listbox).toBeInTheDocument();
+
+    // Navigate with ArrowDown
+    fireEvent.keyDown(combobox, { key: "ArrowDown" });
+
+    // Select using Enter key
+    fireEvent.keyDown(combobox, { key: "Enter" });
+    expect(combobox).toHaveAttribute("aria-expanded", "false");
+
+    // Enter amount and confirm redelegation
+    const input = screen.getByRole("spinbutton");
+    fireEvent.change(input, { target: { value: "50" } });
+    await waitFor(() => expect(screen.getByRole("checkbox")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox"));
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: /confirm redelegation/i }),
+      );
+    });
+
+    expect(onAdjust).toHaveBeenCalledWith(
+      VALIDATOR.id,
+      "redelegate",
+      "50",
+      expect.any(String),
+    );
+  });
 });
 
 // ─── Submitting state ─────────────────────────────────────────────────────────
@@ -240,6 +332,9 @@ describe("DelegationRow — submitting state", () => {
     ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: /undelegate/i }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /redelegate/i }),
     ).toBeDisabled();
   });
 });

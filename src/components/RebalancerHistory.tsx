@@ -3,7 +3,7 @@
  * allocations, swap counts, fees paid, and outcome badge.
  */
 
-import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { ArrowRight01Icon, ClockIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -22,12 +22,17 @@ export interface RebalancerHistoryProps {
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
+  if (Number.isNaN(d.getTime())) return "—";
+  // Fixed locale + UTC so the output is deterministic across system locales and
+  // timezones — `undefined` locale used to cause hydration mismatches and
+  // flaky snapshots (issue #656).
+  return d.toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "UTC",
   });
 }
 
@@ -152,9 +157,24 @@ export function RebalancerHistory({
       </div>
 
       {records.length === 0 ? (
-        <p className="text-[13px] text-ink-3 text-center py-10">
-          No rebalancing history yet
-        </p>
+        /* Issue #656: a proper empty state with an icon and guidance instead of
+           an unstyled blank area. */
+        <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
+          <HugeiconsIcon
+            icon={ClockIcon}
+            size={22}
+            color="currentColor"
+            strokeWidth={1.5}
+            className="text-ink-4"
+            aria-hidden="true"
+          />
+          <p className="text-[13px] font-medium text-ink-2">
+            No rebalance history yet
+          </p>
+          <p className="text-[12px] text-ink-3">
+            Run a rebalance to see before/after allocations and fees here.
+          </p>
+        </div>
       ) : (
         <div>
           {/* Show most recent first */}

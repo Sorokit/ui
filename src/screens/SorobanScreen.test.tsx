@@ -176,6 +176,74 @@ describe("SorobanScreen", () => {
       ).toEqual([CONTRACT_B]);
     });
 
+    it("reads localStorage.getItem exactly once on mount, not on subsequent re-renders (#815)", () => {
+      localStorage.setItem(
+        "sorokit-soroban-contract-history",
+        JSON.stringify([CONTRACT_A]),
+      );
+
+      const getSpy = vi.spyOn(window.localStorage, "getItem");
+
+      const { rerender } = render(<SorobanScreen />);
+
+      // Record how many times getItem was called during the initial mount.
+      const callsAfterMount = getSpy.mock.calls.length;
+      expect(callsAfterMount).toBeGreaterThan(0);
+
+      // Trigger two additional re-renders by updating the context mock.
+      rerender(<SorobanScreen />);
+      rerender(<SorobanScreen />);
+
+      // getItem must not have been called any additional times after mount.
+      expect(getSpy.mock.calls.length).toBe(callsAfterMount);
+
+      getSpy.mockRestore();
+    });
+
+    it("does not call localStorage.getItem on keystrokes in contract ID input", () => {
+      localStorage.setItem(
+        "sorokit-soroban-contract-history",
+        JSON.stringify([CONTRACT_A]),
+      );
+
+      const getSpy = vi.spyOn(window.localStorage, "getItem");
+      render(<SorobanScreen />);
+
+      const callsAfterMount = getSpy.mock.calls.length;
+
+      const input = screen.getByPlaceholderText(/C\.\.\./i);
+      fireEvent.change(input, { target: { value: "C" } });
+      fireEvent.change(input, { target: { value: "CA" } });
+      fireEvent.change(input, { target: { value: "CAA" } });
+
+      expect(getSpy.mock.calls.length).toBe(callsAfterMount);
+
+      getSpy.mockRestore();
+    });
+
+    it("adds a contract reactively when clicking Save contract and persists to storage", () => {
+      render(<SorobanScreen />);
+
+      expect(screen.queryByText("Saved Contracts")).not.toBeInTheDocument();
+
+      const input = screen.getByPlaceholderText(/C\.\.\./i);
+      fireEvent.change(input, { target: { value: CONTRACT_A } });
+
+      const saveButton = screen.getByRole("button", { name: "Save contract" });
+      expect(saveButton).toBeInTheDocument();
+
+      fireEvent.click(saveButton);
+
+      expect(screen.getByText("Saved Contracts")).toBeInTheDocument();
+      expect(
+        screen.getByText(`${CONTRACT_A.slice(0, 6)}…${CONTRACT_A.slice(-4)}`),
+      ).toBeInTheDocument();
+      expect(
+        JSON.parse(localStorage.getItem("sorokit-soroban-contract-history") ?? "[]"),
+      ).toEqual([CONTRACT_A]);
+      expect(screen.queryByRole("button", { name: "Save contract" })).not.toBeInTheDocument();
+    });
+
     it("clears all saved contracts", () => {
       localStorage.setItem(
         "sorokit-soroban-contract-history",

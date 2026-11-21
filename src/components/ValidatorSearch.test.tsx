@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultFilter } from "@/lib/staking";
 
@@ -79,11 +79,20 @@ describe("ValidatorSearch — rendering", () => {
 // ─── Interactions ─────────────────────────────────────────────────────────────
 
 describe("ValidatorSearch — interactions", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
   it("calls onChange with updated query when user types", () => {
     const { onChange, filter } = renderSearch();
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "alpha" },
     });
+    vi.advanceTimersByTime(300);
     expect(onChange).toHaveBeenCalledWith({ ...filter, query: "alpha" });
   });
 
@@ -130,7 +139,8 @@ describe("ValidatorSearch — interactions", () => {
   });
 
   it("calls onChange with undefined minApy when input is cleared", () => {
-    const { onChange, filter } = renderSearch();
+    const filter = { ...createDefaultFilter(), minApy: 5 };
+    const { onChange } = renderSearch({ filter });
     fireEvent.change(
       screen.getByRole("spinbutton", { name: /minimum apy/i }),
       { target: { value: "" } },
@@ -145,6 +155,91 @@ describe("ValidatorSearch — interactions", () => {
       { target: { value: "10" } },
     );
     expect(onChange).toHaveBeenCalledWith({ ...filter, maxCommission: 10 });
+  });
+});
+
+// ─── Query trimming and clear button (#690) ───────────────────────────────────
+
+describe("ValidatorSearch — query trimming and clear button (#690)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("trims leading whitespace from a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "   GABC123" },
+    });
+    vi.advanceTimersByTime(300);
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
+  });
+
+  it("trims trailing whitespace from a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "GABC123   " },
+    });
+    vi.advanceTimersByTime(300);
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "GABC123" });
+  });
+
+  it("trims whitespace on both ends of a pasted query", () => {
+    const { onChange, filter } = renderSearch();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "  Alpha Staking  " },
+    });
+    vi.advanceTimersByTime(300);
+    expect(onChange).toHaveBeenCalledWith({
+      ...filter,
+      query: "Alpha Staking",
+    });
+  });
+
+  it("does not render a clear button when the query is empty", () => {
+    renderSearch({ filter: { ...createDefaultFilter(), query: "" } });
+    expect(
+      screen.queryByRole("button", { name: /clear search/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders a clear button once the query has text", () => {
+    renderSearch({ filter: { ...createDefaultFilter(), query: "alpha" } });
+    expect(
+      screen.getByRole("button", { name: /clear search/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clears the query when the clear button is clicked", () => {
+    const { onChange, filter } = renderSearch({
+      filter: { ...createDefaultFilter(), query: "alpha" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /clear search/i }));
+    expect(onChange).toHaveBeenCalledWith({ ...filter, query: "" });
+  });
+
+  it("hides the clear button again once the query becomes empty", () => {
+    const { rerender } = renderSearch({
+      filter: { ...createDefaultFilter(), query: "alpha" },
+    });
+    expect(
+      screen.getByRole("button", { name: /clear search/i }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ValidatorSearch
+        filter={{ ...createDefaultFilter(), query: "" }}
+        onChange={vi.fn()}
+        totalCount={6}
+        filteredCount={6}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: /clear search/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

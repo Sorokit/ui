@@ -1,12 +1,23 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
 import { AccountCard } from "@/components/AccountCard";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { SorokitProvider } from "@/context/SorokitProvider";
+import { ToastProvider } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
+
+function getWalletButton(name: RegExp | string) {
+  const container =
+    screen.queryByRole("radiogroup", { name: /available wallets/i }) ??
+    screen.getByRole("grid", { name: /available wallets/i });
+  return (
+    within(container).queryByRole("radio", { name }) ??
+    within(container).getByRole("button", { name })
+  );
+}
 
 // The connected WalletConnectButton opens a management modal rather than
 // exposing a direct "Disconnect" control, so drive disconnect through context.
@@ -38,16 +49,22 @@ describe("Wallet Connect Flow Integration", () => {
 
   it("connects wallet, displays account, and disconnects", async () => {
     render(
-      <SorokitProvider client={mockClient}>
-        <WalletConnectButton />
-        <AccountCard />
-        <DisconnectTrigger />
-      </SorokitProvider>
+      <ToastProvider>
+        <SorokitProvider client={mockClient}>
+          <WalletConnectButton />
+          <AccountCard />
+          <DisconnectTrigger />
+        </SorokitProvider>
+      </ToastProvider>,
     );
+
+    // The mock address also ends in "123456789", so every sequence assertion is
+    // anchored on the Sequence label instead of the bare number.
+    const sequenceRow = () => screen.getByText(/^Sequence$/i).parentElement;
 
     // Initial state: Wallet not connected, AccountCard should not show sequence
     expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
-    expect(screen.queryByText(/Sequence:/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Sequence$/i)).not.toBeInTheDocument();
 
     // Action 1: Connect Wallet — opens the adapter-selection modal
     await act(async () => {
@@ -57,7 +74,7 @@ describe("Wallet Connect Flow Integration", () => {
       screen.getByRole("dialog", { name: /connect a wallet/i }),
     );
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+      fireEvent.click(getWalletButton(/Freighter/i));
     });
 
     // Verification 1: Wallet connected, AccountCard renders account data
@@ -66,7 +83,7 @@ describe("Wallet Connect Flow Integration", () => {
     // Disconnect button should appear inside WalletConnectButton or similar if it toggles
     // We wait for the account data to be fetched and rendered in AccountCard
     await waitFor(() => {
-      expect(screen.getByText(/123456789/i)).toBeInTheDocument(); // Sequence number
+      expect(sequenceRow()).toHaveTextContent("123456789"); // Sequence number
     });
 
     // Action 2: Disconnect Wallet (via context; connected button opens a modal instead)
@@ -78,6 +95,6 @@ describe("Wallet Connect Flow Integration", () => {
     // Verification 2: Wallet disconnected, AccountCard returns null (or clears data)
     expect(mockClient.wallet.disconnect).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
-    expect(screen.queryByText(/123456789/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Sequence$/i)).not.toBeInTheDocument();
   });
 });

@@ -5,7 +5,7 @@
  * (with copy), all asset balances, the 5 most recent transactions, and
  * account quick links (network switcher, block explorer, disconnect).
  * Designed to be triggered from anywhere in the app (e.g. via
- * `WalletConnectButton`'s `onOpenModal`).
+ * a button click or other trigger).
  *
  * Balance/account data refreshes on an interval while the sidebar is open,
  * via `useSorokit().refreshAccount()` — sorokit-ui has no blockchain logic
@@ -17,13 +17,13 @@
  * @component
  * @example
  * ```tsx
- * import { AccountSidebar, WalletConnectButton } from 'sorokit-ui';
+ * import { AccountSidebar } from 'sorokit-ui';
  *
- * function TopBar() {
+ * function App() {
  *   const [open, setOpen] = useState(false);
  *   return (
  *     <>
- *       <WalletConnectButton onOpenModal={() => setOpen(true)} />
+ *       <button onClick={() => setOpen(true)}>Open Account</button>
  *       <AccountSidebar open={open} onClose={() => setOpen(false)} />
  *     </>
  *   );
@@ -36,14 +36,14 @@ import {
   Cancel01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { AddressDisplay } from "@/components/AddressDisplay";
 import { AssetBadge } from "@/components/AssetBadge";
 import { Button } from "@/components/ui/Button";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient, type Transaction } from "@/lib/client";
+import { type Transaction } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 import { TxRow } from "./TransactionHistory";
@@ -73,14 +73,16 @@ export function AccountSidebar({
     refreshAccount,
     disconnectWallet,
     network,
+    client,
   } = useSorokit();
-
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof localStorage === "undefined") return false;
     return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
   });
   const [recentTxs, setRecentTxs] = useState<Transaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [activeBalanceIndex, setActiveBalanceIndex] = useState(0);
+  const balanceItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
@@ -91,11 +93,11 @@ export function AccountSidebar({
   // connected address. Deferred via setTimeout(0), same pattern
   // SorokitProvider uses for its own data-loading effects.
   useEffect(() => {
-    if (!open || !address) return;
+    if (!open || !address || !client) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       setTxLoading(true);
-      getClient()
+      client
         .transaction.getHistory(address, 1, RECENT_TX_LIMIT)
         .then(({ data }) => {
           if (!active) return;
@@ -109,7 +111,7 @@ export function AccountSidebar({
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [open, address]);
+  }, [open, address, client]);
 
   // Poll account/balance data while the sidebar is open.
   useEffect(() => {
@@ -123,12 +125,50 @@ export function AccountSidebar({
   // Escape closes the sidebar.
   useEffect(() => {
     if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
+
+  // Clamp the active balance-listbox index in render rather than an effect
+  // (no cascading re-render) so it always stays in range as the balance list
+  // changes shape, e.g. after a refresh drops an asset with a zero balance.
+  const clampedActiveBalanceIndex = Math.min(
+    activeBalanceIndex,
+    Math.max(0, balances.length - 1),
+  );
+
+  /**
+   * Standard ARIA `listbox` keyboard navigation: ArrowDown/ArrowUp move the
+   * active descendant, Enter "selects" it (triggers a balance refresh scoped
+   * to that asset's row is out of scope without a per-asset refresh API, so
+   * Enter re-triggers the same refreshAccount() the "Refresh balances" button
+   * uses, scoped to acting on the highlighted item for parity with a real
+   * selection).
+   */
+  function handleBalanceListKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (balances.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveBalanceIndex((i) => {
+        const next = (i + 1) % balances.length;
+        balanceItemRefs.current[next]?.focus();
+        return next;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveBalanceIndex((i) => {
+        const next = (i - 1 + balances.length) % balances.length;
+        balanceItemRefs.current[next]?.focus();
+        return next;
+      });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      void refreshAccount();
+    }
+  }
 
   if (!open) return null;
 
@@ -219,7 +259,10 @@ export function AccountSidebar({
                 </div>
               ) : balances.length === 0 ? (
                 !collapsed && (
-                  <p className="text-[12px] text-ink-3">No assets found</p>
+                  <p role="status" className="text-[12px] text-ink-3">
+                    No linked accounts. Fund this address or connect another
+                    wallet to see balances here.
+                  </p>
                 )
               ) : collapsed ? (
                 <div className="flex flex-col items-center gap-2">
@@ -234,9 +277,30 @@ export function AccountSidebar({
                   ))}
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  {balances.map((b) => (
-                    <div key={b.asset} className="flex items-center justify-between">
+                <div
+                  role="listbox"
+                  aria-label="Account balances"
+                  aria-activedescendant={`balance-item-${clampedActiveBalanceIndex}`}
+                  tabIndex={0}
+                  onKeyDown={handleBalanceListKeyDown}
+                  className="flex flex-col gap-3 outline-none"
+                >
+                  {balances.map((b, i) => (
+                    <div
+                      key={b.asset}
+                      id={`balance-item-${i}`}
+                      ref={(el) => {
+                        balanceItemRefs.current[i] = el;
+                      }}
+                      role="option"
+                      aria-selected={i === clampedActiveBalanceIndex}
+                      tabIndex={-1}
+                      onClick={() => setActiveBalanceIndex(i)}
+                      className={cn(
+                        "flex items-center justify-between rounded-md px-1 -mx-1 py-0.5",
+                        i === clampedActiveBalanceIndex && "bg-surface-2",
+                      )}
+                    >
                       <AssetBadge balance={b} size="sm" showIssuer={false} />
                       <span className="text-[12px] font-semibold tabular-nums text-ink">
                         {parseFloat(b.balance).toLocaleString(undefined, {

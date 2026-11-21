@@ -1,10 +1,14 @@
-import { Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import {
+  AlertCircleIcon,
+  Cancel01Icon,
+  Copy01Icon,
+  Tick01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Tooltip } from "@/components/ui/Tooltip";
-import { cn } from "@/lib/utils";
-import { truncateAddress } from "@/lib/utils";
+import { cn, truncateAddress, validateStellarAddress } from "@/lib/utils";
 
 export interface AddressDisplayProps {
   address: string;
@@ -14,9 +18,25 @@ export interface AddressDisplayProps {
   className?: string;
   label?: string;
   onCopy?: () => void;
+  onCopyError?: () => void;
   size?: "sm" | "md" | "lg";
   masked?: boolean;
   mono?: boolean;
+  /**
+   * A resolved Stellar federation name (SEP-2, e.g. "alice*example.com") for
+   * this address, if the host app already looked one up. `AddressDisplay`
+   * has no blockchain logic of its own (see package.json's description), so
+   * federation resolution itself is the host's responsibility; this only
+   * renders the result.
+   */
+  federationName?: string | null;
+  /**
+   * Set when the host app's federation lookup for this address failed
+   * (network error, no record, timeout, etc). Renders a subtle warning
+   * indicator instead of silently omitting the federation tag, so the
+   * failure isn't invisible to the user.
+   */
+  federationError?: boolean;
 }
 
 const sizeConfig = {
@@ -24,6 +44,51 @@ const sizeConfig = {
   md: { text: "text-[11px]", icon: 12 },
   lg: { text: "text-[13px]", icon: 14 },
 } as const;
+
+const COPIED_RESET_MS = 2000;
+const FAILED_RESET_MS = 1500;
+
+/**
+ * `document.execCommand("copy")` fallback for non-secure contexts (plain
+ * HTTP), where navigator.clipboard is undefined. Deprecated but still the
+ * only synchronous copy mechanism outside a secure context.
+ */
+function copyViaExecCommand(text: string): boolean {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  // `readOnly` keeps mobile browsers from raising the on-screen keyboard for
+  // the throwaway textarea while it is focused for the copy.
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+
+  // `textarea.select()` replaces whatever the user currently has highlighted
+  // on the page, so capture the existing range and put it back afterwards.
+  const selection = document.getSelection();
+  const previousRange =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+  document.body.appendChild(textarea);
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  let succeeded: boolean;
+  try {
+    succeeded = document.execCommand("copy");
+  } catch {
+    succeeded = false;
+  } finally {
+    document.body.removeChild(textarea);
+    if (previousRange && selection) {
+      selection.removeAllRanges();
+      selection.addRange(previousRange);
+    }
+  }
+  return succeeded;
+}
 
 export function AddressDisplay({
   address,
@@ -33,20 +98,72 @@ export function AddressDisplay({
   className,
   label,
   onCopy,
+  onCopyError,
   size = "md",
   masked = false,
   mono = false,
+  federationName = null,
+  federationError = false,
 }: AddressDisplayProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function clearResetTimer() {
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+  }
+
+  // The "Copied!"/"Copy failed" tooltip is otherwise only cleared by its 2s
+  // (or 1.5s) timeout, which is long enough that moving the cursor away and
+  // back before it elapses re-opens the tooltip still showing the stale
+  // result instead of the resting "Copy address" state. Clearing the state
+  // as soon as the cursor leaves, instead of waiting out the timer, keeps
+  // the tooltip accurate on re-hover regardless of timing.
+  function resetCopyStateOnLeave() {
+    clearResetTimer();
+    setCopied(false);
+    setCopyFailed(false);
+  }
+
+  // Without this, unmounting inside the copied/failed reset window leaves a
+  // pending timeout that fires setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(address);
+    clearResetTimer();
+    let succeeded = false;
+    if (navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(address);
+        succeeded = true;
+      } catch {
+        succeeded = false;
+      }
+    }
+    if (!succeeded) {
+      succeeded = copyViaExecCommand(address);
+    }
+
+    if (succeeded) {
+      setCopyFailed(false);
       setCopied(true);
       onCopy?.();
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* fallback */
+      resetTimerRef.current = setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    } else {
+      setCopied(false);
+      setCopyFailed(true);
+      onCopyError?.();
+      resetTimerRef.current = setTimeout(() => setCopyFailed(false), FAILED_RESET_MS);
     }
   }
 
@@ -56,6 +173,7 @@ export function AddressDisplay({
       ? address
       : truncateAddress(address, start, end);
   const { text, icon: iconSize } = sizeConfig[size];
+  const invalidPublicKey = address.trim().startsWith("G") && !validateStellarAddress(address.trim());
 
   const addressSpan = (
     <div className="flex items-center gap-2 group">
@@ -72,25 +190,76 @@ export function AddressDisplay({
           {display}
         </span>
       </Tooltip>
-      <Tooltip content={copied ? "Copied!" : "Copy address"}>
+      {invalidPublicKey && (
+        <span className="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red" data-testid="invalid-address-badge">
+          Invalid address
+        </span>
+      )}
+      {federationName && (
+        <span className="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-2" data-testid="federation-tag">
+          {federationName}
+        </span>
+      )}
+      {federationError && (
+        <Tooltip content="Federation name lookup failed">
+          <span
+            role="img"
+            aria-label="Federation name lookup failed"
+            data-testid="federation-error-indicator"
+            className="shrink-0 text-ink-4"
+          >
+            <HugeiconsIcon
+              icon={AlertCircleIcon}
+              size={iconSize}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </span>
+        </Tooltip>
+      )}
+      <Tooltip
+        content={copyFailed ? "Copy failed" : copied ? "Copied!" : "Copy address to clipboard"}
+      >
         <button
           onClick={copy}
-          aria-label={copied ? "Address copied" : "Copy address"}
+          onMouseLeave={resetCopyStateOnLeave}
+          aria-label={
+            copyFailed
+              ? "Failed to copy address"
+              : copied
+                ? "Address copied"
+                : "Copy address to clipboard"
+          }
           className={cn(
             "shrink-0 p-1 rounded-md transition-all",
-            copied
-              ? "text-green bg-success-dim"
-              : "text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100",
+            copyFailed
+              ? "text-red bg-error-dim"
+              : copied
+                ? "text-green bg-success-dim"
+                : "text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100",
           )}
         >
           <HugeiconsIcon
-            icon={copied ? Tick01Icon : Copy01Icon}
+            icon={copyFailed ? Cancel01Icon : copied ? Tick01Icon : Copy01Icon}
             size={iconSize}
             color="currentColor"
             strokeWidth={2}
           />
         </button>
       </Tooltip>
+      {/*
+        The icon swap and the button's aria-label are not reliably announced by
+        screen readers, so the copy result - especially a failure in a
+        non-secure context - was silent for assistive technology. This live
+        region announces both outcomes.
+      */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {copyFailed
+          ? "Failed to copy address"
+          : copied
+            ? "Address copied to clipboard"
+            : ""}
+      </span>
     </div>
   );
 

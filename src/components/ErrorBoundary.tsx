@@ -1,8 +1,14 @@
-import { AlertCircleIcon, Refresh01Icon } from "@hugeicons/core-free-icons";
+import {
+  AlertCircleIcon,
+  Copy01Icon,
+  Refresh01Icon,
+  Tick01Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 import { cn } from "../lib/utils";
+import { copyToClipboard } from "./AccountCard";
 
 interface Props {
   children: ReactNode;
@@ -27,13 +33,25 @@ interface State {
   error: Error | null;
   resetKey: number;
   componentStack: string | null;
+  copied: boolean;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, resetKey: 0, componentStack: null };
+  state: State = {
+    error: null,
+    resetKey: 0,
+    componentStack: null,
+    copied: false,
+  };
+
+  private copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { error };
+  }
+
+  componentWillUnmount() {
+    if (this.copyResetTimer) clearTimeout(this.copyResetTimer);
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -53,15 +71,48 @@ export class ErrorBoundary extends Component<Props, State> {
     // Runs before the state clears so a re-initialisation attempt is already
     // done by the time children re-mount under the new resetKey.
     this.props.onRetry?.();
+    if (this.copyResetTimer) clearTimeout(this.copyResetTimer);
     this.setState((state) => ({
       error: null,
       resetKey: state.resetKey + 1,
       componentStack: null,
+      copied: false,
     }));
   };
 
+  private buildDiagnostics() {
+    const { error, componentStack } = this.state;
+    const lines = [
+      "sorokit-ui error report",
+      `Time: ${new Date().toISOString()}`,
+      `URL: ${typeof window !== "undefined" ? window.location.href : "unknown"}`,
+      `User agent: ${
+        typeof navigator !== "undefined" ? navigator.userAgent : "unknown"
+      }`,
+      "",
+      `Message: ${error?.message ?? "Unknown error"}`,
+    ];
+
+    if (error?.stack) lines.push("", "Stack:", error.stack);
+    if (componentStack) lines.push("", "Component stack:", componentStack);
+
+    return lines.join("\n");
+  }
+
+  handleCopy = async () => {
+    const ok = await copyToClipboard(this.buildDiagnostics());
+    if (!ok) return;
+
+    if (this.copyResetTimer) clearTimeout(this.copyResetTimer);
+    this.setState({ copied: true });
+    this.copyResetTimer = setTimeout(() => {
+      this.copyResetTimer = null;
+      this.setState({ copied: false });
+    }, 2000);
+  };
+
   render() {
-    const { error, resetKey, componentStack } = this.state;
+    const { error, resetKey, componentStack, copied } = this.state;
     const { children, fallback, isolate, supportUrl } = this.props;
 
     if (!error) return <div key={resetKey}>{children}</div>;
@@ -138,7 +189,20 @@ export class ErrorBoundary extends Component<Props, State> {
               </pre>
             </details>
           )}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={this.handleCopy}
+              aria-live="polite"
+              className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-surface-2 border border-line hover:border-line-2 text-[13px] text-ink-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+            >
+              <HugeiconsIcon
+                icon={copied ? Tick01Icon : Copy01Icon}
+                size={14}
+                color="currentColor"
+                strokeWidth={1.5}
+              />
+              {copied ? "Copied!" : "Copy error details"}
+            </button>
             <button
               onClick={this.reset}
               className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-surface-2 border border-line hover:border-line-2 text-[13px] text-ink-2 transition-colors cursor-pointer"

@@ -1,9 +1,16 @@
 import { Slot } from "@radix-ui/react-slot";
-import { forwardRef, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "secondary" | "ghost" | "destructive";
+type Variant = "primary" | "secondary" | "outline" | "ghost" | "destructive";
 type Size = "sm" | "md" | "lg";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -36,6 +43,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 const variants: Record<Variant, string> = {
   primary: "bg-brand text-white hover:bg-brand-hover",
   secondary: "bg-transparent text-ink border border-line-2 hover:bg-surface-2",
+  outline: "bg-transparent text-ink border border-line-2 hover:bg-surface-2",
   ghost: "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink",
   destructive:
     "bg-error-dim text-red border border-error-dim-strong hover:bg-error-dim-hover",
@@ -77,7 +85,12 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       children,
       onClick,
+      onClickCapture,
       onBlur,
+      onKeyDown,
+      onKeyDownCapture,
+      style,
+      "aria-disabled": ariaDisabled,
       ...props
     },
     ref,
@@ -87,10 +100,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     const [armed, setArmed] = useState(false);
     const isInert = !!disabled || !!loading;
+    const isAriaDisabled = ariaDisabled === true || ariaDisabled === "true";
 
-    // ── loading width lock ──────────────────────────────────────────────
-    // When loading flips on, snapshot the button's rendered width so the
-    // layout stays stable even when the label text changes.
+    // When loading flips on, snapshot the rendered width so the layout stays
+    // stable even when the spinner replaces a wider or narrower label.
     const elRef = useRef<HTMLButtonElement | HTMLAnchorElement | null>(null);
     const [loadingWidth, setLoadingWidth] = useState<number | null>(null);
     const prevLoading = useRef(loading);
@@ -108,15 +121,36 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       (node: HTMLButtonElement | HTMLAnchorElement | null) => {
         elRef.current = node;
         if (typeof ref === "function") {
-          (ref as (node: HTMLButtonElement | HTMLAnchorElement | null) => void)(node);
+          ref(node);
         } else if (ref) {
           (
-            ref as React.MutableRefObject<HTMLButtonElement | HTMLAnchorElement | null>
+            ref as React.MutableRefObject<HTMLButtonElement | null>
           ).current = node;
         }
       },
       [ref],
     );
+
+    // Runs in the capture phase, before any onClick — including one that a
+    // slotted `asChild` child carries itself, which Slot would otherwise invoke
+    // ahead of ours. Stopping the event here means a disabled or
+    // aria-disabled button never reaches a click handler, whatever element is
+    // rendered. The DOM check also catches aria-disabled/disabled set directly
+    // on a slotted child rather than on <Button>.
+    const handleClickCapture = (e: React.MouseEvent<HTMLButtonElement>) => {
+      const el = e.currentTarget;
+      if (
+        isInert ||
+        isAriaDisabled ||
+        el.getAttribute("aria-disabled") === "true" ||
+        el.hasAttribute("disabled")
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onClickCapture?.(e);
+    };
 
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
       if (isInert) {
@@ -138,6 +172,24 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       // Reset the confirmation prompt when focus leaves the button.
       if (armed) setArmed(false);
       onBlur?.(e);
+    };
+
+    const handleKeyDownCapture = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onKeyDownCapture?.(e as React.KeyboardEvent<HTMLButtonElement>);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onKeyDown?.(e as React.KeyboardEvent<HTMLButtonElement>);
     };
 
     const spinner = (
@@ -170,8 +222,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       "disabled:opacity-40 disabled:cursor-not-allowed",
       variants[variant],
       iconOnly ? iconOnlySizes[size] : sizes[size],
-      // Anchors ignore :disabled, so mirror the styling off aria-disabled.
-      isLink && "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed",
+      // Anchors, slotted elements and aria-disabled buttons ignore :disabled,
+      // so mirror the styling off aria-disabled.
+      "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed",
       className,
     );
 
@@ -193,15 +246,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       </>
     );
 
-    // Merge user style with the locked min-width so neither is lost.
-  const userStyle = props.style;
-  const mergedStyle =
-    loading && loadingWidth
-      ? ({ ...(userStyle as React.CSSProperties | undefined), minWidth: loadingWidth })
-      : userStyle;
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { style: _, ...restProps } = props;
+    // Merge the caller's style with the locked min-width so neither is lost.
+    const mergedStyle =
+      loading && loadingWidth ? { ...style, minWidth: loadingWidth } : style;
 
     if (isLink) {
       return (
@@ -212,13 +259,16 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           href={isInert ? undefined : href}
           target="_blank"
           rel="noopener noreferrer"
-          aria-disabled={isInert || undefined}
+          aria-disabled={isInert || ariaDisabled || undefined}
           aria-busy={loading || undefined}
           className={classes}
           style={mergedStyle}
+          onClickCapture={handleClickCapture as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onClick={handleClick as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onBlur={handleBlur as unknown as React.FocusEventHandler<HTMLAnchorElement>}
-          {...(restProps as unknown as React.AnchorHTMLAttributes<HTMLAnchorElement>)}
+          onKeyDownCapture={handleKeyDownCapture}
+          onKeyDown={handleKeyDown}
+          {...(props as unknown as React.AnchorHTMLAttributes<HTMLAnchorElement>)}
         >
           {content}
         </a>
@@ -229,12 +279,19 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       <Comp
         ref={mergedRef}
         disabled={disabled || loading}
+        // A slotted <a>/<div> has no native disabled state, so announce it.
+        aria-disabled={
+          loading || (asChild && isInert) || ariaDisabled || undefined
+        }
         aria-busy={loading || undefined}
         className={classes}
         style={mergedStyle}
+        onClickCapture={handleClickCapture}
         onClick={handleClick}
         onBlur={handleBlur}
-        {...restProps}
+        onKeyDownCapture={handleKeyDownCapture}
+        onKeyDown={handleKeyDown}
+        {...props}
       >
         {content}
       </Comp>

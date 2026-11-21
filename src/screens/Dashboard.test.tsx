@@ -1,9 +1,30 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom";
+
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import fs from "fs";
+import path from "path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NavSection } from "@/components/Sidebar";
+import { PAGE_TITLES } from "@/lib/nav-labels";
 
 import { Dashboard } from "./Dashboard";
+
+// Toggled from within a test to make the mocked TransactionsScreen throw on
+// render, then recover once cleared — used by the per-screen ErrorBoundary
+// tests below.
+const { getTransactionsShouldThrow, setTransactionsShouldThrow } = vi.hoisted(
+  () => {
+    let shouldThrow = false;
+    return {
+      getTransactionsShouldThrow: () => shouldThrow,
+      setTransactionsShouldThrow: (value: boolean) => {
+        shouldThrow = value;
+      },
+    };
+  },
+);
 
 // Dashboard composes every screen; stub the chrome and screens so these tests
 // cover only Dashboard's own controlled/uncontrolled section logic.
@@ -36,8 +57,26 @@ vi.mock("@/components/NetworkBanner", () => ({
   NetworkBanner: () => null,
 }));
 
+const { sorokitState } = vi.hoisted(() => ({
+  sorokitState: {
+    isConnected: false,
+    isLoading: false,
+    isLoadingAccount: false,
+    account: null as unknown,
+    balances: [] as unknown[],
+    error: null as string | null,
+  },
+}));
+vi.mock("@/context/useSorokit", () => ({
+  useSorokit: () => sorokitState,
+}));
+
 function stubScreen(name: string) {
-  return () => <div data-testid={`screen-${name}`}>{name} screen</div>;
+  return () => (
+    <div data-testid={`screen-${name}`}>
+      <h2>{name} screen</h2>
+    </div>
+  );
 }
 
 vi.mock("@/screens/WalletScreen", () => ({
@@ -47,7 +86,16 @@ vi.mock("@/screens/AccountScreen", () => ({
   AccountScreen: stubScreen("account"),
 }));
 vi.mock("@/screens/TransactionsScreen", () => ({
-  TransactionsScreen: stubScreen("transactions"),
+  TransactionsScreen: () => {
+    if (getTransactionsShouldThrow()) {
+      throw new Error("boom");
+    }
+    return (
+      <div data-testid="screen-transactions">
+        <h2>transactions screen</h2>
+      </div>
+    );
+  },
 }));
 vi.mock("@/screens/SorobanScreen", () => ({
   SorobanScreen: stubScreen("soroban"),
@@ -70,11 +118,93 @@ vi.mock("@/screens/BudgetScreen", () => ({
 vi.mock("@/screens/NFTScreen", () => ({
   NFTScreen: stubScreen("nfts"),
 }));
+vi.mock("@/components/GovernanceDashboard", () => ({
+  GovernanceDashboard: stubScreen("governance"),
+}));
 
 describe("Dashboard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    setTransactionsShouldThrow(false);
+    Object.assign(sorokitState, {
+      isConnected: false,
+      isLoading: false,
+      isLoadingAccount: false,
+      account: null,
+      balances: [],
+      error: null,
+    });
+  });
+
+  describe("quick actions", () => {
+    const routes = [
+      ["Send", "transactions"],
+      ["Receive", "wallet"],
+      ["Swap", "soroban"],
+      ["Stake", "farming"],
+    ] as const;
+
+    it.each(routes)("%s navigates to the %s screen on click", async (label, section) => {
+      const onSectionChange = vi.fn();
+      render(<Dashboard onSectionChange={onSectionChange} defaultSection="network" />);
+
+      fireEvent.click(screen.getByRole("button", { name: label }));
+
+      expect(onSectionChange).toHaveBeenCalledWith(section);
+      expect(await screen.findByTestId(`screen-${section}`)).toBeInTheDocument();
+    });
+
+    it("renders tiles as real buttons reachable via Tab", async () => {
+      const user = userEvent.setup();
+      render(<Dashboard />);
+      const group = screen.getByRole("group", { name: "Quick actions" });
+      const tiles = within(group).getAllByRole("button");
+      expect(tiles.map((t) => t.textContent)).toEqual(["Send", "Receive", "Swap", "Stake"]);
+
+      tiles[0].focus();
+      expect(tiles[0]).toHaveFocus();
+      await user.tab();
+      expect(tiles[1]).toHaveFocus();
+    });
+
+    it("activates a tile with the Enter key", async () => {
+      const user = userEvent.setup();
+      const onSectionChange = vi.fn();
+      render(<Dashboard onSectionChange={onSectionChange} />);
+
+      screen.getByRole("button", { name: "Stake" }).focus();
+      await user.keyboard("{Enter}");
+
+      expect(onSectionChange).toHaveBeenCalledWith("farming");
+      expect(await screen.findByTestId("screen-farming")).toBeInTheDocument();
+    });
+  });
+
+  describe("balance summary", () => {
+    it("is hidden when no wallet is connected", () => {
+      render(<Dashboard />);
+      expect(screen.queryByTestId("balance-summary")).not.toBeInTheDocument();
+    });
+
+    it("shows skeletons instead of 0.00 while account data hydrates", () => {
+      sorokitState.isConnected = true;
+      sorokitState.isLoadingAccount = true;
+      render(<Dashboard />);
+
+      expect(screen.getAllByTestId("balance-summary-skeleton")).toHaveLength(2);
+      expect(screen.queryByText("0.00")).not.toBeInTheDocument();
+    });
+
+    it("renders balances once hydrated", () => {
+      sorokitState.isConnected = true;
+      sorokitState.account = { address: "G" };
+      sorokitState.balances = [{ assetType: "native", balance: "12.5" }];
+      render(<Dashboard />);
+
+      expect(screen.queryByTestId("balance-summary-skeleton")).not.toBeInTheDocument();
+      expect(screen.getByText("12.50")).toBeInTheDocument();
+    });
   });
 
   describe("uncontrolled mode", () => {
@@ -83,28 +213,65 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("screen-wallet")).toBeInTheDocument();
     });
 
-    it("initialises to defaultSection when provided", () => {
+    it("initialises to defaultSection when provided", async () => {
       render(<Dashboard defaultSection="soroban" />);
-      expect(screen.getByTestId("screen-soroban")).toBeInTheDocument();
+      expect(await screen.findByTestId("screen-soroban")).toBeInTheDocument();
       expect(screen.queryByTestId("screen-wallet")).not.toBeInTheDocument();
     });
 
-    it("changes the rendered screen when a nav item is clicked", () => {
+    it("changes the rendered screen when a nav item is clicked", async () => {
       render(<Dashboard />);
       fireEvent.click(screen.getByRole("button", { name: "transactions" }));
 
-      expect(screen.getByTestId("screen-transactions")).toBeInTheDocument();
-      expect(screen.queryByTestId("screen-wallet")).not.toBeInTheDocument();
+      expect(
+        await screen.findByTestId("screen-transactions"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByTestId("screen-wrapper-wallet"),
+      ).toHaveAttribute("hidden");
     });
 
-    it("still reports navigation through onSectionChange", () => {
+    it("does not instantiate a screen before it has been visited", () => {
+      render(<Dashboard />);
+      expect(
+        screen.queryByTestId("screen-wrapper-soroban"),
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps a previously visited screen mounted (but hidden) after navigating away", async () => {
+      render(<Dashboard />);
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      expect(await screen.findByTestId("screen-soroban")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(screen.getByTestId("screen-wallet")).toBeInTheDocument();
+      // Soroban stays mounted so its in-progress form state survives.
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).toHaveAttribute("hidden");
+    });
+
+    it("sets aria-hidden on non-active screens and clears it on the active one", async () => {
+      render(<Dashboard />);
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      await screen.findByTestId("screen-soroban");
+
+      expect(screen.getByTestId("screen-wrapper-wallet")).toHaveAttribute("aria-hidden", "true");
+      expect(screen.getByTestId("screen-wrapper-soroban")).toHaveAttribute("aria-hidden", "false");
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(screen.getByTestId("screen-wrapper-wallet")).toHaveAttribute("aria-hidden", "false");
+      expect(screen.getByTestId("screen-wrapper-soroban")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("still reports navigation through onSectionChange", async () => {
       const onSectionChange = vi.fn();
       render(<Dashboard onSectionChange={onSectionChange} />);
 
       fireEvent.click(screen.getByRole("button", { name: "network" }));
 
       expect(onSectionChange).toHaveBeenCalledWith("network");
-      expect(screen.getByTestId("screen-network")).toBeInTheDocument();
+      expect(await screen.findByTestId("screen-network")).toBeInTheDocument();
     });
   });
 
@@ -129,16 +296,21 @@ describe("Dashboard", () => {
       expect(onSectionChange).toHaveBeenCalledWith("soroban");
       // The parent owns the state, so the view is unchanged until it updates.
       expect(screen.getByTestId("screen-transactions")).toBeInTheDocument();
-      expect(screen.queryByTestId("screen-soroban")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("screen-wrapper-soroban"),
+      ).not.toBeInTheDocument();
     });
 
-    it("follows the parent when activeSection changes", () => {
+    it("follows the parent when activeSection changes", async () => {
       const { rerender } = render(<Dashboard activeSection="wallet" />);
       expect(screen.getByTestId("screen-wallet")).toBeInTheDocument();
 
       rerender(<Dashboard activeSection="network" />);
-      expect(screen.getByTestId("screen-network")).toBeInTheDocument();
-      expect(screen.queryByTestId("screen-wallet")).not.toBeInTheDocument();
+      expect(await screen.findByTestId("screen-network")).toBeInTheDocument();
+      // Wallet stays mounted (hidden) so its state survives navigation.
+      expect(
+        screen.getByTestId("screen-wrapper-wallet"),
+      ).toHaveAttribute("hidden");
     });
 
     it("ignores defaultSection when activeSection is set", () => {
@@ -152,4 +324,137 @@ describe("Dashboard", () => {
       expect(screen.getByTestId("topbar-active")).toHaveTextContent("soroban");
     });
   });
+
+  describe("per-screen error boundaries (#564)", () => {
+    beforeEach(() => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    it("does not bring down the Sidebar or TopBar when a screen crashes", () => {
+      setTransactionsShouldThrow(true);
+      render(<Dashboard defaultSection="transactions" />);
+
+      expect(screen.getByLabelText("Main navigation")).toBeInTheDocument();
+      expect(screen.getByTestId("topbar-active")).toBeInTheDocument();
+      expect(screen.getByText(/Transactions couldn't load/)).toBeInTheDocument();
+    });
+
+    it("shows the screen name and a Retry button in the fallback", () => {
+      setTransactionsShouldThrow(true);
+      render(<Dashboard defaultSection="transactions" />);
+
+      expect(screen.getByText("Transactions couldn't load")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    });
+
+    it("recovers and re-mounts only the affected screen when Retry is clicked", async () => {
+      setTransactionsShouldThrow(true);
+      render(<Dashboard defaultSection="transactions" />);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+
+      setTransactionsShouldThrow(false);
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+      expect(
+        await screen.findByTestId("screen-transactions"),
+      ).toBeInTheDocument();
+      // The chrome was never affected by the crash or the retry.
+      expect(screen.getByLabelText("Main navigation")).toBeInTheDocument();
+    });
+
+    it("leaves other screens working while a different screen is crashed", async () => {
+      setTransactionsShouldThrow(true);
+      render(<Dashboard defaultSection="transactions" />);
+      expect(screen.getByText("Transactions couldn't load")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(await screen.findByTestId("screen-wallet")).toBeInTheDocument();
+    });
+  });
+
+  describe("document title (#551)", () => {
+    it("sets the Wallet title on initial load, matching the default screen", () => {
+      render(<Dashboard />);
+
+      expect(document.title).toBe("Wallet - Sorokit");
+    });
+
+    it("updates the title when the user navigates to another screen", async () => {
+      render(<Dashboard />);
+
+      fireEvent.click(screen.getByRole("button", { name: "transactions" }));
+
+      expect(
+        await screen.findByTestId("screen-transactions"),
+      ).toBeInTheDocument();
+      expect(document.title).toBe("Transactions - Sorokit");
+    });
+
+    it("follows the parent section in controlled mode", () => {
+      const { rerender } = render(<Dashboard activeSection="wallet" />);
+      expect(document.title).toBe("Wallet - Sorokit");
+
+      rerender(<Dashboard activeSection="soroban" />);
+      expect(document.title).toBe("Soroban - Sorokit");
+    });
+
+    it("gives every screen a unique, descriptive 'Screen - Sorokit' title", () => {
+      const titles = Object.values(PAGE_TITLES);
+
+      expect(new Set(titles).size).toBe(titles.length);
+      titles.forEach((title) => expect(title).toMatch(/^.+ - Sorokit$/));
+
+      expect(PAGE_TITLES.wallet).toBe("Wallet - Sorokit");
+      expect(PAGE_TITLES.account).toBe("Account - Sorokit");
+      expect(PAGE_TITLES.transactions).toBe("Transactions - Sorokit");
+      expect(PAGE_TITLES.soroban).toBe("Soroban - Sorokit");
+      expect(PAGE_TITLES.network).toBe("Network - Sorokit");
+    });
+
+    it("keeps the pre-hydration index.html title on the default screen", () => {
+      const html = fs.readFileSync(
+        path.resolve(__dirname, "../../index.html"),
+        "utf8",
+      );
+
+      expect(html).toContain("<title>Wallet - Sorokit</title>");
+    });
+  });
+
+  describe("heading focus on navigation (#879)", () => {
+    it("moves focus to the newly active section heading on section change", async () => {
+      render(<Dashboard />);
+
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      await screen.findByTestId("screen-soroban");
+
+      const sorobanWrapper = screen.getByTestId("screen-wrapper-soroban");
+      const heading = sorobanWrapper.querySelector("h2");
+      expect(heading).toBeInTheDocument();
+      expect(heading).toHaveFocus();
+    });
+
+    it("moves focus to the active section heading in controlled mode when activeSection updates", async () => {
+      const { rerender } = render(<Dashboard activeSection="wallet" />);
+
+      rerender(<Dashboard activeSection="transactions" />);
+      await screen.findByTestId("screen-transactions");
+
+      const transactionsWrapper = screen.getByTestId("screen-wrapper-transactions");
+      const heading = transactionsWrapper.querySelector("h2");
+      expect(heading).toBeInTheDocument();
+      expect(heading).toHaveFocus();
+    });
+
+    it("focuses heading again when re-clicking the currently active nav section", async () => {
+      render(<Dashboard defaultSection="wallet" />);
+      const walletWrapper = screen.getByTestId("screen-wrapper-wallet");
+      const heading = walletWrapper.querySelector("h2");
+      expect(heading).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(heading).toHaveFocus();
+    });
+  });
 });
+

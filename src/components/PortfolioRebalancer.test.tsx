@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
-import { PortfolioRebalancer } from "./PortfolioRebalancer";
+import { DUST_THRESHOLD_BALANCE, fetchPrices,PortfolioRebalancer } from "./PortfolioRebalancer";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -35,10 +35,7 @@ const FIVE_BALANCES = [
 ];
 
 function mockSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
-  vi.mocked(useSorokit).mockReturnValue({
-    address: MOCK_ADDRESS,
-    isConnected: true,
-    isConnecting: false,
+  vi.mocked(useSorokit).mockReturnValue({ address: MOCK_ADDRESS, isConnected: true, get client() { return getClient(); }, isConnecting: false,
     isLoading: false,
     isLoadingAccount: false,
     balances: TWO_BALANCES,
@@ -180,9 +177,14 @@ describe("PortfolioRebalancer — allocations tab", () => {
 
   it("renders the diff table after assets load", async () => {
     render(<PortfolioRebalancer />);
+    // Wait for inputs to be ready, then change a target to produce a non-zero diff
+    await waitFor(() => screen.getByRole("spinbutton", { name: /target allocation for XLM/i }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: /target allocation for XLM/i }), {
+      target: { value: "40" },
+    });
     await waitFor(() => {
-      // Table headers
-      expect(screen.getByRole("columnheader", { name: /asset/i })).toBeInTheDocument();
+      // Table headers only appear when diffs are non-zero
+      expect(screen.getByRole("columnheader", { name: /Asset/i })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: /current/i })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: /target/i })).toBeInTheDocument();
       expect(screen.getByRole("columnheader", { name: /diff/i })).toBeInTheDocument();
@@ -227,14 +229,19 @@ describe("PortfolioRebalancer — tab navigation", () => {
     render(<PortfolioRebalancer />);
     await waitFor(() => screen.getByRole("tab", { name: /history/i }));
     fireEvent.click(screen.getByRole("tab", { name: /history/i }));
-    expect(screen.getByText(/no rebalancing history yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no rebalance(ing)? history yet/i)).toBeInTheDocument();
   });
 
   it("Preview tab navigates back to Allocations via button", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("tab", { name: /preview/i }));
+    // Change allocations so swaps are generated, enabling the "Edit targets" button
+    await waitFor(() => screen.getByRole("spinbutton", { name: /target allocation for XLM/i }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: /target allocation for XLM/i }), {
+      target: { value: "40" },
+    });
+    fireEvent.change(screen.getAllByRole("spinbutton")[1], { target: { value: "60" } });
     fireEvent.click(screen.getByRole("tab", { name: /preview/i }));
-    const editBtn = screen.getByRole("button", { name: /edit targets/i });
+    const editBtn = await screen.findByRole("button", { name: /edit targets/i });
     fireEvent.click(editBtn);
     expect(screen.getByRole("tab", { name: /allocations/i }))
       .toHaveAttribute("aria-selected", "true");
@@ -250,10 +257,10 @@ describe("PortfolioRebalancer — allocation inputs", () => {
     mockClient();
   });
 
-  it("Equalise button distributes 100% evenly", async () => {
+  it("Distribute Evenly button distributes 100% evenly", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     // With 2 assets, each should be 50%
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -302,7 +309,7 @@ describe("PortfolioRebalancer — preview tab", () => {
     render(<PortfolioRebalancer />);
     await waitFor(() => screen.getByRole("tab", { name: /preview/i }));
     fireEvent.click(screen.getByRole("tab", { name: /preview/i }));
-    expect(screen.getByText("Suggested Swaps")).toBeInTheDocument();
+    expect(screen.getAllByText(/Suggested Swaps/i)[0]).toBeInTheDocument();
   });
 
   it("renders Confirm & execute button when targets are valid and swaps exist", async () => {
@@ -458,10 +465,10 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
     });
   });
 
-  it("Equalise distributes 100% across 5 assets (each ~20%)", async () => {
+  it("Distribute Evenly distributes 100% across 5 assets (each ~20%)", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     expect(inputs.length).toBe(5);
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -470,8 +477,8 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
 
   it("shows multiple swap suggestions for a complex rebalance", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     fireEvent.click(screen.getByRole("tab", { name: /preview/i }));
     // With 5 assets equalised from an imbalanced state there should be swaps
     await waitFor(() => {
@@ -516,7 +523,7 @@ describe("PortfolioRebalancer — history empty state", () => {
     render(<PortfolioRebalancer />);
     await waitFor(() => screen.getByRole("tab", { name: /history/i }));
     fireEvent.click(screen.getByRole("tab", { name: /history/i }));
-    expect(screen.getByText(/no rebalancing history yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no rebalance(ing)? history yet/i)).toBeInTheDocument();
   });
 
   it("history tab badge is not shown initially (no count)", async () => {
@@ -564,3 +571,177 @@ describe("PortfolioRebalancer — accessibility", () => {
     ).toBeInTheDocument();
   });
 });
+
+// ─── Issue #674: Partial failure modal, dust filtering, and empty portfolios ───
+
+describe("PortfolioRebalancer — issue #674", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("dust balance filtering", () => {
+    it("excludes dust balances below threshold from portfolio assets and calculation inputs", async () => {
+      expect(DUST_THRESHOLD_BALANCE).toBe(0.00001);
+      const BALANCES_WITH_DUST = [
+        { asset: "XLM", balance: "1000.0000000", assetType: "native" as const },
+        { asset: "USDC", balance: "500.0000000", assetType: "credit_alphanum4" as const, assetCode: "USDC", assetIssuer: "GA1" },
+        { asset: "BTC", balance: "0.000005", assetType: "credit_alphanum4" as const, assetCode: "BTC", assetIssuer: "GA2" }, // dust < 0.00001
+      ];
+
+      mockSorokit({ balances: BALANCES_WITH_DUST });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByRole("spinbutton", { name: /target allocation for XLM/i })).toBeInTheDocument();
+        expect(screen.getByRole("spinbutton", { name: /target allocation for USDC/i })).toBeInTheDocument();
+      });
+
+      // BTC dust balance must NOT be rendered in the allocation inputs
+      expect(screen.queryByRole("spinbutton", { name: /target allocation for BTC/i })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("empty portfolio onboarding state", () => {
+    it("renders onboarding empty state with clear instructions to fund the account when balance is 0", async () => {
+      mockSorokit({ balances: [] });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("empty-portfolio-onboarding")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/instructions to fund your account/i)).toBeInTheDocument();
+      expect(screen.getByText(/transfer xlm from an exchange/i)).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(MOCK_ADDRESS))).toBeInTheDocument();
+    });
+
+    it("treats an account with only dust balances as an empty portfolio with funding instructions", async () => {
+      const ONLY_DUST = [
+        { asset: "BTC", balance: "0.000001", assetType: "credit_alphanum4" as const, assetCode: "BTC", assetIssuer: "GA2" },
+      ];
+      mockSorokit({ balances: ONLY_DUST });
+      mockClient();
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("empty-portfolio-onboarding")).toBeInTheDocument();
+      });
+      expect(screen.getByText(/instructions to fund your account/i)).toBeInTheDocument();
+    });
+  });
+
+  describe("partial rebalance failures and summary modal with retry", () => {
+    it("displays partial execution summary modal when a swap fails, lists succeeded vs failed swaps, and retries", async () => {
+      // Setup 5 balances to ensure multiple swaps
+      mockSorokit({ balances: FIVE_BALANCES });
+
+      const invokeContract = vi
+        .fn()
+        .mockResolvedValueOnce({ data: { hash: "tx-swap-1-ok" }, error: null })
+        .mockResolvedValueOnce({ data: null, error: "Insufficient liquidity in pool" })
+        .mockResolvedValueOnce({ data: { hash: "tx-swap-2-retry-ok" }, error: null })
+        .mockResolvedValue({ data: { hash: "tx-swap-rest-ok" }, error: null });
+
+      vi.mocked(getClient).mockReturnValue({
+        soroban: { invokeContract },
+      } as unknown as ReturnType<typeof getClient>);
+
+      render(<PortfolioRebalancer />);
+
+      await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+      fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
+
+      // Go to preview and then execute
+      fireEvent.click(screen.getByRole("tab", { name: /execute/i }));
+      await waitFor(() => screen.getByRole("button", { name: /execute rebalance/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /execute rebalance/i }));
+
+      // Modal should appear with partial execution summary
+      await waitFor(() => {
+        expect(screen.getByText("Partial Execution Summary")).toBeInTheDocument();
+      });
+
+      // Rollback instructions should be visible
+      expect(screen.getByText(/rollback instructions/i)).toBeInTheDocument();
+      expect(screen.getByText(/succeeded swaps cannot be automatically rolled back/i)).toBeInTheDocument();
+
+      // Check status badges in the modal
+      expect(screen.getAllByText("Succeeded").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Failed").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("Insufficient liquidity in pool").length).toBeGreaterThanOrEqual(1);
+
+      // Retry button inside modal
+      const modalRetryButton = screen.getAllByRole("button", { name: "Retry" })[0];
+      expect(modalRetryButton).toBeInTheDocument();
+
+      // Click retry
+      fireEvent.click(modalRetryButton);
+
+      // Verify that retry invoked contract for remaining swaps
+      await waitFor(() => {
+        expect(invokeContract).toHaveBeenCalledTimes(3);
+      });
+    });
+  });
+});
+
+// ─── Issue #723: injectable price provider ──────────────────────────────────
+
+describe("PortfolioRebalancer — issue #723", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSorokit({ balances: TWO_BALANCES });
+    mockClient();
+  });
+
+  it("shows the simulated-prices disclaimer when no priceProvider is supplied", async () => {
+    render(<PortfolioRebalancer />);
+    await waitFor(() => {
+      expect(screen.getByText(/prices are simulated/i)).toBeInTheDocument();
+    });
+  });
+
+  it("uses an injected priceProvider instead of STUB_PRICES and hides the disclaimer", async () => {
+    const mockPriceProvider = vi.fn().mockResolvedValue({
+      XLM: 999,
+      USDC: 1.0,
+    });
+
+    render(<PortfolioRebalancer priceProvider={mockPriceProvider} />);
+
+    await waitFor(() => {
+      expect(mockPriceProvider).toHaveBeenCalledWith(expect.arrayContaining(["XLM", "USDC"]));
+    });
+
+    // Disclaimer should NOT show since a real provider was supplied
+    expect(screen.queryByText(/prices are simulated/i)).not.toBeInTheDocument();
+
+    // Portfolio value should reflect the injected price (XLM=999), not the stub (XLM=0.11)
+    await waitFor(() => {
+      expect(screen.getByText(/portfolio value/i)).toBeInTheDocument();
+    });
+  });
+
+  it("fetchPrices() invokes custom priceProvider when supplied without relying on hardcoded values", async () => {
+    const mockProvider = vi.fn().mockResolvedValue({ XLM: 0.25, USDC: 1.02 });
+    const prices = await fetchPrices(["XLM", "USDC"], mockProvider);
+
+    expect(mockProvider).toHaveBeenCalledWith(["XLM", "USDC"]);
+    expect(prices).toEqual({ XLM: 0.25, USDC: 1.02 });
+  });
+
+  it("fetchPrices() falls back to stub prices when no custom priceProvider is given", async () => {
+    const prices = await fetchPrices(["XLM", "USDC"]);
+    expect(prices.XLM).toBe(0.11);
+    expect(prices.USDC).toBe(1.0);
+  });
+});
+
+
+

@@ -17,7 +17,8 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AllocationInput } from "@/components/AllocationInput";
 import { RebalancerHistory } from "@/components/RebalancerHistory";
@@ -28,13 +29,11 @@ import { Button } from "@/components/ui/Button";
 import { PieChart } from "@/components/ui/PieChart";
 import { SLICE_COLORS } from "@/components/ui/PieChart";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient } from "@/lib/client";
 import type {
   AllocationDiff,
   PortfolioAsset,
   RebalanceExecution,
   RebalanceRecord,
-  SwapSuggestion,
 } from "@/lib/rebalancer";
 import {
   buildRebalanceRecord,
@@ -56,7 +55,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Stub price map used when no live oracle is wired up.
- * In production this would be replaced by a real price feed.
+ * @todo Replace with a real price feed (Stellar Expert / CoinGecko free tier).
+ * These values are hardcoded and will drift from real market prices.
  */
 const STUB_PRICES: Record<string, number> = {
   XLM: 0.11,
@@ -66,9 +66,18 @@ const STUB_PRICES: Record<string, number> = {
   ETH: 3200,
 };
 
-async function fetchPrices(codes: string[]): Promise<Record<string, number>> {
+export type PriceProvider = (codes: string[]) => Promise<Record<string, number>>;
+
+export const defaultPriceProvider: PriceProvider = async (codes) => {
   // Return stub prices for any known code; fall back to $1 for unknown assets.
   return Object.fromEntries(codes.map((c) => [c, STUB_PRICES[c] ?? 1.0]));
+};
+
+export async function fetchPrices(
+  codes: string[],
+  priceProvider: PriceProvider = defaultPriceProvider,
+): Promise<Record<string, number>> {
+  return priceProvider(codes);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -84,9 +93,10 @@ const TABS: { id: Tab; label: string }[] = [
 
 export interface PortfolioRebalancerProps {
   className?: string;
+  priceProvider?: PriceProvider;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+export const DUST_THRESHOLD_BALANCE = 0.00001;
 
 function getAssetCode(asset: { assetType: string; assetCode?: string; asset: string }): string {
   return asset.assetType === "native" ? "XLM" : (asset.assetCode ?? asset.asset);
@@ -96,7 +106,11 @@ function buildPortfolioAssets(
   balances: ReturnType<typeof useSorokit>["balances"],
   prices: Record<string, number>,
 ): PortfolioAsset[] {
-  const raw = balances.map((b) => ({
+  const nonDust = balances.filter((b) => {
+    const bal = parseFloat(b.balance);
+    return !Number.isNaN(bal) && bal >= DUST_THRESHOLD_BALANCE;
+  });
+  const raw = nonDust.map((b) => ({
     asset: b.asset,
     assetCode: getAssetCode(b),
     balance: b.balance,
@@ -121,22 +135,47 @@ function randomId(): string {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
-  const { balances, isConnected, isLoadingAccount, refreshAccount } = useSorokit();
+export function PortfolioRebalancer({ className, priceProvider }: PortfolioRebalancerProps) {
+  const { isConnected, balances, isLoadingAccount, refreshAccount, client, address } = useSorokit();
 
   // ── Price state ───────────────────────────────────────────────────────────
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [isPricingLoading, setIsPricingLoading] = useState(false);
+  const [isUsingStubPrices, setIsUsingStubPrices] = useState(false);
 
   // ── Portfolio state ───────────────────────────────────────────────────────
-  const [portfolioAssets, setPortfolioAssets] = useState<PortfolioAsset[]>([]);
-  const [targets, setTargets] = useState<Record<string, number>>({});
+  const [customTargets, setCustomTargets] = useState<Record<string, number>>({});
+
+  const portfolioAssets = useMemo(() => {
+    if (balances.length === 0 || Object.keys(prices).length === 0) return [];
+    return buildPortfolioAssets(balances, prices);
+  }, [balances, prices]);
+
+  const targets = useMemo(() => {
+    if (Object.keys(customTargets).length > 0) return customTargets;
+    return Object.fromEntries(portfolioAssets.map((a) => [a.assetCode, parseFloat(a.currentPct.toFixed(2))]));
+  }, [customTargets, portfolioAssets]);
+
+  const setTargets = setCustomTargets;
+
+  const diffs = useMemo(() => {
+    if (portfolioAssets.length === 0) return [];
+    const normTargets = normaliseTargets(targets);
+    const totalUsd = portfolioAssets.reduce((s, a) => s + (a.usdValue ?? 0), 0);
+    return computeAllocationDiffs(portfolioAssets, normTargets, totalUsd);
+  }, [portfolioAssets, targets]);
+
+  const swaps = useMemo(() => {
+    if (diffs.length === 0) return [];
+    const baseFeeUsd = (Number(100) / 1e7) * (prices["XLM"] ?? 0.11);
+    const rawSwaps = generateSwapSuggestions(diffs, prices, baseFeeUsd);
+    return rawSwaps.filter((s) => s.fromAmount >= DUST_THRESHOLD_BALANCE);
+  }, [diffs, prices]);
 
   // ── Swap / execution state ────────────────────────────────────────────────
-  const [swaps, setSwaps] = useState<SwapSuggestion[]>([]);
-  const [diffs, setDiffs] = useState<AllocationDiff[]>([]);
   const [execution, setExecution] = useState<RebalanceExecution>(createInitialExecution(0));
   const [execError, setExecError] = useState<string | null>(null);
+  const [showPartialModal, setShowPartialModal] = useState(false);
 
   // ── History ───────────────────────────────────────────────────────────────
   const [history, setHistory] = useState<RebalanceRecord[]>([]);
@@ -150,41 +189,15 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
   useEffect(() => {
     if (balances.length === 0) return;
     let active = true;
-    setIsPricingLoading(true);
     const codes = balances.map(getAssetCode);
-    fetchPrices(codes).then((p) => {
+    fetchPrices(codes, priceProvider).then((p: Record<string, number>) => {
       if (!active) return;
       setPrices(p);
       setIsPricingLoading(false);
+      setIsUsingStubPrices(!priceProvider);
     });
     return () => { active = false; };
-  }, [balances]);
-
-  // ── Rebuild portfolio when prices or balances change ─────────────────────
-  useEffect(() => {
-    if (balances.length === 0 || Object.keys(prices).length === 0) return;
-    const assets = buildPortfolioAssets(balances, prices);
-    setPortfolioAssets(assets);
-    // Seed targets from current allocation on first load (or when assets change)
-    setTargets((prev) => {
-      const hasEntries = Object.keys(prev).length > 0;
-      if (hasEntries) return prev;
-      return Object.fromEntries(assets.map((a) => [a.assetCode, parseFloat(a.currentPct.toFixed(2))]));
-    });
-  }, [balances, prices]);
-
-  // ── Recompute diffs and swaps when targets change ─────────────────────────
-  useEffect(() => {
-    if (portfolioAssets.length === 0) return;
-    const normTargets = normaliseTargets(targets);
-    const totalUsd = portfolioAssets.reduce((s, a) => s + (a.usdValue ?? 0), 0);
-    const newDiffs = computeAllocationDiffs(portfolioAssets, normTargets, totalUsd);
-    setDiffs(newDiffs);
-    const baseFeeUsd = (Number(100) / 1e7) * (prices["XLM"] ?? 0.11);
-    const newSwaps = generateSwapSuggestions(newDiffs, prices, baseFeeUsd);
-    setSwaps(newSwaps);
-    setExecution(createInitialExecution(newSwaps.length));
-  }, [portfolioAssets, targets, prices]);
+  }, [balances, priceProvider]);
 
   // ── Execution ─────────────────────────────────────────────────────────────
   const executeRebalance = useCallback(async () => {
@@ -219,7 +232,7 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
       try {
         // Invoke the swap as a Soroban contract call. In production this would
         // call the AMM contract; here we use the generic invokeContract stub.
-        const { data, error } = await getClient().soroban.invokeContract({
+        const { data, error } = await client.soroban.invokeContract({
           contractId: "rebalancer",
           method: "swap",
           args: [swaps[i].from, swaps[i].to, swaps[i].fromAmount.toFixed(7)],
@@ -229,8 +242,13 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
 
         if (error) {
           exec = updateSwapStatus(exec, i, "failed", null, error);
-          setExecution({ ...exec, isRunning: true, currentSwapIndex: i + 1 });
-          continue;
+          for (let j = i + 1; j < swaps.length; j++) {
+            exec = updateSwapStatus(exec, j, "skipped", null, "Cancelled due to previous swap failure");
+          }
+          setExecution({ ...exec, isRunning: false });
+          setShowPartialModal(true);
+          await refreshAccount();
+          return;
         }
 
         // Extract hash from result (real AMM response shape)
@@ -246,7 +264,13 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
         if (signal.aborted) break;
         const msg = e instanceof Error ? e.message : "Unknown error";
         exec = updateSwapStatus(exec, i, "failed", null, msg);
-        setExecution({ ...exec, isRunning: true, currentSwapIndex: i + 1 });
+        for (let j = i + 1; j < swaps.length; j++) {
+          exec = updateSwapStatus(exec, j, "skipped", null, "Cancelled due to previous swap failure");
+        }
+        setExecution({ ...exec, isRunning: false });
+        setShowPartialModal(true);
+        await refreshAccount();
+        return;
       }
     }
 
@@ -272,7 +296,79 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
       totalCostUsd,
     );
     setHistory((h) => [record, ...h]);
-  }, [swaps, execution.isRunning, portfolioAssets, prices, balances, refreshAccount]);
+  }, [swaps, execution.isRunning, portfolioAssets, prices, balances, refreshAccount, client.soroban]);
+
+  const retryFailedSwaps = useCallback(async () => {
+    if (swaps.length === 0 || execution.isRunning) return;
+
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
+
+    let exec: RebalanceExecution = {
+      ...execution,
+      isRunning: true,
+    };
+    setExecution(exec);
+    setExecError(null);
+
+    for (let i = 0; i < swaps.length; i++) {
+      if (signal.aborted) break;
+      if (exec.swapStatuses[i] === "success") continue;
+
+      exec = updateSwapStatus(exec, i, "submitting");
+      setExecution({ ...exec, isRunning: true, currentSwapIndex: i });
+
+      try {
+        const { data, error } = await client.soroban.invokeContract({
+          contractId: "rebalancer",
+          method: "swap",
+          args: [swaps[i].from, swaps[i].to, swaps[i].fromAmount.toFixed(7)],
+        });
+
+        if (signal.aborted) break;
+
+        if (error) {
+          exec = updateSwapStatus(exec, i, "failed", null, error);
+          for (let j = i + 1; j < swaps.length; j++) {
+            if (exec.swapStatuses[j] !== "success") {
+              exec = updateSwapStatus(exec, j, "skipped", null, "Cancelled due to previous swap failure");
+            }
+          }
+          setExecution({ ...exec, isRunning: false });
+          setShowPartialModal(true);
+          await refreshAccount();
+          return;
+        }
+
+        const hash =
+          typeof data === "object" && data !== null && "hash" in data
+            ? String((data as { hash: string }).hash)
+            : `stub-${randomId()}`;
+
+        exec = updateSwapStatus(exec, i, "success", hash);
+        setExecution({ ...exec, isRunning: true, currentSwapIndex: i + 1 });
+      } catch (e) {
+        if (signal.aborted) break;
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        exec = updateSwapStatus(exec, i, "failed", null, msg);
+        for (let j = i + 1; j < swaps.length; j++) {
+          if (exec.swapStatuses[j] !== "success") {
+            exec = updateSwapStatus(exec, j, "skipped", null, "Cancelled due to previous swap failure");
+          }
+        }
+        setExecution({ ...exec, isRunning: false });
+        setShowPartialModal(true);
+        await refreshAccount();
+        return;
+      }
+    }
+
+    const finalExec: RebalanceExecution = { ...exec, isRunning: false };
+    setExecution(finalExec);
+    setShowPartialModal(false);
+    await refreshAccount();
+  }, [swaps, execution, client.soroban, refreshAccount]);
 
   const cancelExecution = useCallback(() => {
     abortRef.current?.abort();
@@ -371,6 +467,15 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
             ))}
           </div>
 
+          {isUsingStubPrices && (
+            <div
+            role="alert"
+            className="flex items-center gap-2 px-5 py-2 bg-[rgba(249,115,22,0.08)] border-b border-[rgba(249,115,22,0.2)] text-[12px] text-orange"
+            >
+              <HugeiconsIcon icon={AlertCircleIcon} size={14} strokeWidth={1.5} className="shrink-0" />
+              <span>⚠️ Prices are simulated — figures shown are estimates, not live market data.</span>
+            </div>
+          )}
           {/* ── Panel body ───────────────────────────────────────────────── */}
           <div className="p-5">
 
@@ -384,9 +489,7 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
               {isLoading ? (
                 <AllocationsLoadingSkeleton />
               ) : portfolioAssets.length === 0 ? (
-                <p className="text-[13px] text-ink-3 text-center py-10">
-                  No assets found in your wallet
-                </p>
+                <EmptyPortfolioOnboarding address={address} />
               ) : (
                 <div className="flex flex-col gap-6">
                   {/* Dual pie charts */}
@@ -557,13 +660,32 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
                     </Button>
                   )}
                   {!execution.isRunning && execution.swapStatuses.some((s) => s !== "pending") && (
-                    <Button
-                      variant="secondary"
-                      size="md"
-                      onClick={() => setActiveTab("history")}
-                    >
-                      View history →
-                    </Button>
+                    <>
+                      {execution.swapStatuses.some((s) => s === "failed") && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={() => setShowPartialModal(true)}
+                          >
+                            Partial summary
+                          </Button>
+                          <Button
+                            size="md"
+                            onClick={() => void retryFailedSwaps()}
+                          >
+                            Retry failed swaps
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        variant="secondary"
+                        size="md"
+                        onClick={() => setActiveTab("history")}
+                      >
+                        View history →
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
@@ -581,6 +703,123 @@ export function PortfolioRebalancer({ className }: PortfolioRebalancerProps) {
 
           </div>
         </>
+      )}
+
+      {/* ── Partial execution summary modal ───────────────────────────────── */}
+      <Dialog.Root open={showPartialModal} onOpenChange={setShowPartialModal}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 animate-in fade-in-0" />
+          <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg bg-surface border border-line rounded-xl p-6 shadow-xl z-50 focus:outline-none">
+            <Dialog.Title className="text-[15px] font-semibold text-ink">
+              Partial Execution Summary
+            </Dialog.Title>
+            <Dialog.Description className="text-[12px] text-ink-3 mt-1 mb-4">
+              One of the multi-step rebalance swaps failed. Subsequent swaps were cancelled. Review the status below.
+            </Dialog.Description>
+
+            <div className="rounded-lg bg-[rgba(249,115,22,0.08)] border border-[rgba(249,115,22,0.2)] p-3.5 mb-4 text-[12px] text-ink-2">
+              <p className="font-semibold text-orange mb-1">Rollback instructions</p>
+              <p>
+                Succeeded swaps cannot be automatically rolled back on-chain. You can adjust your targets in the Allocations tab to accept the partial distribution, or click Retry below to re-attempt the failed and remaining swaps.
+              </p>
+            </div>
+
+            <div className="space-y-2 mb-5 max-h-56 overflow-y-auto" data-testid="partial-swaps-list">
+              {swaps.map((s, idx) => {
+                const status = execution.swapStatuses[idx];
+                const err = execution.errors[idx];
+                const hash = execution.txHashes[idx];
+                const isSuccess = status === "success";
+                const isFailed = status === "failed";
+                return (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between p-3 rounded-lg border border-line bg-surface-2/40 text-[12px]"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-ink">
+                          {s.from} → {s.to}
+                        </span>
+                        <span className="text-ink-3">
+                          ({s.fromAmount.toFixed(4)} {s.from})
+                        </span>
+                      </div>
+                      {hash && (
+                        <p className="text-[10px] font-mono text-ink-3 mt-0.5 truncate max-w-[200px]">
+                          Tx: {hash}
+                        </p>
+                      )}
+                      {err && (
+                        <p className="text-[11px] text-red mt-0.5">{err}</p>
+                      )}
+                    </div>
+                    <Badge
+                      variant={
+                        isSuccess ? "success" : isFailed ? "error" : "default"
+                      }
+                    >
+                      {isSuccess ? "Succeeded" : isFailed ? "Failed" : "Cancelled"}
+                    </Badge>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowPartialModal(false)}
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setShowPartialModal(false);
+                  void retryFailedSwaps();
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </div>
+  );
+}
+
+export function EmptyPortfolioOnboarding({ address }: { address?: string | null }) {
+  return (
+    <div
+      data-testid="empty-portfolio-onboarding"
+      className="flex flex-col items-center justify-center py-12 px-6 text-center max-w-md mx-auto"
+    >
+      <div className="w-12 h-12 rounded-full bg-brand-dim flex items-center justify-center mb-4 text-brand">
+        <HugeiconsIcon icon={AlertCircleIcon} size={24} strokeWidth={1.5} />
+      </div>
+      <h3 className="text-[15px] font-semibold text-ink mb-1">
+        No assets found in your wallet
+      </h3>
+      <p className="text-[12px] text-ink-3 mb-6 leading-relaxed">
+        Your portfolio balance is currently 0. To use the rebalancer, you need to fund your account with XLM or other supported tokens (minimum balance {DUST_THRESHOLD_BALANCE} XLM).
+      </p>
+      <div className="w-full bg-surface-2/60 border border-line rounded-lg p-4 text-left mb-5">
+        <p className="text-[11px] font-semibold text-ink uppercase tracking-[0.08em] mb-2">
+          Instructions to fund your account:
+        </p>
+        <ol className="text-[12px] text-ink-2 space-y-1.5 list-decimal list-inside">
+          <li>Transfer XLM from an exchange or an existing Stellar wallet.</li>
+          <li>Maintain the minimum network reserve balance (at least 1 XLM recommended).</li>
+          <li>If testing on Testnet, request funds from the Stellar Friendbot faucet.</li>
+        </ol>
+      </div>
+      {address && (
+        <div className="text-[11px] text-ink-3">
+          Your wallet address: <span className="font-mono text-ink select-all">{address}</span>
+        </div>
       )}
     </div>
   );

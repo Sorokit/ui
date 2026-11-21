@@ -1,24 +1,30 @@
 import {
   ArrowDown01Icon,
-  ArrowLeft01Icon,
-  ArrowRight01Icon,
-  CheckmarkCircle01Icon,
   ChevronDownIcon,
   ClockIcon,
   Delete01Icon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
+import { useSorokit } from "@/context/useSorokit";
 import type { AllowanceEntry } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
 interface AllowanceManagerProps {
   className?: string;
+  /** Current Soroban ledger sequence, used to evaluate ledger-based expiry. */
+  currentLedger?: number;
 }
+
+/**
+ * Valid 56-character Stellar testnet account address used when no wallet
+ * address is available. The previous fallback was 55 characters long, which
+ * made the RPC reject it (issue #650).
+ */
+const FALLBACK_ADDRESS = "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H";
 
 function formatAssetName(entry: AllowanceEntry): string {
   if (entry.tokenCode && entry.tokenCode !== "XLM") {
@@ -30,18 +36,88 @@ function formatAssetName(entry: AllowanceEntry): string {
   return entry.asset;
 }
 
-function formatCurrency(amount: string, tokenCode?: string): string {
+export function formatCurrency(amount: string, tokenCode?: string): string {
   if (!tokenCode || tokenCode === "XLM") {
     return amount;
   }
-  const num = parseFloat(amount);
-  if (isNaN(num)) return amount;
-  return num.toFixed(2);
+  if (!amount) return amount;
+  const [intPart, fracPart] = amount.split(".");
+  if (!intPart || !/^-?\d+$/.test(intPart)) return amount;
+  // Issue #650: group the digits as a string instead of routing the balance
+  // through parseFloat, which truncated 7-decimal stroops and 128-bit values.
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  if (fracPart === undefined) return grouped;
+  const trimmed = fracPart.slice(0, 7);
+  return trimmed ? `${grouped}.${trimmed}` : grouped;
 }
 
-function isExpired(expirationDate?: string): boolean {
+export function isExpired(
+  expirationDate?: string,
+  expirationLedger?: number,
+  currentLedger?: number,
+): boolean {
+  // Issue #650: allowances can expire by Soroban ledger sequence rather than by
+  // wall-clock time — check the ledger first when both values are known.
+  if (typeof expirationLedger === "number" && typeof currentLedger === "number") {
+    return currentLedger >= expirationLedger;
+  }
   if (!expirationDate) return false;
-  return new Date(expirationDate) < new Date();
+  const time = new Date(expirationDate).getTime();
+  if (Number.isNaN(time)) return false;
+  return time < Date.now();
+}
+
+/** Approximate Stellar ledger close time, used to turn ledger counts into wall-clock estimates. */
+export const LEDGER_CLOSE_SECONDS = 5;
+
+function formatRelativeDuration(seconds: number): string {
+  const abs = Math.abs(seconds);
+  let value: number;
+  let unit: string;
+  if (abs < 60) {
+    value = Math.round(abs);
+    unit = "second";
+  } else if (abs < 3600) {
+    value = Math.round(abs / 60);
+    unit = "minute";
+  } else if (abs < 86400) {
+    value = Math.round(abs / 3600);
+    unit = "hour";
+  } else {
+    value = Math.round(abs / 86400);
+    unit = "day";
+  }
+  const label = `~${value} ${unit}${value === 1 ? "" : "s"}`;
+  return seconds >= 0 ? `${label} from now` : `${label} ago`;
+}
+
+/**
+ * Estimate when an allowance expiring at `expirationLedger` will lapse, given
+ * the network's current ledger and ~5-second ledger close times.
+ */
+export function estimateLedgerExpiry(
+  expirationLedger: number,
+  currentLedger: number,
+  nowMs: number = Date.now(),
+): { date: Date; relative: string } {
+  const seconds = (expirationLedger - currentLedger) * LEDGER_CLOSE_SECONDS;
+  return {
+    date: new Date(nowMs + seconds * 1000),
+    relative: formatRelativeDuration(seconds),
+  };
+}
+
+/**
+ * Returns an inline validation message for a spender address, or null when it
+ * is acceptable. Approving the active account as its own spender is blocked.
+ */
+export function validateSpender(spender: string, activeAddress?: string | null): string | null {
+  const trimmed = spender.trim();
+  if (!trimmed) return "Spender address is required";
+  if (activeAddress && trimmed.toUpperCase() === activeAddress.trim().toUpperCase()) {
+    return "You can't approve your own address as a spender";
+  }
+  return null;
 }
 
 function truncateAddress(address: string, start = 8, end = 6): string {
@@ -49,19 +125,20 @@ function truncateAddress(address: string, start = 8, end = 6): string {
   return `${address.slice(0, start)}...${address.slice(-end)}`;
 }
 
-export function AllowanceManager({ className }: AllowanceManagerProps) {
+export function AllowanceManager({ className, currentLedger }: AllowanceManagerProps) {
+  const { address, isConnected, client } = useSorokit();
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [processing, setProcessing] = useState<Record<string, 'increase' | 'decrease' | 'revoke' | null>>({});
+  const [showNewForm, setShowNewForm] = useState(false);
+
+  const sourceAccount = address || FALLBACK_ADDRESS;
 
   const loadAllowances = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const sourceAccount = "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN";
-      const { data, error: err } = await getClient().allowance.getAllowances(sourceAccount);
+      const { data, error: err } = await client.allowance.getAllowances(sourceAccount);
       if (err) {
         setError(err);
         return;
@@ -72,11 +149,33 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [client, sourceAccount]);
 
   useEffect(() => {
-    void loadAllowances();
-  }, [loadAllowances]);
+    let active = true;
+    if (!isConnected || !address || !client) {
+      return;
+    }
+    client
+      .allowance.getAllowances(sourceAccount)
+      .then(({ data, error: err }) => {
+        if (!active) return;
+        if (err) {
+          setError(err);
+        } else {
+          setAllowances(data ?? []);
+        }
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (!active) return;
+        setError(e instanceof Error ? e.message : "Failed to load allowances");
+        setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [address, client, isConnected, sourceAccount]);
 
   const handleIncrease = async (entry: AllowanceEntry) => {
     const key = `${entry.asset}-${entry.spender}`;
@@ -84,13 +183,13 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
         amount: "100.00",
       };
 
-      const { data, error: err } = await getClient().allowance.approveAllowance(params);
+      const { error: err } = await client.allowance.approveAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -110,13 +209,13 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
         amount: newAmount,
       };
 
-      const { data, error: err } = await getClient().allowance.approveAllowance(params);
+      const { error: err } = await client.allowance.approveAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -136,12 +235,12 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
 
     try {
       const params = {
-        sourceAccount: "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34KZVN",
+        sourceAccount,
         asset: entry.asset,
         spender: entry.spender,
       };
 
-      const { data, error: err } = await getClient().allowance.revokeAllowance(params);
+      const { error: err } = await client.allowance.revokeAllowance(params);
       if (err) {
         setError(err);
         return;
@@ -155,13 +254,47 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
     }
   };
 
+  const handleApproveNew = async (params: { asset: string; spender: string; amount: string }) => {
+    // Re-check here too so a bypassed form can never submit a self-approval.
+    if (validateSpender(params.spender, address)) return false;
+    try {
+      const { error: err } = await client.allowance.approveAllowance({
+        sourceAccount,
+        asset: params.asset.trim(),
+        spender: params.spender.trim(),
+        amount: params.amount,
+      });
+      if (err) {
+        setError(err);
+        return false;
+      }
+      await loadAllowances();
+      setShowNewForm(false);
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to approve allowance");
+      return false;
+    }
+  };
+
   const handleRetry = useCallback(() => {
     setError(null);
     void loadAllowances();
-  }, []);
+  }, [loadAllowances]);
 
-  const renderAllowanceCard = (entry: AllowanceEntry) => {
-    const isExp = isExpired(entry.expirationDate);
+  if (!isConnected || !address) {
+    return (
+      <div className={cn("space-y-4", className)}>
+        <div className="rounded-xl border border-line bg-surface p-8 text-center">
+          <p className="text-[14px] font-medium text-ink">Connect your wallet</p>
+          <p className="text-[12px] text-ink-3 mt-1">Connect your wallet to manage allowances</p>
+        </div>
+      </div>
+    );
+  }
+
+  const renderAllowanceCard = (entry: AllowanceEntry, index: number) => {
+    const isExp = isExpired(entry.expirationDate, entry.expirationLedger, currentLedger);
     const isProcessingIncrease = processing[`${entry.asset}-${entry.spender}`] === 'increase';
     const isProcessingDecrease = processing[`${entry.asset}-${entry.spender}`] === 'decrease';
     const isProcessingRevoke = processing[`${entry.asset}-${entry.spender}`] === 'revoke';
@@ -233,6 +366,21 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
                 </div>
               </div>
 
+              {typeof entry.expirationLedger === "number" && (
+                <div className="flex items-center gap-2">
+                  <HugeiconsIcon
+                    icon={ClockIcon}
+                    size={12}
+                    className="text-ink-3"
+                    strokeWidth={1.5}
+                  />
+                  <LedgerExpiry
+                    expirationLedger={entry.expirationLedger}
+                    currentLedger={currentLedger}
+                  />
+                </div>
+              )}
+
               {entry.expirationDate && (
                 <div className="flex items-center gap-2">
                   <HugeiconsIcon
@@ -252,7 +400,7 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
                 <div className="flex flex-wrap gap-2">
                   <IncreaseButton entry={entry} onIncrease={handleIncrease} processing={isProcessingIncrease} />
                   <DecreaseDialog entry={entry} onDecrease={handleDecrease} processing={isProcessingDecrease} />
-                  <RevokeButton entry={entry} onRevoke={handleRevoke} processing={isProcessingRevoke} />
+                  <RevokeButton entry={entry} onRevoke={handleRevoke} processing={isProcessingRevoke} index={index} />
                 </div>
               </div>
             </div>
@@ -272,22 +420,40 @@ export function AllowanceManager({ className }: AllowanceManagerProps) {
               Manage allowances granted to contracts
             </p>
           </div>
-          <button
-            onClick={() => void handleRetry()}
-            disabled={loading}
-            className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
-            title="Refresh"
-            aria-label="Refresh allowances"
-          >
-            <HugeiconsIcon
-              icon={Refresh01Icon}
-              size={14}
-              color="currentColor"
-              strokeWidth={1.5}
-              className={loading ? "animate-spin" : ""}
-            />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNewForm((v) => !v)}
+              aria-expanded={showNewForm}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-surface-2 hover:bg-surface border border-line text-ink-2 transition-colors"
+            >
+              New allowance
+            </button>
+            <button
+              onClick={() => void handleRetry()}
+              disabled={loading}
+              className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
+              title="Refresh"
+              aria-label="Refresh allowances"
+            >
+              <HugeiconsIcon
+                icon={Refresh01Icon}
+                size={14}
+                color="currentColor"
+                strokeWidth={1.5}
+                className={loading ? "animate-spin" : ""}
+              />
+            </button>
+          </div>
         </div>
+
+        {showNewForm && (
+          <NewAllowanceForm
+            activeAddress={address}
+            onSubmit={handleApproveNew}
+            onCancel={() => setShowNewForm(false)}
+          />
+        )}
 
         <div className="px-5 py-4" aria-live="polite" aria-atomic="true">
           {loading && allowances.length === 0 ? (
@@ -475,12 +641,15 @@ function RevokeButton({
   entry,
   onRevoke,
   processing,
+  index,
 }: {
   entry: AllowanceEntry;
   onRevoke: (entry: AllowanceEntry) => void;
   processing: boolean;
+  index: number;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const titleId = useId();
 
   const handleRevoke = () => {
     onRevoke(entry);
@@ -490,6 +659,7 @@ function RevokeButton({
   return (
     <>
       <button
+        data-testid={`revoke-allowance-${index}`}
         onClick={(e) => {
           e.stopPropagation();
           setConfirming(true);
@@ -523,22 +693,28 @@ function RevokeButton({
           }}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
             className="bg-surface rounded-xl border border-line p-5 w-full max-w-md"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-[16px] font-semibold text-ink mb-2">Confirm Revoke</h3>
+            <h3 id={titleId} className="text-[16px] font-semibold text-ink mb-2">Confirm Revoke</h3>
             <p className="text-[13px] text-ink-3 mb-4">
               Are you sure you want to revoke the allowance for <span className="font-medium text-ink">{formatAssetName(entry)}</span> to <span className="font-mono">{truncateAddress(entry.spender)}</span>?
               This action cannot be undone.
             </p>
             <div className="flex gap-2 mt-5">
               <button
+                type="button"
                 onClick={() => setConfirming(false)}
                 className="flex-1 px-4 py-2 rounded-lg border border-line bg-surface-2 text-[14px] font-medium text-ink hover:bg-surface transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
+                data-testid="confirm-revoke"
                 onClick={handleRevoke}
                 className="flex-1 px-4 py-2 rounded-lg bg-red hover:bg-red-dim text-white text-[14px] font-medium transition-colors"
               >
@@ -549,5 +725,160 @@ function RevokeButton({
         </div>
       )}
     </>
+  );
+}
+
+function LedgerExpiry({
+  expirationLedger,
+  currentLedger,
+}: {
+  expirationLedger: number;
+  currentLedger?: number;
+}) {
+  if (typeof currentLedger !== "number") {
+    return (
+      <span className="text-[12px] text-ink-2">
+        Expires at ledger {expirationLedger}
+      </span>
+    );
+  }
+  const { date, relative } = estimateLedgerExpiry(expirationLedger, currentLedger);
+  return (
+    <span
+      className="text-[12px] text-ink-2"
+      title={`Estimated from ${LEDGER_CLOSE_SECONDS}-second ledger close times`}
+      data-testid="ledger-expiry"
+    >
+      Expires at ledger {expirationLedger} · {relative}{" "}
+      <span className="text-ink-4">({date.toLocaleString()})</span>
+    </span>
+  );
+}
+
+function NewAllowanceForm({
+  activeAddress,
+  onSubmit,
+  onCancel,
+}: {
+  activeAddress: string | null;
+  onSubmit: (params: { asset: string; spender: string; amount: string }) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [asset, setAsset] = useState("");
+  const [spender, setSpender] = useState("");
+  const [amount, setAmount] = useState("");
+  const [touched, setTouched] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const fieldId = useId();
+  const spenderErrorId = `${fieldId}-spender-error`;
+
+  const spenderError = validateSpender(spender, activeAddress);
+  // Only surface "required" after the user has interacted; a self-approval is
+  // flagged as soon as it's typed.
+  const visibleSpenderError =
+    spenderError && (touched || spender.trim() !== "") ? spenderError : null;
+  const amountValid = amount !== "" && parseFloat(amount) > 0;
+  const canSubmit = !spenderError && asset.trim() !== "" && amountValid && !submitting;
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setTouched(true);
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      const ok = await onSubmit({ asset, spender, amount });
+      if (ok) {
+        setAsset("");
+        setSpender("");
+        setAmount("");
+        setTouched(false);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const inputClass =
+    "w-full h-9 rounded-lg border bg-surface-2 px-3 text-[13px] text-ink outline-none focus:ring-1";
+
+  return (
+    <form
+      onSubmit={(e) => void handleSubmit(e)}
+      aria-label="New allowance"
+      className="px-5 py-4 border-b border-line bg-surface-2 space-y-3"
+      noValidate
+    >
+      <div>
+        <label htmlFor={`${fieldId}-asset`} className="text-[12px] font-medium text-ink-3 mb-1 block">
+          Token
+        </label>
+        <input
+          id={`${fieldId}-asset`}
+          type="text"
+          value={asset}
+          onChange={(e) => setAsset(e.target.value)}
+          placeholder="Token code or contract ID"
+          className={cn(inputClass, "border-line focus:border-line-2 focus:ring-brand-dim")}
+        />
+      </div>
+      <div>
+        <label htmlFor={`${fieldId}-spender`} className="text-[12px] font-medium text-ink-3 mb-1 block">
+          Spender address
+        </label>
+        <input
+          id={`${fieldId}-spender`}
+          type="text"
+          value={spender}
+          onChange={(e) => setSpender(e.target.value)}
+          onBlur={() => setTouched(true)}
+          placeholder="G... or C..."
+          aria-invalid={visibleSpenderError ? true : undefined}
+          aria-describedby={visibleSpenderError ? spenderErrorId : undefined}
+          className={cn(
+            inputClass,
+            "font-mono",
+            visibleSpenderError
+              ? "border-red focus:border-red focus:ring-error-dim"
+              : "border-line focus:border-line-2 focus:ring-brand-dim",
+          )}
+        />
+        {visibleSpenderError && (
+          <p id={spenderErrorId} role="alert" className="text-[11px] text-red mt-1">
+            {visibleSpenderError}
+          </p>
+        )}
+      </div>
+      <div>
+        <label htmlFor={`${fieldId}-amount`} className="text-[12px] font-medium text-ink-3 mb-1 block">
+          Amount
+        </label>
+        <input
+          id={`${fieldId}-amount`}
+          type="number"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="Amount"
+          min="0"
+          step="0.01"
+          className={cn(inputClass, "border-line focus:border-line-2 focus:ring-brand-dim")}
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2 rounded-lg border border-line bg-surface text-[13px] font-medium text-ink hover:bg-surface-2 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="px-4 py-2 rounded-lg bg-brand hover:bg-brand-dim text-white text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Approving..." : "Approve"}
+        </button>
+      </div>
+    </form>
   );
 }

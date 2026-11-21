@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import QRCodeLib from "qrcode";
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ vi.mock("qrcode", () => {
         }
         return Promise.resolve();
       }),
+      toString: vi.fn(() => Promise.resolve("<svg><rect /></svg>")),
     },
   };
 });
@@ -54,7 +55,7 @@ describe("QRCode", () => {
     getContextSpy.mockReturnValue(null);
     const { container } = render(<QRCode value={value} />);
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
-    expect(screen.getByText("QR Code failed to load")).toBeInTheDocument();
+    expect(screen.getByText("Unable to generate QR code")).toBeInTheDocument();
     expect(screen.getByText(value)).toBeInTheDocument();
   });
 
@@ -68,7 +69,7 @@ describe("QRCode", () => {
 
     const { container } = render(<QRCode value={value} />);
     expect(container.querySelector("canvas")).not.toBeInTheDocument();
-    expect(screen.getByText("QR Code failed to load")).toBeInTheDocument();
+    expect(screen.getByText("Unable to generate QR code")).toBeInTheDocument();
     expect(screen.getByText(value)).toBeInTheDocument();
   });
 
@@ -174,8 +175,8 @@ describe("QRCode", () => {
     mockToCanvas.mockImplementation(((...args: unknown[]) => {
       const canvas = args[0] as HTMLCanvasElement;
       const ctx = canvas.getContext("2d");
-      if (ctx && typeof (ctx as { clearRect: Function }).clearRect === "function") {
-        (ctx as { clearRect: Function }).clearRect(0, 0, 0, 0);
+      if (ctx && typeof (ctx as { clearRect: (...args: unknown[]) => void }).clearRect === "function") {
+        (ctx as { clearRect: (...args: unknown[]) => void }).clearRect(0, 0, 0, 0);
       }
       const callback = args[3] as (err: Error | null) => void;
       if (typeof callback === "function") {
@@ -199,5 +200,70 @@ describe("QRCode", () => {
       0,
     );
     warnSpy.mockRestore();
+  });
+
+  describe("accessible description (#953)", () => {
+    it("links a visually-hidden description to the canvas", () => {
+      render(<QRCode value={value} description="Scan to receive funds." />);
+      const img = screen.getByRole("img");
+      const describedBy = img.getAttribute("aria-describedby");
+
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toHaveTextContent(
+        "Scan to receive funds.",
+      );
+    });
+
+    it("falls back to a generated description when none is provided", () => {
+      render(<QRCode value={value} />);
+      const img = screen.getByRole("img");
+      const describedBy = img.getAttribute("aria-describedby");
+
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toHaveTextContent(
+        new RegExp(`QR code encoding ${value}`),
+      );
+    });
+  });
+
+  describe("download action (#953)", () => {
+    it("re-encodes the value as SVG and triggers a download", async () => {
+      const createObjectURL = vi.fn(() => "blob:mock-url");
+      const revokeObjectURL = vi.fn();
+      const originalCreate = URL.createObjectURL;
+      const originalRevoke = URL.revokeObjectURL;
+      URL.createObjectURL =
+        createObjectURL as unknown as typeof URL.createObjectURL;
+      URL.revokeObjectURL =
+        revokeObjectURL as unknown as typeof URL.revokeObjectURL;
+
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+
+      render(<QRCode value={value} downloadFileName="my-wallet" />);
+      fireEvent.click(
+        screen.getByRole("button", { name: /download qr code/i }),
+      );
+
+      await waitFor(() => expect(QRCodeLib.toString).toHaveBeenCalled());
+      const [, options] = vi.mocked(QRCodeLib.toString).mock.calls[0];
+      expect(options).toMatchObject({ type: "svg" });
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock-url");
+
+      clickSpy.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    });
+
+    it("does not render the download action when generation failed", () => {
+      getContextSpy.mockReturnValue(null);
+      render(<QRCode value={value} />);
+      expect(
+        screen.queryByRole("button", { name: /download qr code/i }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

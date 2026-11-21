@@ -24,6 +24,8 @@
  * @param props.limit - Maximum number of events to fetch per poll (default: 10)
  * @param props.pollInterval - Auto-poll interval in ms (default: 0, disabled)
  * @param props.filterTypes - Event types to show by default (default: all types)
+ * @param props.filterTopics - Only show events carrying at least one of these
+ *   topic names (default: no topic filter)
  * @param props.maxValueLength - Character length before an event value gets a
  *   "Show more" toggle (default: 200)
  *
@@ -50,8 +52,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
+import { useSorokit } from "@/context/useSorokit";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import type { ContractEvent } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const EVENT_TYPE_VARIANT: Record<
@@ -67,6 +70,45 @@ const EVENT_TYPE_VARIANT: Record<
 const DEFAULT_MAX_VALUE_LENGTH = 200;
 const TOPIC_PREVIEW_COUNT = 3;
 const HIGHLIGHT_DURATION_MS = 1500;
+
+// Issue #732: persist the last-seen ledger per contract so navigating away and
+// back (an unmount/remount, not just a re-render) resumes where the feed left
+// off instead of silently skipping whatever arrived while it was hidden.
+const FROM_LEDGER_STORAGE_PREFIX = "sorokit:contract-event-feed:fromLedger:";
+
+function fromLedgerStorageKey(contractId: string): string {
+  return `${FROM_LEDGER_STORAGE_PREFIX}${contractId}`;
+}
+
+function readPersistedFromLedger(contractId: string): number | undefined {
+  try {
+    const raw = window.sessionStorage.getItem(fromLedgerStorageKey(contractId));
+    if (raw === null) return undefined;
+    const ledger = Number(raw);
+    // A corrupted or tampered value must not be forwarded to `getEvents` as
+    // NaN — fall back to the prop/default window instead.
+    return Number.isFinite(ledger) && ledger >= 0 ? ledger : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function persistFromLedger(contractId: string, ledger: number): void {
+  if (!Number.isFinite(ledger) || ledger < 0) return;
+  try {
+    window.sessionStorage.setItem(fromLedgerStorageKey(contractId), String(ledger));
+  } catch {
+    /* sessionStorage unavailable (e.g. private browsing) — resume is best-effort */
+  }
+}
+
+function clearPersistedFromLedger(contractId: string): void {
+  try {
+    window.sessionStorage.removeItem(fromLedgerStorageKey(contractId));
+  } catch {
+    /* ignore */
+  }
+}
 
 function formatRelativeTime(fromMs: number, nowMs: number): string {
   const diff = Math.max(0, nowMs - fromMs);
@@ -130,6 +172,7 @@ function TopicTag({ topic }: { topic: string }) {
         type="button"
         onClick={handleCopy}
         title="Copy topic"
+        aria-label={copied ? "Topic copied" : "Copy topic"}
         className="opacity-0 group-hover:opacity-100 hover:text-ink-1 transition-opacity cursor-pointer p-0.5"
       >
         <HugeiconsIcon
@@ -217,6 +260,11 @@ export interface ContractEventFeedProps {
   limit?: number;
   /** Event types shown by default. Defaults to every type present in the feed. */
   filterTypes?: string[];
+  /**
+   * Only show events whose topics include at least one of these names (exact
+   * match). Omitted or empty shows events regardless of topic.
+   */
+  filterTopics?: string[];
   /** Character length before an event value is truncated with a "Show more" toggle. */
   maxValueLength?: number;
   /**
@@ -226,6 +274,7 @@ export interface ContractEventFeedProps {
    * consumers can page through historical event windows.
    */
   fromLedger?: number;
+  className?: string;
 }
 
 export function ContractEventFeed({
@@ -233,25 +282,51 @@ export function ContractEventFeed({
   pollInterval = 0,
   limit = 10,
   filterTypes,
+  filterTopics,
   maxValueLength = DEFAULT_MAX_VALUE_LENGTH,
   fromLedger,
+  className,
 }: ContractEventFeedProps) {
+  const { client, registerWatcher } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
   const [events, setEvents] = useState<ContractEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while live polling keeps failing after at least one successful load.
+  // The last good events stay on screen and the next successful poll clears it.
+  const [reconnecting, setReconnecting] = useState(false);
   const [live, setLive] = useState(pollInterval > 0);
+  // Read inside `load` without making it a dependency, so toggling Live or
+  // changing pollInterval doesn't trigger an extra fetch.
+  const pollingRef = useRef(live && pollInterval > 0);
+  useEffect(() => {
+    pollingRef.current = live && pollInterval > 0;
+  }, [live, pollInterval]);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [activeTypes, setActiveTypes] = useState<Set<string> | null>(
     filterTypes ? new Set(filterTypes) : null,
   );
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Issue #442: generation counter for `load`. Bumped on every call and
+  // whenever `contractId` changes, so a response that arrives after a newer
+  // request started - or after the feed moved to another contract - is
+  // discarded instead of overwriting the current events.
+  const requestIdRef = useRef(0);
 
   // IDs highlighted as newly-arrived. `prevEventIdsRef` is the baseline from
   // the previous successful load — `null` means no baseline yet, so the very
   // first load doesn't flag every event as "new".
   const [newEventIds, setNewEventIds] = useState<Set<string>>(new Set());
   const prevEventIdsRef = useRef<Set<string> | null>(null);
+
+  // Issue #732: the ledger actually used for `getEvents`. Seeded from the
+  // `fromLedger` prop, falling back to whatever was persisted for this
+  // contract by a previous mount — this is what makes an unmount/remount
+  // resume instead of resetting to the prop default.
+  const [effectiveFromLedger, setEffectiveFromLedger] = useState<number | undefined>(
+    () => fromLedger ?? readPersistedFromLedger(contractId),
+  );
 
   // Drop the previous contract's events as soon as `contractId` changes.
   // `load` only replaces `events` once the new fetch succeeds, so without this
@@ -260,29 +335,81 @@ export function ContractEventFeed({
   // frame is committed.
   const [prevContractId, setPrevContractId] = useState(contractId);
   if (prevContractId !== contractId) {
+    // The old contract's cursor is no longer relevant once we've moved on.
+    clearPersistedFromLedger(prevContractId);
     setPrevContractId(contractId);
     setEvents([]);
     setError(null);
+    setReconnecting(false);
     setLastUpdatedAt(null);
     setNewEventIds(new Set());
-    prevEventIdsRef.current = null;
+    setEffectiveFromLedger(fromLedger ?? readPersistedFromLedger(contractId));
   }
 
+  // An explicit `fromLedger` prop change (as opposed to a contractId switch)
+  // always overrides whatever was persisted — the caller asked for a specific
+  // ledger, so honor it exactly, mirroring the `prevContractId` pattern above.
+  const [prevFromLedgerProp, setPrevFromLedgerProp] = useState(fromLedger);
+  if (prevFromLedgerProp !== fromLedger) {
+    setPrevFromLedgerProp(fromLedger);
+    setEffectiveFromLedger(fromLedger ?? readPersistedFromLedger(contractId));
+  }
+
+  // Issue #442: `live` is seeded from `pollInterval` at mount, so a runtime
+  // change of the prop has to re-seed it - otherwise a feed mounted with
+  // polling off (pollInterval 0) never starts polling when the prop turns on.
+  // Synced during render, mirroring the `prevContractId` pattern above.
+  const [prevPollInterval, setPrevPollInterval] = useState(pollInterval);
+  if (prevPollInterval !== pollInterval) {
+    setPrevPollInterval(pollInterval);
+    setLive(pollInterval > 0);
+  }
+
+  useEffect(() => {
+    prevEventIdsRef.current = null;
+    // Issue #442: invalidate whatever `load` has in flight for the previous
+    // contract. This effect is declared before the loading effect, so it runs
+    // first and the fresh load below gets the next generation number.
+    requestIdRef.current += 1;
+  }, [contractId]);
+
   const load = useCallback(async () => {
-    if (!contractId.trim()) return;
+    if (!contractId.trim() || !client) return;
+    // Issue #442: claim a generation up front; anything that resolves once a
+    // newer request exists is stale and must not touch state.
+    const requestId = ++requestIdRef.current;
+    const isStale = () => requestId !== requestIdRef.current;
+    // A failed poll after a successful load is treated as a dropped
+    // connection rather than a hard error: keep the feed and retry next tick.
+    const handleFailure = (message: string) => {
+      if (pollingRef.current && prevEventIdsRef.current !== null) {
+        setReconnecting(true);
+      } else {
+        setError(message);
+      }
+    };
     setLoading(true);
     try {
-      const { data, error: err } = await getClient().soroban.getEvents(
+      const { data, error: err } = await client.soroban.getEvents(
         contractId,
         limit,
-        fromLedger,
+        effectiveFromLedger,
       );
+      if (isStale()) return;
       if (err) {
-        setError(err);
+        handleFailure(err);
         setLoading(false);
         return;
       }
       const newData = data ?? [];
+      if (newData.length > 0) {
+        // Issue #732: remember the furthest ledger we've seen for this
+        // contract so a future remount can resume past it instead of
+        // re-requesting the default window and silently missing nothing —
+        // just re-fetching what's already been shown.
+        const maxLedger = Math.max(...newData.map((e) => e.ledger));
+        persistFromLedger(contractId, maxLedger + 1);
+      }
       if (prevEventIdsRef.current !== null) {
         const baseline = prevEventIdsRef.current;
         const addedIds = newData
@@ -302,16 +429,22 @@ export function ContractEventFeed({
       prevEventIdsRef.current = new Set(newData.map((e) => e.id));
       setEvents(newData);
       setError(null);
+      setReconnecting(false);
       setLastUpdatedAt(Date.now());
+    } catch (e) {
+      if (isStale()) return;
+      handleFailure(e instanceof Error ? e.message : "Failed to load events");
     } finally {
-      setLoading(false);
+      // Issue #442: a stale call must not clear the spinner that belongs to the
+      // request that superseded it.
+      if (!isStale()) setLoading(false);
     }
-  }, [contractId, limit, fromLedger]);
+  }, [client, contractId, limit, effectiveFromLedger]);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEvents([]);
-  }, [contractId]);
+  // Issue #442: the `setEvents([])` effect that used to sit here (behind a
+  // react-hooks/set-state-in-effect suppression) duplicated the render-phase
+  // reset above and ran again on mount. Removed - the render-phase reset
+  // already clears the previous contract's events without an extra pass.
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -323,33 +456,70 @@ export function ContractEventFeed({
     };
   }, [load]);
 
+  // Issue #442: polling owns only the timer - the initial fetch belongs to the
+  // effect above, so mount fires exactly one request. Keyed on `pollInterval`,
+  // so changing the prop at runtime tears the old timer down and re-arms a new
+  // one at the new period.
   useEffect(() => {
-    if (live && pollInterval > 0 && contractId.trim() !== "") {
-      intervalRef.current = setInterval(() => {
-        void load();
-      }, pollInterval);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+    if (!live || !isVisible || pollInterval <= 0 || contractId.trim() === "") {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      return;
     }
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [live, pollInterval, load, contractId]);
 
-  // Tick the relative "Last updated" label once a second while polling is active.
+    intervalRef.current = setInterval(() => {
+      void load();
+    }, pollInterval);
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [live, isVisible, pollInterval, load, contractId]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715).
   useEffect(() => {
-    if (!live || pollInterval <= 0) return;
+    const cancel = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
+
+  // Tick the relative "Last updated" label once a second while polling is
+  // active and visible — ticking a hidden screen's clock wastes a timer for
+  // a label nobody can see.
+  useEffect(() => {
+    if (!live || !isVisible || pollInterval <= 0) return;
     const tickId = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(tickId);
-  }, [live, pollInterval]);
+  }, [live, isVisible, pollInterval]);
+
+  const topicFilterKey = filterTopics?.join("\u0000") ?? "";
+  const topicFilteredEvents = useMemo(() => {
+    if (!topicFilterKey) return events;
+    const wanted = new Set(topicFilterKey.split("\u0000"));
+    return events.filter((e) => e.topics.some((t) => wanted.has(t)));
+  }, [events, topicFilterKey]);
 
   const typeCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const e of events) {
+    for (const e of topicFilteredEvents) {
       counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
     }
     return counts;
-  }, [events]);
+  }, [topicFilteredEvents]);
 
   const availableTypes = useMemo(
     () => Array.from(typeCounts.keys()).sort(),
@@ -357,9 +527,9 @@ export function ContractEventFeed({
   );
 
   const filteredEvents = useMemo(() => {
-    if (!activeTypes) return events;
-    return events.filter((e) => activeTypes.has(e.type));
-  }, [events, activeTypes]);
+    if (!activeTypes) return topicFilteredEvents;
+    return topicFilteredEvents.filter((e) => activeTypes.has(e.type));
+  }, [topicFilteredEvents, activeTypes]);
 
   function toggleType(type: string) {
     setActiveTypes((prev) => {
@@ -379,7 +549,10 @@ export function ContractEventFeed({
     activeTypes ? activeTypes.has(type) : true;
 
   return (
-    <div className="rounded-xl border border-line bg-surface overflow-hidden">
+    <div
+      ref={containerRef}
+      className={cn("rounded-xl border border-line bg-surface overflow-hidden", className)}
+    >
       <div className="flex items-center justify-between px-5 py-4 border-b border-line">
         <div>
           <h3 className="text-[14px] font-semibold text-ink">
@@ -395,10 +568,16 @@ export function ContractEventFeed({
           )}
         </div>
         <div className="flex items-center gap-2">
+          {reconnecting && (
+            <Badge variant="warning" dot live>
+              Reconnecting…
+            </Badge>
+          )}
           {pollInterval > 0 && (
             <button
               onClick={() => setLive((l) => !l)}
               aria-pressed={live}
+              aria-label={live ? "Live, pause updates" : "Paused, resume updates"}
               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${live ? "bg-success-dim text-green border-success-dim-strong" : "bg-surface-2 text-ink-3 border-line-2"}`}
             >
               <span
@@ -437,8 +616,11 @@ export function ContractEventFeed({
             Export JSON
           </button>
           <button
+            type="button"
             onClick={() => void load()}
             disabled={loading}
+            aria-label="Refresh"
+            title="Refresh"
             className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
           >
             <HugeiconsIcon

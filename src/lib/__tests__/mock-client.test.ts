@@ -124,4 +124,28 @@ describe('Mock Client - Issue #30 Fixes', () => {
       expect(snapshot1).toEqual(snapshot2);
     });
   });
+
+  describe('Fix 4: Pagination support in getHistory (Issue #588)', () => {
+    it('should paginate results by page and limit with accurate total', async () => {
+      const client = createMockClient() as SorokitClient;
+
+      const page1 = await client.transaction.getHistory('GADDR', 1, 10);
+      const page2 = await client.transaction.getHistory('GADDR', 2, 10);
+      const page3 = await client.transaction.getHistory('GADDR', 3, 10);
+
+      expect(page1.data).toHaveLength(10);
+      expect(page2.data).toHaveLength(10);
+      expect(page3.data).toHaveLength(5);
+
+      expect(page1.total).toBe(25);
+      expect(page2.total).toBe(25);
+      expect(page3.total).toBe(25);
+
+      // Verify that page 1 and page 2 return completely different transactions
+      const page1Ids = page1.data?.map(t => t.hash);
+      const page2Ids = page2.data?.map(t => t.hash);
+      expect(page1Ids).not.toEqual(page2Ids);
+    });
+  });
 });
+

@@ -82,7 +82,7 @@ describe("AssetFilter", () => {
     const input = screen.getByPlaceholderText(/search/i);
     fireEvent.change(input, { target: { value: "usdc" } });
     expect(screen.queryByText("XLM")).not.toBeInTheDocument();
-    const clearBtn = screen.getByRole("button", { name: /clear/i });
+    const clearBtn = screen.getByRole("button", { name: /clear search/i });
     fireEvent.click(clearBtn);
     expect(screen.getByText("XLM")).toBeInTheDocument();
   });
@@ -125,7 +125,7 @@ describe("AssetFilter", () => {
 
   it("shows favorites toggle button", () => {
     renderComponent();
-    const favToggle = screen.getByRole("button", { name: /favorites/i });
+    const favToggle = screen.getByRole("button", { name: /favorites only|show all/i });
     expect(favToggle).toBeInTheDocument();
   });
 
@@ -142,7 +142,7 @@ describe("AssetFilter", () => {
     renderComponent();
     const input = screen.getByPlaceholderText(/search/i);
     fireEvent.change(input, { target: { value: "ZZZZZZ" } });
-    expect(screen.getByText(/no assets match/i)).toBeInTheDocument();
+    expect(screen.getByText(/no assets (match|found)/i)).toBeInTheDocument();
   });
 
   it("shows empty state when no assets provided", () => {
@@ -192,14 +192,14 @@ describe("AssetFilter", () => {
     renderComponent();
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Name"));
-    expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(screen.getByText(/Name/)).toBeInTheDocument();
   });
 
   it("sorts by balance when selected", () => {
     renderComponent();
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Balance"));
-    expect(screen.getByText("Balance")).toBeInTheDocument();
+    expect(screen.getByText(/Balance/)).toBeInTheDocument();
   });
 
   it("shows asset count", () => {
@@ -221,7 +221,7 @@ describe("AssetFilter", () => {
 
   it("toggles favorites and persists to localStorage", () => {
     renderComponent();
-    const favButtons = screen.getAllByRole("button", { name: /favorites/i });
+    const favButtons = screen.getAllByRole("button", { name: /add to favorites|remove from favorites/i });
     fireEvent.click(favButtons[0]);
     expect(localStorage.getItem("sorokit-asset-favorites")).not.toBeNull();
   });
@@ -248,12 +248,12 @@ describe("AssetFilter", () => {
     );
     fireEvent.click(screen.getByText(/sort/i));
     fireEvent.click(screen.getByText("Popularity"));
-    expect(screen.getByText("Popularity")).toBeInTheDocument();
+    expect(screen.getByText(/Popularity/)).toBeInTheDocument();
   });
 
   it("shows favorite-only filter when toggled", () => {
     renderComponent();
-    const favToggle = screen.getByRole("button", { name: /favorites only/i });
+    const favToggle = screen.getByRole("button", { name: /favorites only|show all/i });
     fireEvent.click(favToggle);
   });
 
@@ -294,6 +294,114 @@ describe("AssetFilter", () => {
     fireEvent.click(favButtons[1]);
     const list = screen.getByRole("listbox");
     expect(list).toBeInTheDocument();
+  });
+
+  it("matches search case-insensitively and resets the page on change (#664)", () => {
+    const onPageReset = vi.fn();
+    renderComponent({ onPageReset });
+
+    const input = screen.getByPlaceholderText(/search/i);
+    fireEvent.change(input, { target: { value: "usdc" } });
+
+    expect(screen.getByText("USDC")).toBeInTheDocument();
+    expect(onPageReset).toHaveBeenCalled();
+  });
+
+  it("clears all filters and resets the page (#664)", () => {
+    const onPageReset = vi.fn();
+    renderComponent({ onPageReset });
+
+    fireEvent.click(screen.getByText("Verified"));
+    expect(screen.queryByText("yXLM")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    expect(screen.getByText("yXLM")).toBeInTheDocument();
+    expect(onPageReset).toHaveBeenCalled();
+  });
+
+  it("closes the sort popover on Escape (#664)", () => {
+    renderComponent();
+
+    fireEvent.click(screen.getByText(/sort/i));
+    const option = screen.getByText("Default");
+    fireEvent.keyDown(option.closest("div") as HTMLElement, { key: "Escape" });
+
+    expect(screen.queryByText("Default")).not.toBeInTheDocument();
+  });
+
+  it("clamps focusedIndex when list shrinks (#754)", () => {
+    const onSelect = vi.fn();
+    const { rerender } = renderComponent({ onAssetSelect: onSelect });
+    const input = screen.getByPlaceholderText(/search/i);
+
+    // Move focus to index 3 (last item in mockAssets: RANDOM)
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    // List shrinks to 2 items without typing
+    rerender(
+      <AssetFilter
+        assets={mockAssets.slice(0, 2)}
+        onAssetSelect={onSelect}
+      />,
+    );
+
+    // Press Enter to select focused item
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    // It should have clamped to index 1 (USDC)
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ asset: "USDC" }),
+    );
+  });
+
+  it("resets keyboard focus to index 0 on filter change (#853)", () => {
+    const onSelect = vi.fn();
+    renderComponent({ onAssetSelect: onSelect });
+    const input = screen.getByPlaceholderText(/search/i);
+
+    // Move focus down first (to index 2)
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+
+    // Type in the filter — focus must reset to index 0
+    fireEvent.change(input, { target: { value: "xlm" } });
+
+    const rows = screen.getByRole("listbox").querySelectorAll("[data-asset-row]");
+    expect(rows[0]).toHaveClass("bg-surface-2");
+
+    // Press Enter to select focused item at index 0
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ asset: "XLM" }),
+    );
+  });
+
+  it("allows arrow-key navigation after typing in filter (#853)", () => {
+    const onSelect = vi.fn();
+    renderComponent({ onAssetSelect: onSelect });
+    const input = screen.getByPlaceholderText(/search/i);
+
+    // Type in the filter matching multiple assets
+    fireEvent.change(input, { target: { value: "xlm" } });
+
+    const rows = screen.getByRole("listbox").querySelectorAll("[data-asset-row]");
+    expect(rows[0]).toHaveClass("bg-surface-2");
+
+    // Move down with ArrowDown
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(rows[1]).toHaveClass("bg-surface-2");
+
+    // Move back up with ArrowUp
+    fireEvent.keyDown(input, { key: "ArrowUp" });
+    expect(rows[0]).toHaveClass("bg-surface-2");
+
+    // Press Enter to select focused item at index 0
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ asset: "XLM" }),
+    );
   });
 });
 

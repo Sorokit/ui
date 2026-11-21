@@ -9,9 +9,10 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import * as Tooltip from "@radix-ui/react-tooltip";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
+import { useOutsideClick } from "@/hooks/useOutsideClick";
 import type { NetworkInfo, NetworkName } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -76,19 +77,135 @@ export const STANDARD_NETWORKS: NetworkPreset[] = [
  */
 export const NETWORK_SWITCHER_SHORTCUT = "Alt+N";
 
+/**
+ * HTTPS is required except for localhost HTTP endpoints in development.
+ */
+export function isValidHttpUrl(urlString: string): boolean {
+  if (!urlString || typeof urlString !== "string") return false;
+  try {
+    const url = new URL(urlString.trim());
+    return (
+      url.protocol === "https:" ||
+      (import.meta.env.DEV &&
+        url.protocol === "http:" &&
+        url.hostname === "localhost")
+    );
+  } catch {
+    return false;
+  }
+}
+
+const RPC_HEALTH_TIMEOUT_MS = 5000;
+
+function isAbortError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: string }).name === "AbortError"
+  );
+}
+
+/**
+ * Pings a candidate Soroban RPC endpoint with a lightweight `getHealth` call.
+ * A successful JSON-RPC response also proves the endpoint's CORS headers allow
+ * this origin, since a blocked cross-origin request rejects `fetch` outright.
+ *
+ * Resolves when the node reports healthy and rejects with a user-facing
+ * message otherwise. Rejects with an `AbortError` if `signal` is aborted.
+ */
+export async function checkRpcHealth(
+  rpcUrl: string,
+  signal?: AbortSignal,
+  timeoutMs: number = RPC_HEALTH_TIMEOUT_MS,
+): Promise<void> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  const onAbort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  try {
+    const res = await fetch(rpcUrl.trim(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getHealth" }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new Error(`RPC endpoint responded with HTTP ${res.status}.`);
+    }
+    const body = (await res.json()) as {
+      result?: { status?: string };
+      error?: { message?: string };
+    };
+    if (body.error) {
+      throw new Error(
+        `RPC endpoint returned an error: ${body.error.message ?? "unknown error"}.`,
+      );
+    }
+    if (body.result?.status && body.result.status !== "healthy") {
+      throw new Error(`RPC endpoint reports status "${body.result.status}".`);
+    }
+  } catch (err) {
+    if (timedOut) {
+      const error = new Error(
+        `RPC endpoint did not respond within ${Math.round(timeoutMs / 1000)}s.`,
+      );
+      (error as Error & { cause?: unknown }).cause = err;
+      throw error;
+    }
+    if (isAbortError(err)) throw err;
+    if (err instanceof TypeError) {
+      const error = new Error(
+        "Could not reach the RPC endpoint. It may be offline or may not allow requests from this origin (CORS).",
+      );
+      (error as Error & { cause?: unknown }).cause = err;
+      throw error;
+    }
+    throw err instanceof Error ? err : new Error("RPC health check failed.");
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
 export function NetworkSwitcher() {
   const {
     network,
     initialNetwork,
     switchNetwork,
+    // #537 — provider-wide in-flight flag; defaults to `false` so tests that
+    // mock a partial context keep working.
+    isSwitchingNetwork: isSwitchingNetworkProvider = false,
     customNetworks = [],
     addCustomNetwork,
+    resetTransactionWatchers,
   } = useSorokit();
 
-  const [isSwitching, setIsSwitching] = useState(false);
+  const [isOwnSwitching, setIsOwnSwitching] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [isCustomDialogOpen, setIsCustomDialogOpen] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [isCheckingRpc, setIsCheckingRpc] = useState(false);
+
+  // Tracks the in-flight switch / health check so a newer one (or unmount)
+  // can cancel it and its late result is ignored instead of throwing.
+  const requestRef = useRef<AbortController | null>(null);
+  const beginRequest = useCallback(() => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    return controller;
+  }, []);
+  useEffect(() => () => requestRef.current?.abort(), []);
+
+  const menuRef = useOutsideClick<HTMLDivElement>(() => {
+    setIsOpen(false);
+  }, isOpen);
 
   // Alt+N toggles the picker from anywhere in the app.
   useEffect(() => {
@@ -112,6 +229,22 @@ export function NetworkSwitcher() {
   const [customPassphrase, setCustomPassphrase] = useState("");
   const [formError, setFormError] = useState("");
 
+  // Escape key closes the custom network dialog
+  useEffect(() => {
+    if (!isCustomDialogOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        requestRef.current?.abort();
+        setIsCheckingRpc(false);
+        setIsCustomDialogOpen(false);
+        setFormError("");
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isCustomDialogOpen]);
+
   const activePreset = STANDARD_NETWORKS.find(
     (n) => n.name === network?.name,
   );
@@ -134,17 +267,34 @@ export function NetworkSwitcher() {
     : "";
 
   const handleSelectNetwork = async (target: NetworkName | NetworkInfo) => {
-    if (isSwitching) return;
-    setIsSwitching(true);
+    // #537 — either this component's own pending switch or one started from
+    // another surface (e.g. NetworkScreen) blocks starting another one; the
+    // provider's in-flight guard is the hard backstop.
+    if (isOwnSwitching || isSwitchingNetworkProvider) return;
+    const controller = beginRequest();
+    setIsOwnSwitching(true);
     try {
+      resetTransactionWatchers?.();
       await switchNetwork(target);
+      if (controller.signal.aborted) return;
       const targetLabel =
         typeof target === "string"
           ? (STANDARD_NETWORKS.find((n) => n.name === target)?.label ?? target)
           : target.name;
       setAnnouncement(`Switched to ${targetLabel}`);
+    } catch (err: unknown) {
+      // A superseded or unmounted switch is not an error worth surfacing.
+      if (controller.signal.aborted || isAbortError(err)) return;
+      setAnnouncement(
+        err instanceof Error
+          ? `Failed to switch network: ${err.message}`
+          : "Failed to switch network",
+      );
     } finally {
-      setIsSwitching(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setIsOwnSwitching(false);
+      }
     }
   };
 
@@ -158,18 +308,73 @@ export function NetworkSwitcher() {
       setFormError("RPC URL is required");
       return;
     }
+    if (!isValidHttpUrl(customRpcUrl)) {
+      setFormError(
+        "RPC URL must use HTTPS (HTTP is allowed only for localhost in development)",
+      );
+      return;
+    }
+    if (customHorizonUrl.trim() && !isValidHttpUrl(customHorizonUrl)) {
+      setFormError(
+        "Horizon URL must use HTTPS (HTTP is allowed only for localhost in development)",
+      );
+      return;
+    }
+
+    const isBuiltinName =
+      STANDARD_NETWORKS.some(
+        (n) => n.name.toLowerCase() === customName.trim().toLowerCase(),
+      ) || customName.trim().toLowerCase() === "custom";
+    if (isBuiltinName) {
+      setFormError(
+        `Cannot add custom network with built-in name "${customName.trim()}".`,
+      );
+      return;
+    }
+
+    const passphrase =
+      customPassphrase.trim() || "Standalone Network ; February 2017";
+    if (
+      customNetworks.some(
+        (existing) =>
+          existing.name !== customName.trim() &&
+          existing.passphrase.trim() === passphrase,
+      )
+    ) {
+      setFormError("Network passphrase must be unique");
+      return;
+    }
 
     setFormError("");
+    if (!customHorizonUrl.trim() && !import.meta.env.DEV) {
+      setFormError("Horizon URL is required outside development");
+      return;
+    }
     const newConfig: NetworkInfo = {
       name: customName.trim(),
       rpcUrl: customRpcUrl.trim(),
       horizonUrl: customHorizonUrl.trim() || "http://localhost:8000",
-      passphrase: customPassphrase.trim() || "Standalone Network ; February 2017",
+      passphrase,
       status: "online",
     };
 
-    setIsSwitching(true);
+    const controller = beginRequest();
+    setIsCheckingRpc(true);
     try {
+      await checkRpcHealth(newConfig.rpcUrl, controller.signal);
+    } catch (err: unknown) {
+      if (controller.signal.aborted || isAbortError(err)) return;
+      setFormError(
+        err instanceof Error ? err.message : "RPC health check failed.",
+      );
+      return;
+    } finally {
+      setIsCheckingRpc(false);
+    }
+
+    setIsOwnSwitching(true);
+    try {
+      resetTransactionWatchers?.();
       if (addCustomNetwork) {
         await addCustomNetwork(newConfig);
       } else {
@@ -182,14 +387,24 @@ export function NetworkSwitcher() {
       setCustomRpcUrl("");
       setCustomHorizonUrl("");
       setCustomPassphrase("");
+      setFormError("");
     } catch (err: unknown) {
+      if (controller.signal.aborted || isAbortError(err)) return;
       setFormError(
         err instanceof Error ? err.message : "Failed to add custom network",
       );
     } finally {
-      setIsSwitching(false);
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setIsOwnSwitching(false);
+      }
     }
   };
+
+  // #537 — a switch pending here or on any other surface (NetworkScreen,
+  // another NetworkSwitcher instance) disables every interaction in this
+  // dropdown; the provider's in-flight guard is the hard backstop.
+  const isSwitching = isOwnSwitching || isSwitchingNetworkProvider;
 
   return (
     <Tooltip.Provider delayDuration={200}>
@@ -227,8 +442,37 @@ export function NetworkSwitcher() {
                   />
                 </span>
 
+                <HugeiconsIcon
+                  icon={
+                    currentInfo.status === "offline" || currentInfo.status === "error"
+                      ? Cancel01Icon
+                      : isMismatched || currentInfo.status === "warning" || currentInfo.status === "degraded"
+                        ? Alert01Icon
+                        : Tick01Icon
+                  }
+                  size={11}
+                  strokeWidth={2.5}
+                  data-testid="network-status-icon"
+                  className={cn(
+                    "shrink-0",
+                    currentInfo.status === "offline" || currentInfo.status === "error"
+                      ? "text-red"
+                      : isMismatched || currentInfo.status === "warning" || currentInfo.status === "degraded"
+                        ? "text-orange"
+                        : "text-green",
+                  )}
+                  aria-hidden="true"
+                />
+
                 <span className="hidden sm:inline font-medium text-ink" aria-hidden="true">
                   {currentInfo.label}
+                </span>
+
+                <span
+                  data-testid="network-status-label"
+                  className="text-[10px] font-semibold uppercase tracking-wider text-ink-3 hidden md:inline"
+                >
+                  {currentInfo.status === "online" ? "Active" : currentInfo.status}
                 </span>
 
                 {isMismatched && (
@@ -286,10 +530,12 @@ export function NetworkSwitcher() {
 
         <DropdownMenu.Portal>
           <DropdownMenu.Content
+            ref={menuRef}
             align="end"
             sideOffset={6}
             avoidCollisions={true}
             collisionPadding={12}
+            onPointerDownOutside={() => setIsOpen(false)}
             className="z-50 w-64 rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
           >
             {/* Header info */}
@@ -482,10 +728,31 @@ export function NetworkSwitcher() {
       </DropdownMenu.Root>
 
       {/* Custom Network Dialog Modal */}
-      <Dialog.Root open={isCustomDialogOpen} onOpenChange={setIsCustomDialogOpen}>
+      <Dialog.Root
+        open={isCustomDialogOpen}
+        onOpenChange={(open) => {
+          setIsCustomDialogOpen(open);
+          if (!open) {
+            if (isCheckingRpc) requestRef.current?.abort();
+            setFormError("");
+          }
+        }}
+      >
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs animate-in fade-in" />
-          <Dialog.Content className="fixed top-1/2 left-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none">
+          <Dialog.Content
+            onEscapeKeyDown={() => {
+              setIsCustomDialogOpen(false);
+              setFormError("");
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setIsCustomDialogOpen(false);
+                setFormError("");
+              }
+            }}
+            className="fixed top-1/2 left-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-line bg-surface p-6 shadow-2xl focus:outline-none"
+          >
             <div className="flex items-center justify-between pb-4 border-b border-line mb-4">
               <div>
                 <Dialog.Title className="text-[16px] font-semibold text-ink">
@@ -546,7 +813,7 @@ export function NetworkSwitcher() {
                   id="custom-rpc-url"
                   type="url"
                   required
-                  placeholder="e.g. http://localhost:8000/soroban/rpc"
+                  placeholder="https://rpc.example.com (or http://localhost:8000 in development)"
                   value={customRpcUrl}
                   onChange={(e) => setCustomRpcUrl(e.target.value)}
                   className="w-full h-9 px-3 rounded-lg bg-surface-2 border border-line text-[13px] text-ink font-mono focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand placeholder:text-ink-4"
@@ -563,7 +830,7 @@ export function NetworkSwitcher() {
                 <input
                   id="custom-horizon-url"
                   type="url"
-                  placeholder="e.g. http://localhost:8000"
+                  placeholder="https://horizon.example.com (or http://localhost:8000 in development)"
                   value={customHorizonUrl}
                   onChange={(e) => setCustomHorizonUrl(e.target.value)}
                   className="w-full h-9 px-3 rounded-lg bg-surface-2 border border-line text-[13px] text-ink font-mono focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand placeholder:text-ink-4"
@@ -598,10 +865,10 @@ export function NetworkSwitcher() {
                 </Dialog.Close>
                 <button
                   type="submit"
-                  disabled={isSwitching}
+                  disabled={isSwitching || isCheckingRpc}
                   className="px-4 h-9 rounded-lg bg-brand text-[13px] font-medium text-white hover:bg-brand/90 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  Add & Switch Network
+                  {isCheckingRpc ? "Testing RPC..." : "Add & Switch Network"}
                 </button>
               </div>
             </form>

@@ -3,10 +3,12 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle01Icon,
+  Copy01Icon,
   Download01Icon,
   FilterIcon,
   SortByDown01Icon,
   SortByUp01Icon,
+  Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,7 +18,6 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
 import type { NetworkInfo, Transaction } from "@/lib/client";
-import { getClient } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
@@ -40,6 +41,8 @@ export interface TransactionFilters {
 export interface TransactionHistoryTableProps {
   className?: string;
   pageSize?: number;
+  /** Optional callback for CSV export. If provided, called instead of DOM download. */
+  onExport?: (csv: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -129,7 +132,7 @@ function escapeCsv(value: string): string {
   return value;
 }
 
-function generateCsv(rows: Transaction[]): Blob {
+function generateCsvString(rows: Transaction[]): string {
   const headers = [
     "Hash",
     "Ledger",
@@ -158,11 +161,20 @@ function generateCsv(rows: Transaction[]): Blob {
     );
   }
 
-  return new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  return lines.join("\n");
 }
 
-function downloadCsv(rows: Transaction[]): void {
-  const blob = generateCsv(rows);
+function downloadCsv(rows: Transaction[], onExport?: (csv: string) => void): void {
+  const csv = generateCsvString(rows);
+
+  // If onExport callback is provided, use it (for testing)
+  if (onExport) {
+    onExport(csv);
+    return;
+  }
+
+  // Default DOM-based download
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -281,6 +293,50 @@ function FilterBar({ filters, onChange, show, onToggle }: FilterBarProps) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Copy Hash Button                                                   */
+/* ------------------------------------------------------------------ */
+
+const COPY_HASH_RESET_MS = 2000;
+
+function CopyHashButton({ hash }: { hash: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(hash);
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPY_HASH_RESET_MS);
+    } catch {
+      // Clipboard access can fail (e.g. non-secure context or denied
+      // permission); silently no-op rather than throw in the UI.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label="Copy transaction hash"
+      className={cn(
+        "shrink-0 p-1 rounded-md transition-colors",
+        copied
+          ? "text-green bg-success-dim"
+          : "text-ink-3 hover:text-ink-2 hover:bg-surface-2",
+      )}
+    >
+      <HugeiconsIcon
+        icon={copied ? Tick01Icon : Copy01Icon}
+        size={10}
+        color="currentColor"
+        strokeWidth={2}
+      />
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Sortable Header                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -337,8 +393,9 @@ function SortHeader({
 export function TransactionHistoryTable({
   className,
   pageSize = PAGE_SIZE,
+  onExport,
 }: TransactionHistoryTableProps) {
-  const { address, isConnected, network } = useSorokit();
+  const { address, isConnected, network, client } = useSorokit();
   const [allTxs, setAllTxs] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -356,11 +413,11 @@ export function TransactionHistoryTable({
 
   // Fetch all transactions
   useEffect(() => {
-    if (!address) return;
+    if (!address || !client) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       setLoading(true);
-      getClient()
+      client
         .transaction.getHistory(address, 1, 1000)
         .then(({ data, error: err }) => {
           if (!active) return;
@@ -379,11 +436,12 @@ export function TransactionHistoryTable({
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [address]);
+  }, [address, client]);
 
-   
   useEffect(() => {
-    setPage((prev) => (prev !== 1 ? 1 : prev));
+    queueMicrotask(() => {
+      setPage((prev) => (prev !== 1 ? 1 : prev));
+    });
   }, [filters]);
 
   // Toggle sort
@@ -439,7 +497,7 @@ export function TransactionHistoryTable({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => downloadCsv(allTxs)}
+              onClick={() => downloadCsv(allTxs, onExport)}
             >
               <HugeiconsIcon
                 icon={Download01Icon}
@@ -491,129 +549,151 @@ export function TransactionHistoryTable({
         </div>
       ) : (
         <>
-          {/* Desktop table */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-line">
-                  <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-10" />
-                  <SortHeader
-                    label="Hash"
-                    field="createdAt"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                  />
-                  <SortHeader
-                    label="Ledger"
-                    field="ledger"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-20 text-right"
-                  />
-                  <SortHeader
-                    label="Date"
-                    field="createdAt"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-36"
-                  />
-                  <SortHeader
-                    label="Fee"
-                    field="feePaid"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-28 text-right"
-                  />
-                  <SortHeader
-                    label="Ops"
-                    field="operationCount"
-                    currentField={sortField}
-                    direction={sortDir}
-                    onChange={handleSort}
-                    className="w-16 text-center"
-                  />
-                  <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-24">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {paged.map((tx) => {
-                  const { date, time } = formatDate(tx.createdAt);
-                  return (
-                    <tr
-                      key={tx.hash}
-                      className="border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors"
-                    >
-                      <td className="px-4 py-3">
-                        <StatusIcon successful={tx.successful} />
-                      </td>
-                      <td className="px-4 py-3">
-                        {(() => {
-                          const url = explorerTxUrl(network, tx.hash);
-                          return url ? (
-                            <a
-                              data-txhash
-                              href={url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
-                            >
-                              {truncateAddress(tx.hash, 8, 6)}
-                              <span aria-hidden="true" className="opacity-60">
-                                ↗
-                              </span>
-                            </a>
-                          ) : (
-                            <span
-                              data-txhash
-                              className="text-[13px] text-ink font-mono"
-                            >
-                              {truncateAddress(tx.hash, 8, 6)}
-                            </span>
-                          );
-                        })()}
-                        {tx.memo && (
-                          <span
-                            className="block text-[10px] text-ink-3 mt-0.5"
-                            title={tx.memo}
-                          >
-                            {truncateMemo(tx.memo)}
-                          </span>
+          {/* Desktop table with overflow container and scroll shadow indicators */}
+          <div className="relative">
+            <div
+              className="overflow-x-auto scrollbar-thin"
+              data-testid="table-overflow-wrapper"
+            >
+              <table className="w-full min-w-[600px]">
+                <thead>
+                  <tr className="border-b border-line">
+                    <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-10" />
+                    <SortHeader
+                      label="Hash"
+                      field="createdAt"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                    />
+                    <SortHeader
+                      label="Ledger"
+                      field="ledger"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-20 text-right"
+                    />
+                    <SortHeader
+                      label="Date"
+                      field="createdAt"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-36"
+                    />
+                    <SortHeader
+                      label="Fee"
+                      field="feePaid"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-28 text-right"
+                    />
+                    <SortHeader
+                      label="Ops"
+                      field="operationCount"
+                      currentField={sortField}
+                      direction={sortDir}
+                      onChange={handleSort}
+                      className="w-16 text-center"
+                    />
+                    <th className="text-[11px] font-semibold text-ink-3 uppercase tracking-wider px-4 py-3 text-left w-24">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paged.map((tx) => {
+                    const { date, time } = formatDate(tx.createdAt);
+                    return (
+                      <tr
+                        key={tx.hash}
+                        data-failed-row={!tx.successful ? "true" : undefined}
+                        className={cn(
+                          "border-b border-line last:border-0 hover:bg-surface-2/50 transition-colors",
+                          !tx.successful && "bg-error/5 dark:bg-error/10",
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
-                        {tx.ledger}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[13px] text-ink">{date}</span>
-                        <span className="block text-[10px] text-ink-3">
-                          {time}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
-                        {tx.feePaid}
-                      </td>
-                      <td className="px-4 py-3 text-[13px] text-ink text-center">
-                        {tx.operationCount}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant={tx.successful ? "success" : "error"}
-                          live
-                        >
-                          {tx.successful ? "Success" : "Failed"}
-                        </Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      >
+                        <td className="px-4 py-3">
+                          <StatusIcon successful={tx.successful} />
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1">
+                            {(() => {
+                              const url = explorerTxUrl(network, tx.hash);
+                              return url ? (
+                                <a
+                                  data-txhash
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
+                                >
+                                  {truncateAddress(tx.hash, 8, 6)}
+                                  <span aria-hidden="true" className="opacity-60">
+                                    ↗
+                                  </span>
+                                </a>
+                              ) : (
+                                <span
+                                  data-txhash
+                                  className="text-[13px] text-ink font-mono"
+                                >
+                                  {truncateAddress(tx.hash, 8, 6)}
+                                </span>
+                              );
+                            })()}
+                            <CopyHashButton hash={tx.hash} />
+                          </div>
+                          {tx.memo && (
+                            <span
+                              className="block text-[10px] text-ink-3 mt-0.5"
+                              title={tx.memo}
+                            >
+                              {truncateMemo(tx.memo)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
+                          {tx.ledger}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-[13px] text-ink">{date}</span>
+                          <span className="block text-[10px] text-ink-3">
+                            {time}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-right font-mono">
+                          {tx.feePaid}
+                        </td>
+                        <td className="px-4 py-3 text-[13px] text-ink text-center">
+                          {tx.operationCount}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={tx.successful ? "success" : "error"}
+                            live
+                          >
+                            {tx.successful ? "Success" : "Failed"}
+                          </Badge>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile scroll indicator gradients */}
+            <div
+              data-testid="scroll-indicator-right"
+              className="pointer-events-none absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-surface to-transparent opacity-75 md:hidden"
+            />
+            <div
+              data-testid="scroll-indicator-left"
+              className="pointer-events-none absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-surface to-transparent opacity-75 md:hidden"
+            />
           </div>
 
           {/* Mobile card list */}
@@ -623,7 +703,11 @@ export function TransactionHistoryTable({
               return (
                 <div
                   key={tx.hash}
-                  className="flex items-center gap-3 px-4 py-3"
+                  data-failed-row={!tx.successful ? "true" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3",
+                    !tx.successful && "bg-error/5 dark:bg-error/10",
+                  )}
                 >
                   <StatusIcon successful={tx.successful} />
                   <div className="flex-1 min-w-0">
@@ -656,6 +740,7 @@ export function TransactionHistoryTable({
                       >
                         {tx.successful ? "Success" : "Failed"}
                       </Badge>
+                      <CopyHashButton hash={tx.hash} />
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-[11px] text-ink-3">
                       <span>Ledger {tx.ledger}</span>

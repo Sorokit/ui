@@ -1,11 +1,38 @@
 import { Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Tooltip } from "@/components/ui/Tooltip";
-import { getClient } from "@/lib/client";
-import { cn } from "@/lib/utils";
+import { useSorokit } from "@/context/useSorokit";
+import { useFeeData } from "@/hooks/useFeeData";
+import { useIsVisible } from "@/hooks/useIsVisible";
+import { cn, toXLM } from "@/lib/utils";
+
+export const MIN_NETWORK_BASE_FEE = 100;
+
+/**
+ * Base fee (stroops) above which the network is treated as surge pricing:
+ * more than 3x the 100-stroop minimum means ledgers are full and
+ * transactions are bidding against each other for inclusion.
+ */
+export const SURGE_FEE_THRESHOLD = MIN_NETWORK_BASE_FEE * 3;
+
+/** Speed multipliers a user can apply on top of the recommended fee. */
+export const FEE_MULTIPLIERS = [1.2, 1.5, 2] as const;
+export type FeeMultiplier = (typeof FEE_MULTIPLIERS)[number];
+
+/**
+ * Recommended fee scaled by `multiplier`, rounded up to a whole stroop.
+ * Computed in tenths to avoid float artifacts (500 * 1.2 is
+ * 600.0000000000001 in floating point, which would round up to 601).
+ */
+export function applyFeeMultiplier(fee: string, multiplier: number): string {
+  const stroops = parseInt(fee, 10);
+  if (Number.isNaN(stroops)) return fee;
+  const tenths = Math.round(multiplier * 10);
+  return String(Math.ceil((stroops * tenths) / 10));
+}
 
 export interface FeeData {
   baseFee: string;
@@ -20,6 +47,15 @@ interface FeeEstimatorProps {
   compact?: boolean;
   /** Callback fired when fee data loads successfully. */
   onFeeLoad?: (fee: FeeData) => void;
+  /** Custom fee override value in stroops. */
+  customFee?: string;
+  /** Callback fired when custom fee input changes. */
+  onCustomFeeChange?: (customFee: string) => void;
+  /**
+   * Callback fired when the user toggles a speed multiplier. Receives the
+   * multiplier (null when cleared) and the resulting fee in stroops.
+   */
+  onMultiplierChange?: (multiplier: FeeMultiplier | null, fee: string | null) => void;
 }
 
 export function FeeEstimator({
@@ -27,47 +63,107 @@ export function FeeEstimator({
   refreshInterval = 0,
   compact,
   onFeeLoad,
+  customFee: customFeeProp,
+  onCustomFeeChange,
+  onMultiplierChange,
 }: FeeEstimatorProps) {
-  const [fee, setFee] = useState<FeeData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { registerWatcher } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
+  const [internalCustomFee, setInternalCustomFee] = useState(
+    customFeeProp ?? "",
+  );
+  const [prevCustomFeeProp, setPrevCustomFeeProp] = useState(customFeeProp);
+  const [customFeeError, setCustomFeeError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { data, error: err } = await getClient().transaction.estimateFee();
-      if (err) {
-        setError(err);
-        return;
-      }
-      setFee(data);
-      setError(null);
-      if (data) onFeeLoad?.(data);
-      if (data && onFeeLoad) {
-        onFeeLoad(data);
-      }
-    } finally {
-      setLoading(false);
+  if (customFeeProp !== prevCustomFeeProp) {
+    setPrevCustomFeeProp(customFeeProp);
+    if (customFeeProp !== undefined) {
+      setInternalCustomFee(customFeeProp);
     }
+  }
+
+  const customFee =
+    customFeeProp !== undefined ? customFeeProp : internalCustomFee;
+
+  const handleCustomFeeChange = (val: string) => {
+    setInternalCustomFee(val);
+    if (!val.trim()) {
+      setCustomFeeError(null);
+      onCustomFeeChange?.("");
+      return;
+    }
+    const parsed = parseInt(val, 10);
+    if (Number.isNaN(parsed) || parsed < MIN_NETWORK_BASE_FEE) {
+      setCustomFeeError(`Fee must be at least ${MIN_NETWORK_BASE_FEE} stroops`);
+      onCustomFeeChange?.("");
+    } else {
+      setCustomFeeError(null);
+      onCustomFeeChange?.(val);
+    }
+  };
+
+  // Issue #442: `onFeeLoad` is normally an inline arrow, so it had a new
+  // identity on every parent render. As a `load` dependency that rebuilt
+  // `load`, re-ran the effect and fired another request per render (and the
+  // callback itself usually sets parent state, so it fed itself). Kept in a ref
+  // instead: the latest callback is always used, but `load` only depends on
+  // `client`, so mount performs exactly one request.
+  const onFeeLoadRef = useRef(onFeeLoad);
+  useEffect(() => {
+    onFeeLoadRef.current = onFeeLoad;
   }, [onFeeLoad]);
 
+  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Issue #442: generation counter - an estimate that resolves after a newer
+  const {
+    fee,
+    loading,
+    error,
+    load: hookLoad,
+  } = useFeeData(refreshInterval, isVisible);
+
   useEffect(() => {
-    const timerId = window.setTimeout(() => {
-      void load();
-    }, 0);
-    if (refreshInterval > 0) {
-      const id = setInterval(() => {
-        void load();
-      }, refreshInterval);
-      return () => {
-        window.clearTimeout(timerId);
-        clearInterval(id);
-      };
+    if (fee) {
+      onFeeLoadRef.current?.(fee);
     }
-    return () => {
-      window.clearTimeout(timerId);
+  }, [fee]);
+
+  const load = useCallback(async () => {
+    await hookLoad();
+  }, [hookLoad]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715) and unmount (#861).
+  useEffect(() => {
+    const cancel = () => {
+      if (intervalIdRef.current !== null) {
+        clearInterval(intervalIdRef.current);
+        intervalIdRef.current = null;
+      }
     };
-  }, [load, refreshInterval]);
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
+
+  const [multiplier, setMultiplier] = useState<FeeMultiplier | null>(null);
+  const multipliedFee =
+    fee && multiplier !== null ? applyFeeMultiplier(fee.recommended, multiplier) : null;
+
+  const handleMultiplierToggle = (value: FeeMultiplier) => {
+    const next = multiplier === value ? null : value;
+    setMultiplier(next);
+    onMultiplierChange?.(
+      next,
+      fee && next !== null ? applyFeeMultiplier(fee.recommended, next) : null,
+    );
+  };
+
+  const baseFeeStroops = fee ? parseInt(fee.baseFee, 10) : NaN;
+  const isSurge = !Number.isNaN(baseFeeStroops) && baseFeeStroops > SURGE_FEE_THRESHOLD;
 
   const compactContent = fee
     ? `Base: ${fee.baseFee} stroops · Recommended: ${fee.recommended} stroops`
@@ -75,6 +171,7 @@ export function FeeEstimator({
 
   return (
     <div
+      ref={containerRef}
       role="region"
       aria-label="Network fee estimate"
       className={cn(
@@ -89,16 +186,34 @@ export function FeeEstimator({
           {loading && !fee ? (
             <span className="text-[11px] text-ink-3">Loading…</span>
           ) : error ? (
-            <span className="text-[11px] text-red">{error}</span>
+            <span className="inline-flex items-center gap-2 text-[11px] text-red">
+              <span role="alert">{error}</span>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="underline text-ink-2 hover:text-ink cursor-pointer"
+              >
+                Retry
+              </button>
+            </span>
           ) : fee ? (
-            <span className="text-[11px] text-ink">{compactContent}</span>
+            <span className="inline-flex items-center gap-2 text-[11px] text-ink">
+              {compactContent}
+              {isSurge && (
+                <span role="alert">
+                  <Badge variant="warning">Surge pricing</Badge>
+                </span>
+              )}
+            </span>
           ) : null}
         </div>
       ) : (
         <>
           <div className="flex items-center justify-between px-5 py-4 border-b border-line">
             <div>
-              <h3 className="text-[13px] font-semibold text-ink">Network Fee</h3>
+              <h3 className="text-[13px] font-semibold text-ink">
+                Network Fee
+              </h3>
               <p className="text-[11px] text-ink-3 mt-0.5">
                 Current Stellar base fee estimate
               </p>
@@ -128,25 +243,147 @@ export function FeeEstimator({
                 <div className="h-8 w-24 rounded-lg bg-surface-2 animate-pulse" />
               </div>
             ) : error ? (
-              <p className="text-[12px] text-red">{error}</p>
-            ) : fee ? (
-              <div className="flex items-center gap-4">
-                <FeeCell label="Base Fee" value={fee.baseFee} unit="stroops" />
-                <div className="w-px h-8 bg-line" />
-                <FeeCell
-                  label="Recommended"
-                  value={fee.recommended}
-                  unit="stroops"
-                  highlight
-                  highFee={
-                    parseInt(fee.recommended, 10) > parseInt(fee.baseFee, 10) * 2
-                  }
-                />
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <p className="text-[12px] text-red" role="alert">
+                  {error}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void load()}
+                  disabled={loading}
+                  className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-2 hover:bg-surface-3 text-ink transition-colors border border-line"
+                >
+                  Retry
+                </button>
               </div>
+            ) : fee ? (
+              <>
+                {isSurge && <SurgeWarning baseFee={baseFeeStroops} />}
+                <div className="flex items-center gap-4">
+                  <FeeCell
+                    label="Base Fee"
+                    value={fee.baseFee}
+                    unit="stroops"
+                  />
+                  <div className="w-px h-8 bg-line" />
+                  <FeeCell
+                    label="Recommended"
+                    value={fee.recommended}
+                    unit="stroops"
+                    highlight
+                    highFee={
+                      parseInt(fee.recommended, 10) >
+                      parseInt(fee.baseFee, 10) * 2
+                    }
+                  />
+                </div>
+                <div className="mt-4 pt-4 border-t border-line">
+                  <div className="flex items-center justify-between gap-3">
+                    <span
+                      id="fee-multiplier-label"
+                      className="text-[11px] font-medium text-ink-2"
+                    >
+                      Speed Multiplier
+                    </span>
+                    <div
+                      role="group"
+                      aria-labelledby="fee-multiplier-label"
+                      className="flex items-center gap-1.5"
+                    >
+                      {FEE_MULTIPLIERS.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          aria-pressed={multiplier === m}
+                          onClick={() => handleMultiplierToggle(m)}
+                          className={cn(
+                            "px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors",
+                            multiplier === m
+                              ? "border-brand bg-brand-dim text-brand"
+                              : "border-line bg-surface-2 text-ink-2 hover:text-ink",
+                          )}
+                        >
+                          {m.toFixed(1)}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {multipliedFee !== null && (
+                    <p
+                      data-testid="multiplied-fee"
+                      className="text-[11px] text-ink-3 mt-1.5"
+                    >
+                      Priority fee: <span className="text-ink font-semibold">{multipliedFee}</span>{" "}
+                      stroops (≈ {toXLM(multipliedFee)} XLM) for faster inclusion
+                    </p>
+                  )}
+                </div>
+                <div className="mt-4 pt-4 border-t border-line">
+                  <label
+                    htmlFor="custom-fee-input"
+                    className="block text-[11px] font-medium text-ink-2 mb-1.5"
+                  >
+                    Custom Fee Override (stroops/op)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="custom-fee-input"
+                      type="number"
+                      min={MIN_NETWORK_BASE_FEE}
+                      placeholder={`Min ${MIN_NETWORK_BASE_FEE}`}
+                      value={customFee}
+                      onChange={(e) => handleCustomFeeChange(e.target.value)}
+                      className="px-3 py-1.5 text-[12px] bg-surface-2 border border-line rounded-lg text-ink focus:outline-none focus:border-brand w-36"
+                      aria-label="Custom fee in stroops"
+                      aria-invalid={!!customFeeError}
+                      aria-describedby={
+                        customFeeError ? "custom-fee-error" : undefined
+                      }
+                    />
+                    {customFee && !customFeeError && (
+                      <span className="text-[11px] text-ink-3">
+                        (≈ {toXLM(customFee)} XLM)
+                      </span>
+                    )}
+                  </div>
+                  {customFeeError && (
+                    <p
+                      id="custom-fee-error"
+                      role="alert"
+                      className="text-[11px] text-red mt-1"
+                    >
+                      {customFeeError}
+                    </p>
+                  )}
+                </div>
+              </>
             ) : null}
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SurgeWarning({ baseFee }: { baseFee: number }) {
+  const ratio = (baseFee / MIN_NETWORK_BASE_FEE).toFixed(1);
+  return (
+    <div
+      role="alert"
+      data-testid="surge-warning"
+      className="mb-4 rounded-lg border border-warning-dim bg-warning-dim px-3 py-2"
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant="warning">Surge pricing</Badge>
+        <span className="text-[12px] font-semibold text-ink">
+          Network fees are elevated ({ratio}x the minimum)
+        </span>
+      </div>
+      <p className="text-[11px] text-ink-2 mt-1">
+        The base fee is {baseFee} stroops. Ledgers are at capacity, so
+        transactions are competing on fee for inclusion. Pay at least the
+        recommended fee, or wait for congestion to ease.
+      </p>
     </div>
   );
 }
@@ -186,7 +423,7 @@ export function FeeCell({
       <span className="text-[10px] text-ink-3">
         {Number.isNaN(parseInt(value, 10))
           ? "(≈ — XLM)"
-          : `(≈ ${parseInt(value, 10) / 10_000_000} XLM)`}
+          : `(≈ ${toXLM(value)} XLM)`}
       </span>
     </div>
   );

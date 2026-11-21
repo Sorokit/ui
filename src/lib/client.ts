@@ -11,9 +11,14 @@ export interface TransactionParams {
   destination: string;
   amount: string;
   asset: string;
-  memoType: "none" | "text" | "id";
+  /** Issuer account for a non-native asset. Omitted (or undefined) for XLM. */
+  assetIssuer?: string;
+  memoType: "none" | "text" | "id" | "hash" | "return";
   memo?: string;
 }
+
+/** Result status shared by async client methods that return a request state. */
+export type RequestStatus = "idle" | "loading" | "success" | "error";
 
 /** A Soroban XDR value produced by @stellar/stellar-sdk. */
 export type SorobanScVal = object;
@@ -48,11 +53,21 @@ export type FeeScenario = {
   savings: string;
 };
 
+/** Soroban resources a simulated transaction consumed (from simulateTransaction). */
+export type SorobanResourceUsage = {
+  cpuInstructions?: number;
+  memoryBytes?: number;
+  readBytes?: number;
+  writeBytes?: number;
+};
+
 export type GasEstimate = {
   totalGasUnits: number;
   breakdown: OperationGasBreakdown[];
   scenarios: FeeScenario[];
   customMultiplier: number;
+  /** Simulated resource usage; absent for classic (non-Soroban) operations. */
+  resources?: SorobanResourceUsage;
 };
 
 export type SorokitClient = {
@@ -60,7 +75,7 @@ export type SorokitClient = {
     connect: () => Promise<{
       data: { address: string } | null;
       error: string | null;
-      status: "idle" | "loading" | "success" | "error";
+      status: RequestStatus;
     }>;
     disconnect: () => Promise<void>;
     getAddress: () => Promise<{ data: string | null; error: string | null }>;
@@ -71,7 +86,7 @@ export type SorokitClient = {
     ) => Promise<{
       data: AccountData | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     getBalances: (
       address: string,
@@ -89,7 +104,7 @@ export type SorokitClient = {
     ) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     getStatus: (
       txHash: string,
@@ -125,10 +140,10 @@ export type SorokitClient = {
   soroban: {
     invokeContract: (
       params: InvokeParams,
-    ) => Promise<{ data: unknown; error: string | null; status: string }>;
+    ) => Promise<{ data: unknown; error: string | null; status: RequestStatus }>;
     simulateContract: (
       params: InvokeParams,
-    ) => Promise<{ data: unknown; error: string | null; status: string }>;
+    ) => Promise<{ data: unknown; error: string | null; status: RequestStatus }>;
     getEvents: (
       contractId: string,
       limit?: number,
@@ -195,7 +210,7 @@ export type SorokitClient = {
     }) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     revokeAllowance: (params: {
       sourceAccount: string;
@@ -204,7 +219,7 @@ export type SorokitClient = {
     }) => Promise<{
       data: TxResult | null;
       error: string | null;
-      status: string;
+      status: RequestStatus;
     }>;
     estimateAllowanceFee: (params: {
       asset: string;
@@ -282,6 +297,9 @@ export type Transaction = {
   operationCount: number;
   feePaid: string;
   memo?: string;
+  operationType?: string;
+  type?: string;
+  contractId?: string;
 };
 
 export type ClaimableBalance = {
@@ -320,6 +338,7 @@ export type NetworkInfo = {
   passphrase: string;
   rpcUrl: string;
   horizonUrl: string;
+  ledger?: number;
   status?: "online" | "degraded" | "offline" | string;
 };
 
@@ -331,6 +350,8 @@ export type AllowanceEntry = {
   spenderName?: string;
   amount: string;
   expirationDate?: string;
+  /** Soroban ledger sequence at which the allowance expires (issue #650). */
+  expirationLedger?: number;
   tokenCode?: string;
   tokenIssuer?: string;
 };
@@ -372,9 +393,11 @@ export type BatchProgress = {
   batchId: string;
   completed: number;
   total: number;
+  failed?: number;
   percentage: number;
-  etaSeconds: number;
-  currentStatus: BatchEntryResult["status"];
+  etaSeconds?: number;
+  currentStatus?: BatchEntryResult["status"];
+  status?: "idle" | "processing" | "paused" | "completed" | "error" | "cancelled" | string;
 };
 
 // ─── NFT Types ────────────────────────────────────────────────────────────────
@@ -390,6 +413,10 @@ export type NftMetadata = {
   name: string;
   description?: string;
   image?: string;
+  /** Audio/video asset URL (e.g. `animation_url` in token metadata) */
+  animationUrl?: string;
+  /** MIME type of the primary media asset, e.g. `video/mp4`, `audio/mpeg` */
+  mimeType?: string;
   externalUrl?: string;
   attributes: NftAttribute[];
 };

@@ -7,7 +7,6 @@ import {
   Copy01Icon,
   FilterIcon,
   Search01Icon,
-  XCircleIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,10 +15,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
-import { getClient, type GroupedTransaction, type Operation, type TimelineFilter, type TimelineGroup } from "@/lib/client";
+import type { GroupedTransaction, Operation, TimelineFilter, TimelineGroup } from "@/lib/client";
 import { cn, getExplorerUrl, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
+const MS_PER_DAY = 86_400_000;
 const OPERATION_TYPES = [
   { value: "all", label: "All Operations" },
   { value: "payment", label: "Payments" },
@@ -33,9 +33,35 @@ const OPERATION_TYPES = [
   { value: "allow_trust", label: "Allow Trust" },
   { value: "account_creator", label: "Account Creator" },
 ];
+// Labels are deliberately distinct from the row-level "Success"/"Failed"
+// badge text (e.g. "Succeeded" rather than "Success") so a test asserting
+// on that badge text can't accidentally match one of these filter chips
+// instead, which would let it pass before the real transaction data has
+// even loaded.
+const STATUS_FILTER_CHIPS = [
+  { value: "all", label: "All" },
+  { value: "success", label: "Succeeded" },
+  { value: "failed", label: "Unsuccessful" },
+] as const;
 
-function formatDateLabel(dateStr: string): string {
+/**
+ * Formats a group's date as "Today", "Yesterday", or a full date (issue
+ * #960): a bare weekday/month/day label gives no sense of recency at a
+ * glance, and the two most recent days are the ones a user checks most
+ * often. Compares local calendar days, matching how `group.date` is
+ * produced from local-time buckets server-side.
+ */
+function formatDateLabel(dateStr: string, now: Date = new Date()): string {
   const d = new Date(dateStr);
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const daysAgo = Math.round(
+    (startOfDay(now) - startOfDay(d)) / MS_PER_DAY,
+  );
+
+  if (daysAgo === 0) return "Today";
+  if (daysAgo === 1) return "Yesterday";
+
   return d.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
@@ -148,7 +174,17 @@ function GroupedTxRow({ tx, onCopy, explorerUrl }: { tx: GroupedTransaction; onC
   }, []);
 
   return (
-    <div>
+    <div
+      // Skip layout/paint for rows scrolled out of view (issue #960): a
+      // zero-dependency alternative to a virtualization library, keeping
+      // hundreds of rows from all mounting their full DOM at once.
+      // content-visibility: visible on the expanded row so its operations
+      // list stays rendered and measured while open.
+      style={{
+        contentVisibility: isExpanded ? "visible" : "auto",
+        containIntrinsicSize: "0 57px",
+      }}
+    >
       <div
         role="button"
         tabIndex={0}
@@ -243,8 +279,29 @@ function BigChevronIcon({ expanded }: { expanded: boolean }) {
   );
 }
 
+type StatusFilter = "all" | "success" | "failed";
+
+/**
+ * Applies the status filter client-side, dropping groups left with no
+ * transactions afterward (issue #960). Status filtering doesn't need a
+ * server round trip: the current page's transactions are already loaded,
+ * and toggling "Failed" to spot a stuck payment should feel instant.
+ */
+function filterGroupsByStatus(
+  groups: TimelineGroup[],
+  statusFilter: StatusFilter,
+): TimelineGroup[] {
+  if (statusFilter === "all") return groups;
+  return groups
+    .map((group) => ({
+      ...group,
+      transactions: group.transactions.filter((tx) => tx.status === statusFilter),
+    }))
+    .filter((group) => group.transactions.length > 0);
+}
+
 export function ActivityTimeline({ className }: { className?: string }) {
-  const { address, isConnected, network } = useSorokit();
+  const { address, isConnected, network, client } = useSorokit();
   const [groups, setGroups] = useState<TimelineGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -255,13 +312,15 @@ export function ActivityTimeline({ className }: { className?: string }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const abortRef = useRef<AbortController | null>(null);
 
   const loadTimeline = useCallback(() => {
-    if (!address) return;
+    if (!address || !client) return;
 
     abortRef.current?.abort();
-    abortRef.current = new AbortController();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setLoading(true);
     setError(null);
@@ -274,7 +333,7 @@ export function ActivityTimeline({ className }: { className?: string }) {
     if (dateTo) f.dateTo = dateTo;
     if (searchInput.trim()) f.searchQuery = searchInput.trim();
 
-    getClient()
+    client
       .operation.getTimeline({
         address,
         page,
@@ -282,6 +341,10 @@ export function ActivityTimeline({ className }: { className?: string }) {
         filters: f,
       })
       .then(({ data, error: err, total: t }) => {
+        // A newer request (or unmount) has already superseded this one;
+        // applying its response now would overwrite fresher state with
+        // stale data.
+        if (controller.signal.aborted) return;
         if (err) {
           setError(err);
           return;
@@ -290,10 +353,15 @@ export function ActivityTimeline({ className }: { className?: string }) {
         setTotal(t);
         setError(null);
       })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Failed to load activity");
+      })
       .finally(() => {
+        if (controller.signal.aborted) return;
         setLoading(false);
       });
-  }, [address, page, filters, dateFrom, dateTo, searchInput]);
+  }, [address, client, page, filters, dateFrom, dateTo, searchInput]);
 
   useEffect(() => {
     if (!address) return;
@@ -302,10 +370,16 @@ export function ActivityTimeline({ className }: { className?: string }) {
     }, 0);
     return () => {
       window.clearTimeout(timerId);
+      // Unmounting (or a dependency change about to re-run this effect)
+      // invalidates any fetch loadTimeline already kicked off; its
+      // eventual response is handled by the aborted-signal check inside
+      // loadTimeline itself.
+      abortRef.current?.abort();
     };
   }, [address, loadTimeline]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
+  const visibleGroups = filterGroupsByStatus(groups, statusFilter);
 
   const handleCopyHash = useCallback((hash: string) => {
     navigator.clipboard.writeText(hash).catch(() => {});
@@ -316,6 +390,7 @@ export function ActivityTimeline({ className }: { className?: string }) {
     setDateFrom("");
     setDateTo("");
     setSearchInput("");
+    setStatusFilter("all");
     setPage(1);
   }, []);
 
@@ -323,7 +398,8 @@ export function ActivityTimeline({ className }: { className?: string }) {
     filters.operationType !== "all" ||
     dateFrom !== "" ||
     dateTo !== "" ||
-    searchInput !== "";
+    searchInput !== "" ||
+    statusFilter !== "all";
 
   return (
     <div
@@ -354,6 +430,28 @@ export function ActivityTimeline({ className }: { className?: string }) {
             {hasActiveFilters && <span className="w-1.5 h-1.5 rounded-full bg-brand" />}
           </button>
         </div>
+      </div>
+
+      <div
+        role="group"
+        aria-label="Filter by status"
+        className="flex items-center gap-2 px-5 py-3 border-b border-line"
+      >
+        {STATUS_FILTER_CHIPS.map((chip) => (
+          <button
+            key={chip.value}
+            onClick={() => setStatusFilter(chip.value)}
+            aria-pressed={statusFilter === chip.value}
+            className={cn(
+              "px-3 py-1 rounded-full text-[12px] font-medium border transition-colors",
+              statusFilter === chip.value
+                ? "bg-brand-dim text-brand border-brand/20"
+                : "bg-surface-2 text-ink-3 border-line hover:bg-surface-2",
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
       </div>
 
       {filterOpen && (
@@ -399,6 +497,7 @@ export function ActivityTimeline({ className }: { className?: string }) {
               <Input
                 id="at-search"
                 placeholder="Search by address or transaction hash..."
+                aria-label="Search by address or transaction hash"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -439,7 +538,7 @@ export function ActivityTimeline({ className }: { className?: string }) {
       ) : error ? (
         <div className="flex items-start gap-3 px-5 py-4">
           <div className="w-8 h-8 rounded-full bg-error-dim flex items-center justify-center shrink-0 mt-0.5">
-            <HugeiconsIcon icon={XCircleIcon} size={16} color="currentColor" strokeWidth={1.5} className="text-red" />
+            <HugeiconsIcon icon={CircleXIcon} size={16} color="currentColor" strokeWidth={1.5} className="text-red" />
           </div>
           <div>
             <p className="text-[13px] font-semibold text-ink">Failed to load activity</p>
@@ -455,31 +554,25 @@ export function ActivityTimeline({ className }: { className?: string }) {
             <SkeletonRow key={i} />
           ))}
         </div>
-      ) : groups.length === 0 ? (
+      ) : visibleGroups.length === 0 ? (
         <p className="text-[13px] text-ink-3 text-center py-10">
           {hasActiveFilters ? "No transactions match your filters" : "No activity yet"}
         </p>
       ) : (
         <>
           <div>
-            {groups.map((group, groupIndex) => (
+            {visibleGroups.map((group) => (
               <div key={group.date}>
-                {groupIndex > 0 && (
-                  <div className="flex items-center gap-3 px-5 py-2">
-                    <div className="flex-1 h-px bg-line" />
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
-                      {formatDateLabel(group.date)}
-                    </span>
-                    <div className="flex-1 h-px bg-line" />
-                  </div>
-                )}
-                {groupIndex === 0 && (
-                  <div className="px-5 py-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
-                      {formatDateLabel(group.date)}
-                    </span>
-                  </div>
-                )}
+                {/* Sticky so the date a transaction belongs to stays
+                    visible while scrolling through a long group (issue
+                    #960). */}
+                <div className="flex items-center gap-3 px-5 py-2 sticky top-0 z-10 bg-surface">
+                  <div className="flex-1 h-px bg-line" />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+                    {formatDateLabel(group.date)}
+                  </span>
+                  <div className="flex-1 h-px bg-line" />
+                </div>
                 {group.transactions.map((tx) => {
                   const url = getExplorerUrl(network?.name ?? null, tx.hash);
                   return (

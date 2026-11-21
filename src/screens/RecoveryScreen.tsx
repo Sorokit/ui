@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { SeedPhraseInput } from "@/components/SeedPhraseInput";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardDescription, CardFooter,CardHeader, CardTitle } from "@/components/ui/Card";
@@ -207,6 +208,19 @@ export function RecoveryScreen() {
               Register Recovery Signer
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      {/* Seed phrase entry with masking, paste distribution & BIP-39 validation */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Seed Phrase Recovery</CardTitle>
+          <CardDescription>
+            Enter your 12 or 24-word recovery phrase. You can paste the whole phrase into any box.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SeedPhraseInput />
         </CardContent>
       </Card>
 

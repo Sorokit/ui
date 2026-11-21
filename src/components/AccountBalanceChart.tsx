@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { type TouchEvent, useId, useMemo, useState } from "react";
 
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
@@ -20,6 +20,7 @@ type AssetTab = "XLM" | string;
 
 interface AccountBalanceChartProps {
   className?: string;
+  title?: string;
   /** Balance history data per asset. Falls back to mock data if empty. */
   balanceHistory?: AssetBalance[];
 }
@@ -88,14 +89,35 @@ function LineChart({
 
   if (data.length === 0) return null;
 
+  const handleTouch = (event: TouchEvent<SVGSVGElement>) => {
+    const touch = event.touches[0];
+    if (!touch) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width === 0) return;
+
+    const chartX = ((touch.clientX - rect.left) / rect.width) * width;
+    const progress = (chartX - padding.left) / (width - padding.left - padding.right);
+    const index = Math.min(
+      data.length - 1,
+      Math.max(0, Math.round(progress * (data.length - 1))),
+    );
+    onHover?.(data[index] ?? null);
+  };
+
   const values = data.map((d) => d.value);
   const minY = Math.min(...values);
   const maxY = Math.max(...values);
   const rangeY = maxY - minY || 1;
+  // A single data point makes `data.length - 1` zero, which turns xScale
+  // into a division by zero (`i / 0` => NaN for i > 0, and 0/0 => NaN for
+  // i === 0) and produces an invalid `d="M NaN NaN"` path. Falling back to 1
+  // here places that single point at the chart's left edge instead.
+  const xRangeDivisor = data.length - 1 || 1;
 
   const xScale = (i: number) =>
     padding.left +
-    (i / (data.length - 1)) * (width - padding.left - padding.right);
+    (i / xRangeDivisor) * (width - padding.left - padding.right);
   const yScale = (v: number) =>
     padding.top +
     (1 - (v - minY) / rangeY) * (height - padding.top - padding.bottom);
@@ -116,9 +138,12 @@ function LineChart({
     <svg
       width="100%"
       viewBox={`0 0 ${width} ${height}`}
-      className="overflow-visible"
+      className="overflow-visible touch-pan-y"
       role="img"
       aria-label={`Line chart with ${data.length} data points`}
+      onTouchStart={handleTouch}
+      onTouchMove={handleTouch}
+      onTouchEnd={() => onHover?.(null)}
     >
       <defs>
         <linearGradient
@@ -208,6 +233,7 @@ function LineChart({
 
 export function AccountBalanceChart({
   className,
+  title = "Account Balance History",
   balanceHistory,
 }: AccountBalanceChartProps) {
   const titleId = useId();
@@ -257,7 +283,12 @@ export function AccountBalanceChart({
   const timeframeDays =
     TIMEFRAMES.find((t) => t.value === timeframe)?.days ?? 7;
 
-  const activeAsset = assets.find((a) => a.asset === activeTab);
+  const effectiveActiveTab =
+    assets.length > 0 && !assets.some((a) => a.asset === activeTab)
+      ? assets[0].asset
+      : activeTab;
+
+  const activeAsset = assets.find((a) => a.asset === effectiveActiveTab);
   const chartData = useMemo(() => {
     if (!activeAsset) return [];
     return activeAsset.data.slice(-timeframeDays);
@@ -269,16 +300,6 @@ export function AccountBalanceChart({
   const change = currentValue - startValue;
   const changePct = startValue > 0 ? (change / startValue) * 100 : 0;
 
-  useEffect(() => {
-    if (assets.length > 0 && !assets.find((a) => a.asset === activeTab)) {
-      setActiveTab((prev) =>
-        assets.find((a) => a.asset === prev)?.asset === prev
-          ? prev
-          : assets[0].asset,
-      );
-    }
-  }, [assets]);
-
   return (
     <div
       className={cn(
@@ -288,14 +309,31 @@ export function AccountBalanceChart({
       role="region"
       aria-labelledby={titleId}
     >
-      <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+      <div className="px-5 py-4 border-b border-line flex items-center justify-between">
         <div>
-          <h3 id={titleId} className="text-[13px] font-semibold text-ink">
-            Balance History
+          <h3 id={titleId} className="text-[14px] font-semibold text-ink">
+            {title}
           </h3>
-          <p className="text-[11px] text-ink-3 mt-0.5">
-            Account balance over time
+          <p className="text-[12px] text-ink-3 mt-0.5">
+            Historical balance trends
           </p>
+        </div>
+        <div className="flex items-center gap-1">
+          {TIMEFRAMES.map((t) => (
+            <button
+              key={t.value}
+              type="button"
+              onClick={() => setTimeframe(t.value as Timeframe)}
+              className={cn(
+                "text-[11px] font-medium px-2 py-1 rounded-md transition-colors",
+                timeframe === t.value
+                  ? "bg-surface-2 text-ink"
+                  : "text-ink-3 hover:text-ink-2",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -318,7 +356,7 @@ export function AccountBalanceChart({
                   onClick={() => setActiveTab(a.asset)}
                   className={cn(
                     "text-[12px] font-medium px-2.5 py-1 rounded-md transition-colors",
-                    activeTab === a.asset
+                    effectiveActiveTab === a.asset
                       ? "bg-brand-dim text-brand"
                       : "text-ink-3 hover:text-ink-2",
                   )}
@@ -371,11 +409,21 @@ export function AccountBalanceChart({
           )}
 
           <div className="px-2 py-2">
-            <LineChart
-              data={chartData}
-              color={activeAsset?.color ?? "#55852b"}
-              onHover={setHoveredPoint}
-            />
+            {chartData.length === 0 ? (
+              <div
+                className="flex h-[200px] items-center justify-center text-center text-[13px] text-ink-3"
+                role="status"
+                aria-label="No balance history available"
+              >
+                No balance history available
+              </div>
+            ) : (
+              <LineChart
+                data={chartData}
+                color={activeAsset?.color ?? "#55852b"}
+                onHover={setHoveredPoint}
+              />
+            )}
           </div>
 
           {!balanceHistory && (

@@ -16,18 +16,17 @@
     "jsx": "react-jsx",
 
     /* Path aliases */
-    "ignoreDeprecations": "6.0",
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
 
     /* Linting */
+    "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/**/*.test.*", "src/__tests__/**", "src/setupTests.ts"]
+  "exclude": ["src/**/*.test.*", "src/__tests__/**", "src/test/setup.ts"]
 }

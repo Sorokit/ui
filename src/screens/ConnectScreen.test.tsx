@@ -1,178 +1,273 @@
-import { Download01Icon,Refresh01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AccountCard } from "@/components/AccountCard";
-import { BalanceList } from "@/components/BalanceList";
-import { ClaimableBalanceCard } from "@/components/ClaimableBalanceCard";
-import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
-import type { NetworkInfo } from "@/lib/client";
 
-function handleExport(
-  address: string,
-  account: ReturnType<typeof useSorokit>["account"],
-  balances: ReturnType<typeof useSorokit>["balances"],
-) {
-  const data = {
-    address,
-    account,
-    balances,
-    exportedAt: new Date().toISOString(),
-  };
+import { ConnectScreen } from "./ConnectScreen";
 
-  const blob = new Blob([JSON.stringify(data, null, 2)], {
-    type: "application/json",
+vi.mock("@/context/useSorokit", () => ({
+  useSorokit: vi.fn(),
+}));
+
+describe("ConnectScreen", () => {
+  it("renders connect button and calls connectWallet on click", () => {
+    const connectWallet = vi.fn();
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet,
+      isConnecting: false,
+      error: null,
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<ConnectScreen />);
+    const btn = screen.getByRole("button", { name: /Connect Wallet/i });
+    expect(btn).toBeInTheDocument();
+    
+    fireEvent.click(btn);
+    expect(connectWallet).toHaveBeenCalledTimes(1);
   });
 
-  const url = URL.createObjectURL(blob);
+  it("shows a loading state and disables the CTA while connecting", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: true,
+      error: null,
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
 
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `sorokit-account-${address.slice(0, 8)}.json`;
-  a.click();
+    render(<ConnectScreen />);
 
-  URL.revokeObjectURL(url);
-}
+    const btn = screen.getByRole("button", { name: /Connecting/i });
+    expect(btn).toBeDisabled();
+    expect(screen.getByText("Connecting to your wallet…")).toBeInTheDocument();
+  });
 
-/**
- * Maps a Stellar network to its Stellar Expert account-explorer URL.
- * Returns null for unsupported networks.
- */
-function explorerAccountUrl(
-  network: NetworkInfo | null,
-  address: string | null,
-): string | null {
-  if (!network || !address) return null;
+  it("announces connection errors to assistive technology", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: false,
+      error: "Wallet connection failed",
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
 
-  const segment =
-    network.name === "mainnet"
-      ? "public"
-      : network.name === "testnet"
-        ? "testnet"
-        : null;
+    render(<ConnectScreen />);
 
-  if (!segment) return null;
+    expect(screen.getByRole("alert")).toHaveTextContent("Wallet connection failed");
+  });
 
-  return `https://stellar.expert/explorer/${segment}/account/${address}`;
-}
+  it("resets the document title to the disconnected default (#551)", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: false,
+      error: null,
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
 
-export function AccountScreen() {
-  const {
-    isConnected,
-    isLoadingAccount,
-    refreshAccount,
-    address,
-    account,
-    balances,
-    network,
-  } = useSorokit();
+    // Simulate the tab still showing the last dashboard screen.
+    document.title = "Transactions - Sorokit";
 
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-  const [now, setNow] = useState(new Date());
+    render(<ConnectScreen />);
 
-  useEffect(() => {
-    if (!lastRefreshed) return;
+    expect(document.title).toBe("Connect - Sorokit");
+  });
 
-    const interval = setInterval(() => {
-      setNow(new Date());
-    }, 60_000);
+  // ── Query-param auto-connect (#893) ─────────────────────────────────────
+  describe("query-param auto-connect (#893)", () => {
+    const originalLocation = window.location;
 
-    return () => clearInterval(interval);
-  }, [lastRefreshed]);
+    afterEach(() => {
+      Object.defineProperty(window, "location", {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      });
+    });
 
-  const handleRefresh = async () => {
-    await refreshAccount();
-    const timestamp = new Date();
-    setLastRefreshed(timestamp);
-    setNow(timestamp);
-  };
+    function setSearch(search: string) {
+      Object.defineProperty(window, "location", {
+        value: { ...originalLocation, search },
+        writable: true,
+        configurable: true,
+      });
+    }
 
-  const getRelativeTime = (date: Date) => {
-    const diffInSeconds = Math.floor(
-      (now.getTime() - date.getTime()) / 1000,
-    );
+    it("auto-connects when a recognized provider is given via ?provider=", () => {
+      setSearch("?provider=freighter");
+      const connectWallet = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
 
-    if (diffInSeconds < 60) return "just now";
+      render(<ConnectScreen />);
 
-    const minutes = Math.floor(diffInSeconds / 60);
+      expect(connectWallet).toHaveBeenCalledTimes(1);
+    });
 
-    if (minutes === 1) return "1 min ago";
+    it("matches provider ids case-insensitively", () => {
+      setSearch("?provider=FREIGHTER");
+      const connectWallet = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
 
-    return `${minutes} min ago`;
-  };
+      render(<ConnectScreen />);
 
-  const explorerUrl = explorerAccountUrl(network, address);
+      expect(connectWallet).toHaveBeenCalledTimes(1);
+    });
 
-  return (
-    <div className="flex flex-col gap-5">
-      <h2 className="text-[18px] font-semibold text-ink">Account</h2>
+    it("does not auto-connect for an unrecognized provider id", () => {
+      setSearch("?provider=not-a-real-wallet");
+      const connectWallet = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
 
-      <p className="text-[13px] text-ink-3 -mt-3">
-        Balances and account details
-      </p>
+      render(<ConnectScreen />);
 
-      {isConnected && (
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              loading={isLoadingAccount}
-              onClick={handleRefresh}
-              aria-label="Refresh account data"
-            >
-              <HugeiconsIcon
-                icon={Refresh01Icon}
-                size={14}
-                strokeWidth={1.5}
-              />
-              Refresh
-            </Button>
+      expect(connectWallet).not.toHaveBeenCalled();
+    });
 
-            {address && (
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => handleExport(address, account, balances)}
-                aria-label="Export account data"
-                data-testid="account-export-button"
-              >
-                <HugeiconsIcon
-                  icon={Download01Icon}
-                  size={14}
-                  strokeWidth={1.5}
-                />
-                Export
-              </Button>
-            )}
+    it("does not auto-connect when no provider param is present", () => {
+      setSearch("");
+      const connectWallet = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
 
-            {explorerUrl && (
-              <a
-                data-testid="account-explorer-link"
-                href={explorerUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`View ${address} on Stellar Expert`}
-                className="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-medium text-ink-2 hover:text-ink hover:bg-surface-2 transition-colors"
-              >
-                Explorer
-                <span aria-hidden="true">↗</span>
-              </a>
-            )}
-          </div>
+      render(<ConnectScreen />);
 
-          {lastRefreshed && (
-            <span className="text-[11px] text-ink-3 pr-1">
-              Last updated: {getRelativeTime(lastRefreshed)}
-            </span>
-          )}
-        </div>
-      )}
+      expect(connectWallet).not.toHaveBeenCalled();
+    });
 
-      <AccountCard />
-      <BalanceList />
-      <ClaimableBalanceCard />
-    </div>
-  );
-}
+    it("only auto-connects once even if the component re-renders", () => {
+      setSearch("?provider=xbull");
+      const connectWallet = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      const { rerender } = render(<ConnectScreen />);
+      rerender(<ConnectScreen />);
+
+      expect(connectWallet).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Actionable rejection errors (#893) ──────────────────────────────────
+  describe("actionable troubleshooting for connection errors (#893)", () => {
+    function renderWithError(error: string) {
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet: vi.fn(),
+        isConnecting: false,
+        error,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
+      return render(<ConnectScreen />);
+    }
+
+    it("suggests unlocking the extension for a locked-wallet error", () => {
+      renderWithError("Wallet is locked");
+      expect(
+        screen.getByText(/unlock your wallet extension/i),
+      ).toBeInTheDocument();
+    });
+
+    it("suggests approving the request for a user-rejected error", () => {
+      renderWithError("User rejected the request");
+      expect(
+        screen.getByText(/declined.*approve the connection request/is),
+      ).toBeInTheDocument();
+    });
+
+    it("suggests installing a wallet when none is detected", () => {
+      renderWithError("No wallet extension found");
+      expect(
+        screen.getByText(/install one of the wallets below/i),
+      ).toBeInTheDocument();
+    });
+
+    it("suggests retrying for a timeout error", () => {
+      renderWithError("Connection request timed out");
+      expect(screen.getByRole("alert")).toHaveTextContent("Connection request timed out");
+      expect(screen.getByText(/responsive and try again/i)).toBeInTheDocument();
+    });
+
+    it("still shows the raw error with no extra guidance for an unrecognized message", () => {
+      renderWithError("Something completely unexpected happened");
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Something completely unexpected happened",
+      );
+      // No troubleshooting paragraph should be appended for an unmatched error.
+      expect(screen.queryByText(/unlock your wallet/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/install one of the wallets/i)).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Mobile deep links (#893) ────────────────────────────────────────────
+  describe("mobile wallet deep links (#893)", () => {
+    const originalUserAgent = window.navigator.userAgent;
+
+    afterEach(() => {
+      Object.defineProperty(window.navigator, "userAgent", {
+        value: originalUserAgent,
+        configurable: true,
+      });
+    });
+
+    function setUserAgent(ua: string) {
+      Object.defineProperty(window.navigator, "userAgent", {
+        value: ua,
+        configurable: true,
+      });
+    }
+
+    it("shows mobile wallet deep links on a mobile user agent", () => {
+      setUserAgent(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+      );
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet: vi.fn(),
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<ConnectScreen />);
+
+      expect(screen.getByRole("link", { name: /open lobstr app/i })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /open albedo app/i })).toBeInTheDocument();
+    });
+
+    it("does not show mobile wallet deep links on a desktop user agent", () => {
+      setUserAgent(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      );
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet: vi.fn(),
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<ConnectScreen />);
+
+      expect(screen.queryByRole("link", { name: /open lobstr app/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /open albedo app/i })).not.toBeInTheDocument();
+    });
+  });
+});

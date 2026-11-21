@@ -28,6 +28,13 @@ export interface Validator {
   apyPct: number;
   /** Historical uptime as a percentage 0–100 */
   uptimePct: number;
+  /**
+   * Total uptime checks (pings) recorded for this validator. A newly
+   * registered validator has 0, in which case uptime cannot be computed yet.
+   */
+  pingCount?: number;
+  /** Number of recorded pings that succeeded. Used with `pingCount`. */
+  successfulPings?: number;
   /** Total amount staked with this validator (in XLM) */
   totalStaked: string;
   /** Number of unique delegators */
@@ -73,6 +80,10 @@ export interface RewardEvent {
   validatorId: string;
   /** Transaction hash for the payout */
   txHash?: string;
+  /** Historical XLM price in USD at the time of distribution */
+  priceUsd?: number;
+  /** Estimated USD value of the reward at the time of distribution */
+  usdValue?: number;
 }
 
 /** Aggregated daily reward bucket for the history chart */
@@ -148,6 +159,9 @@ export const MIN_DELEGATION_XLM = 1;
 /** Number of days shown in the reward history */
 export const REWARD_HISTORY_DAYS = 30;
 
+/** Default baseline XLM price in USD for historical fiat estimation */
+export const DEFAULT_XLM_PRICE_USD = 0.11;
+
 // ─── Pure utility functions ───────────────────────────────────────────────────
 
 /**
@@ -193,6 +207,26 @@ export function formatXlm(value: number | string, decimals = 4): string {
 /**
  * Format a percentage value to one decimal place.
  */
+/**
+ * Resolve a validator's uptime percentage, or `null` when there is no data to
+ * base it on yet — a newly registered validator with 0 recorded pings, or an
+ * upstream value that isn't a finite number. Never returns NaN, so callers
+ * can't end up rendering "NaN%".
+ */
+export function computeUptimePct(
+  validator: Pick<Validator, "uptimePct" | "pingCount" | "successfulPings">,
+): number | null {
+  const { uptimePct, pingCount, successfulPings } = validator;
+  if (pingCount !== undefined) {
+    if (!Number.isFinite(pingCount) || pingCount <= 0) return null;
+    if (successfulPings !== undefined && Number.isFinite(successfulPings)) {
+      const pct = (successfulPings / pingCount) * 100;
+      return Math.min(100, Math.max(0, pct));
+    }
+  }
+  return Number.isFinite(uptimePct) ? uptimePct : null;
+}
+
 export function formatPct(value: number): string {
   return `${value.toFixed(1)}%`;
 }
@@ -228,6 +262,39 @@ export function aggregateDailyRewards(
  */
 export function totalRewardHistoryXlm(history: DailyReward[]): number {
   return history.reduce((s, d) => s + d.totalXlm, 0);
+}
+
+/**
+ * Deterministically estimate the historical XLM price in USD for a given date.
+ * Uses a mild sinusoidal curve around `DEFAULT_XLM_PRICE_USD` when no explicit
+ * price feed is provided.
+ */
+export function estimateHistoricalXlmPriceUsd(dateStr: string): number {
+  const time = new Date(dateStr).getTime();
+  if (Number.isNaN(time)) return DEFAULT_XLM_PRICE_USD;
+  const dayIndex = Math.floor(time / 86_400_000);
+  const variance = Math.sin(dayIndex * 0.45) * 0.015;
+  return Number((DEFAULT_XLM_PRICE_USD + variance).toFixed(4));
+}
+
+/**
+ * Estimate the historical USD value of a reward event at the time of distribution.
+ */
+export function estimateRewardUsdValue(event: RewardEvent): {
+  priceUsd: number;
+  usdValue: number;
+} {
+  const amount = parseFloat(event.amount);
+  const validAmount = Number.isFinite(amount) ? amount : 0;
+  const priceUsd =
+    event.priceUsd != null && Number.isFinite(event.priceUsd)
+      ? event.priceUsd
+      : estimateHistoricalXlmPriceUsd(event.date);
+  const usdValue =
+    event.usdValue != null && Number.isFinite(event.usdValue)
+      ? event.usdValue
+      : Number((validAmount * priceUsd).toFixed(4));
+  return { priceUsd, usdValue };
 }
 
 /**
@@ -443,11 +510,16 @@ export function generateMockRewardHistory(): RewardEvent[] {
       // Simulate small daily variance (±10%)
       const base = amounts[idx];
       const jitter = base * 0.1 * (Math.sin(i * idx + 1) * 0.5 + 0.5);
+      const amount = (base + jitter).toFixed(6);
+      const priceUsd = estimateHistoricalXlmPriceUsd(dateStr);
+      const usdValue = Number((parseFloat(amount) * priceUsd).toFixed(4));
       events.push({
         id: `reward-${dateStr}-${vid}`,
         date: dateStr,
-        amount: (base + jitter).toFixed(6),
+        amount,
         validatorId: vid,
+        priceUsd,
+        usdValue,
       });
     });
   }

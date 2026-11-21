@@ -1,15 +1,170 @@
-import { FlameIcon } from "@hugeicons/core-free-icons";
-import { BulbIcon, CalculatorIcon, CircleGaugeIcon, ClockIcon, Refresh01Icon, ZapIcon } from "@hugeicons/core-free-icons";
+import {
+  BulbIcon,
+  CalculatorIcon,
+  CircleGaugeIcon,
+  ClockIcon,
+  Download01Icon,
+  FlameIcon,
+  Refresh01Icon,
+  Tick01Icon,
+  ZapIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getClient } from "@/lib/client";
-import { cn } from "@/lib/utils";
+import { useSorokit } from "@/context/useSorokit";
+import { useFeeData } from "@/hooks/useFeeData";
+import type { SorobanResourceUsage } from "@/lib/client";
+import { parseContractPanic } from "@/lib/diagnostics";
+import { cn, toXLM } from "@/lib/utils";
 
-interface GasOptimizerProps {
+// Soroban Protocol Execution Limits
+export const MIN_CPU_INSTRUCTIONS = 40_000;
+export const MAX_CPU_INSTRUCTIONS = 100_000_000;
+export const MIN_MEMORY_BYTES = 1_048_576; // 1 MiB (1,048,576 bytes) Soroban minimum requirement
+export const MAX_MEMORY_BYTES = 41_943_040; // 40 MiB (41,943_040 bytes) Soroban protocol limit
+
+export const SOROBAN_MIN_INSTRUCTIONS = MIN_CPU_INSTRUCTIONS;
+export const SOROBAN_MAX_INSTRUCTIONS = MAX_CPU_INSTRUCTIONS;
+export const SOROBAN_MIN_MEMORY = MIN_MEMORY_BYTES;
+export const SOROBAN_MAX_MEMORY = MAX_MEMORY_BYTES;
+
+export const SOROBAN_PROTOCOL_LIMITS = {
+  instructions: {
+    min: MIN_CPU_INSTRUCTIONS,
+    max: MAX_CPU_INSTRUCTIONS,
+  },
+  memory: {
+    min: MIN_MEMORY_BYTES,
+    max: MAX_MEMORY_BYTES,
+  },
+} as const;
+
+/**
+ * Soroban resource fee rates, in stroops. Defaults mirror the Mainnet
+ * network configuration (`ConfigSettingContractComputeV0` /
+ * `ConfigSettingContractLedgerCostV0`); validators can vote to change them,
+ * so they are an estimate, not a quote. Memory has no separate fee — it is
+ * bounded by the limit but billed through CPU instructions.
+ */
+export const RESOURCE_FEE_RATES = {
+  /** Stroops per 10,000 CPU instructions. */
+  feePerInstructionIncrement: 25,
+  /** Stroops per 1 KB of ledger entries read. */
+  feeRead1Kb: 1_786,
+  /** Stroops per 1 KB of ledger entries written. */
+  feeWrite1Kb: 11_800,
+} as const;
+
+export interface ResourceCost {
+  key: "cpu" | "memory" | "read" | "write";
+  label: string;
+  amount: number;
+  unit: string;
+  feeStroops: number;
+}
+
+/** Sanitize a resource count: missing, negative or non-finite becomes 0. */
+function resourceAmount(value: number | undefined): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0;
+}
+
+/**
+ * Per-resource fee breakdown. Each fee rounds up like the network does, and
+ * zero (or missing) resource limits produce zero rows rather than NaN.
+ */
+export function computeResourceCosts(
+  resources: SorobanResourceUsage | undefined,
+  rates: typeof RESOURCE_FEE_RATES = RESOURCE_FEE_RATES,
+): ResourceCost[] {
+  const cpu = resourceAmount(resources?.cpuInstructions);
+  const memory = resourceAmount(resources?.memoryBytes);
+  const read = resourceAmount(resources?.readBytes);
+  const write = resourceAmount(resources?.writeBytes);
+  return [
+    {
+      key: "cpu",
+      label: "CPU Instructions",
+      amount: cpu,
+      unit: "instructions",
+      feeStroops: Math.ceil((cpu * rates.feePerInstructionIncrement) / 10_000),
+    },
+    { key: "memory", label: "Memory", amount: memory, unit: "bytes", feeStroops: 0 },
+    {
+      key: "read",
+      label: "Ledger Read",
+      amount: read,
+      unit: "bytes",
+      feeStroops: Math.ceil((read * rates.feeRead1Kb) / 1024),
+    },
+    {
+      key: "write",
+      label: "Ledger Write",
+      amount: write,
+      unit: "bytes",
+      feeStroops: Math.ceil((write * rates.feeWrite1Kb) / 1024),
+    },
+  ];
+}
+
+export type GasPresetName = "Conservative" | "Aggressive" | "Custom";
+
+export interface GasPresetConfig {
+  cpuInstructions: number;
+  memoryBytes: number;
+  multiplier: number;
+}
+
+export const GAS_PRESETS: Record<
+  "Conservative" | "Aggressive",
+  GasPresetConfig
+> = {
+  Conservative: {
+    cpuInstructions: 50_000_000,
+    memoryBytes: 33_554_432, // 32 MiB
+    multiplier: 1.0,
+  },
+  Aggressive: {
+    cpuInstructions: 10_000_000,
+    memoryBytes: 10_485_760, // 10 MiB
+    multiplier: 1.5,
+  },
+};
+
+export interface GasOptimizerConfig {
+  version: string;
+  network: string;
+  preset: string;
+  instructions: number;
+  cpuInstructions: number;
+  memory: number;
+  memoryBytes: number;
+  feeMultiplier: number;
+  gasMultiplier: number;
+  multiplier: number;
+  gasPrice: string;
+  baseFee: string;
+  baseReserve: string;
+  operations: string[];
+  resources: {
+    instructions: number;
+    memory: number;
+  };
+  profile: {
+    preset: string;
+    instructions: number;
+    memory: number;
+    multiplier: number;
+  };
+}
+
+export interface GasOptimizerProps {
   className?: string;
   operations?: string[];
   refreshInterval?: number;
+  onExport?: (config: GasOptimizerConfig) => void;
 }
 
 interface GasPriceData {
@@ -39,6 +194,7 @@ interface GasEstimate {
   breakdown: OperationGasBreakdown[];
   scenarios: FeeScenario[];
   customMultiplier: number;
+  resources?: SorobanResourceUsage;
 }
 
 function formatStroops(stroops: string): string {
@@ -60,26 +216,72 @@ function formatTime(seconds: number): string {
   return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
 }
 
+function copyViaExecCommand(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.readOnly = true;
+    textarea.setAttribute("aria-hidden", "true");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "0";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const succeeded = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return succeeded;
+  } catch {
+    return false;
+  }
+}
+
+import { useIsVisible } from "@/hooks/useIsVisible";
+
+const DEFAULT_OPERATIONS = ["payment"];
+
 export function GasOptimizer({
   className,
-  operations = ["payment", "manage_data", "change_trust"],
+  operations = DEFAULT_OPERATIONS,
   refreshInterval = 0,
+  onExport,
 }: GasOptimizerProps) {
+  const { client, network, registerWatcher } = useSorokit();
+  const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
+  // Shares FeeEstimator's polling interval and cache instead of fetching the
+  // base fee a second time: the hook dedupes concurrent callers down to one
+  // `estimateFee()` request per tick regardless of how many components use it.
+  const { fee: sharedFee } = useFeeData(refreshInterval, isVisible);
   const [gasPriceData, setGasPriceData] = useState<GasPriceData | null>(null);
   const [estimate, setEstimate] = useState<GasEstimate | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [customMultiplier, setCustomMultiplier] = useState(1);
-  const [scenarioLoading, setScenarioLoading] = useState(false);
   const [scenarioError, setScenarioError] = useState<string | null>(null);
 
+  // Optimization preset & resource states
+  const [preset, setPreset] = useState<GasPresetName>("Conservative");
+  const [cpuInstructions, setCpuInstructions] = useState<number>(
+    GAS_PRESETS.Conservative.cpuInstructions,
+  );
+  const [memoryBytes, setMemoryBytes] = useState<number>(
+    GAS_PRESETS.Conservative.memoryBytes,
+  );
+  const [customMultiplier, setCustomMultiplier] = useState<number>(
+    GAS_PRESETS.Conservative.multiplier,
+  );
+  const [exported, setExported] = useState<boolean>(false);
+  const [announcement, setAnnouncement] = useState<string>("");
+
   const loadGasData = useCallback(async () => {
+    if (!client) return;
     setLoading(true);
     setError(null);
     try {
       const [gasRes, feeRes] = await Promise.all([
-        getClient().network.getGasPrice(),
-        getClient().transaction.estimateDetailedFee({
+        client.network.getGasPrice(),
+        client.transaction.estimateDetailedFee({
           operations,
           feeMultiplier: customMultiplier,
         }),
@@ -101,14 +303,13 @@ export function GasOptimizer({
     } finally {
       setLoading(false);
     }
-  }, [operations, customMultiplier]);
+  }, [client, operations, customMultiplier]);
 
   const loadScenarios = useCallback(async () => {
-    if (!estimate) return;
-    setScenarioLoading(true);
+    if (!estimate || !client) return;
     setScenarioError(null);
     try {
-      const { data, error: err } = await getClient().transaction.getFeeScenarios({
+      const { data, error: err } = await client.transaction.getFeeScenarios({
         operations,
         baseGasUnits: estimate.totalGasUnits,
       });
@@ -117,46 +318,202 @@ export function GasOptimizer({
         return;
       }
       if (data) {
-        setEstimate((prev) =>
-          prev ? { ...prev, scenarios: data } : prev,
-        );
+        setEstimate((prev) => (prev ? { ...prev, scenarios: data } : prev));
       }
     } catch (e) {
-      setScenarioError(e instanceof Error ? e.message : "Failed to load scenarios");
-    } finally {
-      setScenarioLoading(false);
+      setScenarioError(
+        e instanceof Error ? e.message : "Failed to load scenarios",
+      );
     }
-  }, [estimate, operations]);
+  }, [client, estimate, operations]);
+
+  const gasIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
+    if (!isVisible) return;
     const timerId = window.setTimeout(() => {
       void loadGasData();
     }, 0);
     if (refreshInterval > 0) {
-      const id = setInterval(() => {
+      gasIntervalRef.current = setInterval(() => {
         void loadGasData();
       }, refreshInterval);
       return () => {
         window.clearTimeout(timerId);
-        clearInterval(id);
+        if (gasIntervalRef.current !== null) {
+          clearInterval(gasIntervalRef.current);
+          gasIntervalRef.current = null;
+        }
       };
     }
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [loadGasData, refreshInterval]);
+  }, [loadGasData, refreshInterval, isVisible]);
+
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715).
+  useEffect(() => {
+    const cancel = () => {
+      if (gasIntervalRef.current !== null) {
+        clearInterval(gasIntervalRef.current);
+        gasIntervalRef.current = null;
+      }
+    };
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
 
   useEffect(() => {
     if (!estimate) return;
-    void loadScenarios();
+    let active = true;
+    const timerId = window.setTimeout(() => {
+      if (active) void loadScenarios();
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(timerId);
+    };
   }, [estimate, loadScenarios]);
 
-  const handleMultiplierChange = (value: number) => {
-    setCustomMultiplier(value);
+  const handlePresetSelect = (newPreset: GasPresetName) => {
+    setPreset(newPreset);
+    if (newPreset === "Conservative") {
+      const config = GAS_PRESETS.Conservative;
+      setCpuInstructions(config.cpuInstructions);
+      setMemoryBytes(config.memoryBytes);
+      setCustomMultiplier(config.multiplier);
+      setAnnouncement(
+        `Preset changed to Conservative. CPU instructions: ${config.cpuInstructions.toLocaleString()}, Memory: ${config.memoryBytes.toLocaleString()} bytes, Multiplier: ${config.multiplier.toFixed(1)}x`,
+      );
+    } else if (newPreset === "Aggressive") {
+      const config = GAS_PRESETS.Aggressive;
+      setCpuInstructions(config.cpuInstructions);
+      setMemoryBytes(config.memoryBytes);
+      setCustomMultiplier(config.multiplier);
+      setAnnouncement(
+        `Preset changed to Aggressive. CPU instructions: ${config.cpuInstructions.toLocaleString()}, Memory: ${config.memoryBytes.toLocaleString()} bytes, Multiplier: ${config.multiplier.toFixed(1)}x`,
+      );
+    } else {
+      setAnnouncement(
+        `Preset changed to Custom. CPU instructions: ${cpuInstructions.toLocaleString()}, Memory: ${memoryBytes.toLocaleString()} bytes, Multiplier: ${customMultiplier.toFixed(1)}x`,
+      );
+    }
   };
+
+  const handleCpuChange = (val: number) => {
+    const clamped = Math.max(
+      MIN_CPU_INSTRUCTIONS,
+      Math.min(MAX_CPU_INSTRUCTIONS, isNaN(val) ? MIN_CPU_INSTRUCTIONS : val),
+    );
+    setCpuInstructions(clamped);
+    setPreset("Custom");
+  };
+
+  const handleMemoryChange = (val: number) => {
+    const clamped = Math.max(
+      MIN_MEMORY_BYTES,
+      Math.min(MAX_MEMORY_BYTES, isNaN(val) ? MIN_MEMORY_BYTES : val),
+    );
+    setMemoryBytes(clamped);
+    setPreset("Custom");
+  };
+
+  const handleMultiplierChange = (val: number) => {
+    const clamped = Math.max(0.5, Math.min(2.0, isNaN(val) ? 1.0 : val));
+    setCustomMultiplier(clamped);
+    setPreset("Custom");
+  };
+
+  const getExportConfig = useCallback((): GasOptimizerConfig => {
+    const netName =
+      (typeof network === "string" ? network : network?.name) || "testnet";
+    return {
+      version: "1.0.0",
+      network: netName,
+      preset: preset.toLowerCase(),
+      instructions: cpuInstructions,
+      cpuInstructions,
+      memory: memoryBytes,
+      memoryBytes,
+      feeMultiplier: customMultiplier,
+      gasMultiplier: customMultiplier,
+      multiplier: customMultiplier,
+      gasPrice: gasPriceData?.gasPrice ?? "100",
+      baseFee: sharedFee?.baseFee ?? gasPriceData?.baseFee ?? "100",
+      baseReserve: gasPriceData?.baseReserve ?? "0.5",
+      operations,
+      resources: {
+        instructions: cpuInstructions,
+        memory: memoryBytes,
+      },
+      profile: {
+        preset: preset.toLowerCase(),
+        instructions: cpuInstructions,
+        memory: memoryBytes,
+        multiplier: customMultiplier,
+      },
+    };
+  }, [
+    network,
+    preset,
+    cpuInstructions,
+    memoryBytes,
+    customMultiplier,
+    gasPriceData,
+    sharedFee,
+    operations,
+  ]);
+
+  const handleExport = useCallback(() => {
+    const config = getExportConfig();
+    const jsonString = JSON.stringify(config, null, 2);
+
+    // Copy to clipboard
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(jsonString).catch(() => {
+        copyViaExecCommand(jsonString);
+      });
+    } else {
+      copyViaExecCommand(jsonString);
+    }
+
+    // Trigger download if supported in environment
+    if (
+      typeof window !== "undefined" &&
+      typeof URL !== "undefined" &&
+      typeof URL.createObjectURL === "function" &&
+      typeof Blob !== "undefined"
+    ) {
+      try {
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sorokit-gas-config.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch {
+        // Safe in non-browser or test environments
+      }
+    }
+
+    onExport?.(config);
+    setExported(true);
+    setAnnouncement("Gas configuration exported to clipboard");
+    setTimeout(() => {
+      setExported(false);
+    }, 2000);
+  }, [getExportConfig, onExport]);
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "rounded-xl border border-line bg-surface overflow-hidden",
         className,
@@ -169,42 +526,109 @@ export function GasOptimizer({
             Network gas stats & fee optimization
           </p>
         </div>
-        <button
-          onClick={() => void loadGasData()}
-          disabled={loading}
-          className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
-          title="Refresh gas data"
-          aria-label="Refresh gas data"
-        >
-          <HugeiconsIcon
-            icon={Refresh01Icon}
-            size={14}
-            color="currentColor"
-            strokeWidth={1.5}
-            className={loading ? "animate-spin" : ""}
-          />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExport}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-surface-2 hover:bg-surface text-ink-2 hover:text-ink text-[12px] font-medium transition-colors"
+            title="Export configuration as JSON"
+            aria-label="Export Config"
+          >
+            <HugeiconsIcon
+              icon={exported ? Tick01Icon : Download01Icon}
+              size={13}
+              color="currentColor"
+              strokeWidth={1.5}
+              className={exported ? "text-green" : ""}
+            />
+            <span>{exported ? "Exported!" : "Export Config"}</span>
+          </button>
+          <button
+            onClick={() => void loadGasData()}
+            disabled={loading}
+            className="p-1.5 rounded-lg hover:bg-surface-2 text-ink-3 hover:text-ink-2 transition-colors disabled:opacity-40"
+            title="Refresh gas data"
+            aria-label="Refresh gas data"
+          >
+            <HugeiconsIcon
+              icon={Refresh01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+              className={loading ? "animate-spin" : ""}
+            />
+          </button>
+        </div>
       </div>
 
       <div className="px-5 py-4" aria-live="polite" aria-atomic="true">
+        <span
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {announcement}
+        </span>
         {loading && !gasPriceData ? (
           <div className="flex flex-col gap-4">
             <div className="h-8 w-full rounded-lg bg-surface-2 animate-pulse" />
             <div className="h-24 rounded-lg bg-surface-2 animate-pulse" />
           </div>
         ) : error || scenarioError ? (
-          <p className="text-[12px] text-red">{error || scenarioError}</p>
+          <SimulationError message={(error || scenarioError) as string} />
         ) : gasPriceData && estimate ? (
           <div className="flex flex-col gap-5">
             <NetworkStats gasPriceData={gasPriceData} />
             <GasPriceDisplay gasPriceData={gasPriceData} estimate={estimate} />
-            <MultiplierSlider
-              value={customMultiplier}
-              onChange={handleMultiplierChange}
+            <PresetSelector preset={preset} onSelect={handlePresetSelect} />
+            <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <HugeiconsIcon
+                    icon={CalculatorIcon}
+                    size={12}
+                    className="text-ink-3"
+                    strokeWidth={1.5}
+                  />
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+                    Execution Resource Limits
+                  </span>
+                </div>
+                <span className="text-[10px] text-ink-4 font-mono">
+                  Soroban Protocol Boundaries
+                </span>
+              </div>
+              <CpuInstructionsSlider
+                value={cpuInstructions}
+                onChange={handleCpuChange}
+              />
+              <MemorySlider value={memoryBytes} onChange={handleMemoryChange} />
+              <MultiplierSlider
+                value={customMultiplier}
+                onChange={handleMultiplierChange}
+              />
+            </div>
+            <ResourceBreakdown
+              resources={
+                estimate.resources ?? {
+                  cpuInstructions,
+                  memoryBytes,
+                  readBytes: 0,
+                  writeBytes: 0,
+                }
+              }
+              simulated={estimate.resources !== undefined}
             />
             <OperationBreakdown breakdown={estimate.breakdown} />
-            <FeeScenarios scenarios={estimate.scenarios} multiplier={customMultiplier} />
-            <OptimizerSuggestions estimate={estimate} gasPriceData={gasPriceData} />
+            <FeeScenarios
+              scenarios={estimate.scenarios}
+              multiplier={customMultiplier}
+            />
+            <OptimizerSuggestions
+              estimate={estimate}
+              gasPriceData={gasPriceData}
+            />
             <TotalFee estimate={estimate} multiplier={customMultiplier} />
           </div>
         ) : null}
@@ -213,61 +637,301 @@ export function GasOptimizer({
   );
 }
 
-function NetworkStats({ gasPriceData }: { gasPriceData: GasPriceData }) {
+/**
+ * Simulation/network error. Contract panics and host errors are explained
+ * in plain English; the raw diagnostic output stays available, collapsed,
+ * for developers.
+ */
+function SimulationError({ message }: { message: string }) {
+  const panic = parseContractPanic(message);
+  if (!panic) {
+    return <p className="text-[12px] text-red">{message}</p>;
+  }
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
-          <HugeiconsIcon icon={CircleGaugeIcon} size={14} color="currentColor" className="text-brand" strokeWidth={1.5} />
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">Base Reserve</span>
-          <span className="text-[13px] font-semibold text-ink">{gasPriceData.baseReserve} XLM</span>
-        </div>
-      </div>
-      <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
-          <HugeiconsIcon icon={ClockIcon} size={14} color="currentColor" className="text-brand" strokeWidth={1.5} />
-        </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">Ledger Close</span>
-          <span className="text-[13px] font-semibold text-ink">{formatTime(gasPriceData.ledgerCloseTime)}</span>
-        </div>
-      </div>
+    <div
+      role="alert"
+      data-testid="contract-panic"
+      className="rounded-lg border border-line bg-surface-2 px-4 py-3 flex flex-col gap-2"
+    >
+      <span className="text-[12px] font-semibold text-red">Contract simulation failed</span>
+      <p className="text-[12px] text-ink-2">{panic.summary}</p>
+      <details className="text-[11px] text-ink-3">
+        <summary className="cursor-pointer select-none">Raw diagnostics</summary>
+        <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-[10px]">
+          {message}
+        </pre>
+      </details>
     </div>
   );
 }
 
-function GasPriceDisplay({ gasPriceData, estimate }: { gasPriceData: GasPriceData; estimate: GasEstimate }) {
+/**
+ * Collapsible per-resource cost breakdown (#959). Uses the simulated usage
+ * when the estimate includes it, otherwise the configured limits — the worst
+ * case the transaction is allowed to consume.
+ */
+function ResourceBreakdown({
+  resources,
+  simulated,
+}: {
+  resources: SorobanResourceUsage;
+  simulated: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const costs = computeResourceCosts(resources);
+  const totalStroops = costs.reduce((sum, c) => sum + c.feeStroops, 0);
+
   return (
-    <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
-          <HugeiconsIcon icon={ZapIcon} size={14} color="currentColor" className="text-brand" strokeWidth={1.5} />
+    <div className="rounded-lg bg-surface-2 border border-line">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls="gas-resource-breakdown"
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+      >
+        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+          Resource Breakdown
+        </span>
+        <span className="text-[11px] text-ink-3">
+          {totalStroops.toLocaleString()} stroops {open ? "▾" : "▸"}
+        </span>
+      </button>
+      {open && (
+        <div id="gas-resource-breakdown" className="px-4 pb-3">
+          <p className="text-[10px] text-ink-4 mb-2">
+            {simulated
+              ? "Resources consumed in simulation."
+              : "Based on the configured execution limits (no simulation data)."}
+          </p>
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr>
+                <th className="text-left py-1 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                  Resource
+                </th>
+                <th className="text-right py-1 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                  Usage
+                </th>
+                <th className="text-right py-1 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                  Fee (stroops)
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {costs.map((cost) => (
+                <tr key={cost.key} data-testid={`resource-${cost.key}`} className="border-t border-line">
+                  <td className="py-1.5 text-ink-2">{cost.label}</td>
+                  <td className="py-1.5 text-right font-mono text-ink">
+                    {cost.amount.toLocaleString()} {cost.unit}
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-ink">
+                    {cost.key === "memory" ? "—" : cost.feeStroops.toLocaleString()}
+                  </td>
+                </tr>
+              ))}
+              <tr className="border-t border-line">
+                <td className="py-1.5 font-semibold text-ink">Resource fee</td>
+                <td className="py-1.5 text-right font-mono text-ink-3">
+                  {toXLM(String(totalStroops))} XLM
+                </td>
+                <td
+                  data-testid="resource-total"
+                  className="py-1.5 text-right font-mono font-semibold text-ink"
+                >
+                  {totalStroops.toLocaleString()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">Gas Price</span>
-          <span className="text-[13px] font-semibold text-ink">
-            {gasPriceData.gasPrice} stroops/op
-          </span>
-        </div>
-      </div>
-      <div className="text-right">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">Total Gas</span>
-        <span className="text-[13px] font-semibold text-ink ml-2">{estimate.totalGasUnits} units</span>
-      </div>
+      )}
     </div>
   );
 }
 
-function MultiplierSlider({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+function PresetSelector({
+  preset,
+  onSelect,
+}: {
+  preset: GasPresetName;
+  onSelect: (p: GasPresetName) => void;
+}) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-ink-2">Gas Price Multiplier</span>
-        <span className="text-[13px] font-semibold text-brand">{value.toFixed(1)}x</span>
+        <div className="flex items-center gap-2">
+          <HugeiconsIcon
+            icon={ZapIcon}
+            size={12}
+            className="text-ink-3"
+            strokeWidth={1.5}
+          />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+            Optimization Preset
+          </span>
+        </div>
+        <span className="text-[11px] text-ink-3">
+          Active: <span className="font-semibold text-brand">{preset}</span>
+        </span>
+      </div>
+      <div
+        className="grid grid-cols-3 gap-2"
+        role="group"
+        aria-label="Optimization presets"
+      >
+        {(["Conservative", "Aggressive", "Custom"] as const).map((p) => {
+          const isActive = preset === p;
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onSelect(p)}
+              aria-pressed={isActive}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-center text-[12px] font-medium transition-all",
+                isActive
+                  ? "border-brand bg-brand-dim text-brand font-semibold shadow-xs"
+                  : "border-line bg-surface-2 text-ink-2 hover:bg-surface hover:text-ink",
+              )}
+            >
+              {p}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CpuInstructionsSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <label
+          htmlFor="gas-cpu-instructions-slider"
+          className="text-[11px] font-semibold text-ink-2"
+        >
+          CPU Instructions
+        </label>
+        <div className="flex items-baseline gap-1">
+          <span className="text-[13px] font-semibold text-brand font-mono">
+            {value.toLocaleString()}
+          </span>
+          <span className="text-[10px] text-ink-4">instructions</span>
+        </div>
       </div>
       <input
+        id="gas-cpu-instructions-slider"
+        type="range"
+        min={MIN_CPU_INSTRUCTIONS}
+        max={MAX_CPU_INSTRUCTIONS}
+        step={10000}
+        value={value}
+        onChange={(e) => {
+          const raw = parseFloat(e.target.value);
+          const clamped = Math.max(
+            MIN_CPU_INSTRUCTIONS,
+            Math.min(
+              MAX_CPU_INSTRUCTIONS,
+              isNaN(raw) ? MIN_CPU_INSTRUCTIONS : raw,
+            ),
+          );
+          onChange(clamped);
+        }}
+        className="w-full h-1.5 rounded-lg appearance-none bg-surface-2 cursor-pointer accent-brand"
+        aria-label="CPU instructions"
+      />
+      <div className="flex justify-between text-[10px] text-ink-4">
+        <span>{MIN_CPU_INSTRUCTIONS.toLocaleString()} (min)</span>
+        <span>50,000,000</span>
+        <span>{MAX_CPU_INSTRUCTIONS.toLocaleString()} (max)</span>
+      </div>
+    </div>
+  );
+}
+
+function MemorySlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const mb = (value / (1024 * 1024)).toFixed(1);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <label
+          htmlFor="gas-memory-slider"
+          className="text-[11px] font-semibold text-ink-2"
+        >
+          Memory Limit
+        </label>
+        <div className="flex items-baseline gap-1">
+          <span className="text-[13px] font-semibold text-brand font-mono">
+            {mb} MB
+          </span>
+          <span className="text-[10px] text-ink-4">
+            ({value.toLocaleString()} B)
+          </span>
+        </div>
+      </div>
+      <input
+        id="gas-memory-slider"
+        type="range"
+        min={MIN_MEMORY_BYTES}
+        max={MAX_MEMORY_BYTES}
+        step={65536}
+        value={value}
+        onChange={(e) => {
+          const raw = parseFloat(e.target.value);
+          const clamped = Math.max(
+            MIN_MEMORY_BYTES,
+            Math.min(MAX_MEMORY_BYTES, isNaN(raw) ? MIN_MEMORY_BYTES : raw),
+          );
+          onChange(clamped);
+        }}
+        className="w-full h-1.5 rounded-lg appearance-none bg-surface-2 cursor-pointer accent-brand"
+        aria-label="Memory limit"
+      />
+      <div className="flex justify-between text-[10px] text-ink-4">
+        <span>1.0 MB (min)</span>
+        <span>20.0 MB</span>
+        <span>40.0 MB (max)</span>
+      </div>
+    </div>
+  );
+}
+
+function MultiplierSlider({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <label
+          htmlFor="gas-multiplier-slider"
+          className="text-[11px] font-semibold text-ink-2"
+        >
+          Gas Price Multiplier
+        </label>
+        <span className="text-[13px] font-semibold text-brand">
+          {value.toFixed(1)}x
+        </span>
+      </div>
+      <input
+        id="gas-multiplier-slider"
         type="range"
         min={0.5}
         max={2}
@@ -286,7 +950,96 @@ function MultiplierSlider({ value, onChange }: { value: number; onChange: (v: nu
   );
 }
 
-function OperationBreakdown({ breakdown }: { breakdown: OperationGasBreakdown[] }) {
+function NetworkStats({ gasPriceData }: { gasPriceData: GasPriceData }) {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
+          <HugeiconsIcon
+            icon={CircleGaugeIcon}
+            size={14}
+            color="currentColor"
+            className="text-brand"
+            strokeWidth={1.5}
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+            Base Reserve
+          </span>
+          <span className="text-[13px] font-semibold text-ink">
+            {gasPriceData.baseReserve} XLM
+          </span>
+        </div>
+      </div>
+      <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
+          <HugeiconsIcon
+            icon={ClockIcon}
+            size={14}
+            color="currentColor"
+            className="text-brand"
+            strokeWidth={1.5}
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+            Ledger Close
+          </span>
+          <span className="text-[13px] font-semibold text-ink">
+            {formatTime(gasPriceData.ledgerCloseTime)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GasPriceDisplay({
+  gasPriceData,
+  estimate,
+}: {
+  gasPriceData: GasPriceData;
+  estimate: GasEstimate;
+}) {
+  return (
+    <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
+          <HugeiconsIcon
+            icon={ZapIcon}
+            size={14}
+            color="currentColor"
+            className="text-brand"
+            strokeWidth={1.5}
+          />
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+            Gas Price
+          </span>
+          <span className="text-[13px] font-semibold text-ink">
+            {gasPriceData.gasPrice} stroops/op
+          </span>
+        </div>
+      </div>
+      <div className="text-right">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+          Total Gas
+        </span>
+        <span className="text-[13px] font-semibold text-ink ml-2">
+          {estimate.totalGasUnits} units
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OperationBreakdown({
+  breakdown,
+}: {
+  breakdown: OperationGasBreakdown[];
+}) {
   if (breakdown.length === 0) {
     return (
       <div className="rounded-lg bg-surface-2 border border-line px-4 py-3">
@@ -296,36 +1049,64 @@ function OperationBreakdown({ breakdown }: { breakdown: OperationGasBreakdown[] 
   }
 
   const totalGasUnits = breakdown.reduce((s, b) => s + b.gasUnits, 0);
-  const totalFeeStroops = breakdown.reduce((s, b) => s + parseInt(b.feeStroops, 10), 0);
-  const totalFeeXlm = breakdown.reduce((s, b) => s + parseFloat(b.feeXlm), 0);
+  const totalFeeStroops = breakdown.reduce(
+    (s, b) => s + (parseInt(b.feeStroops, 10) || 0),
+    0,
+  );
+  const totalFeeXlm = breakdown.reduce((s, b) => s + (parseFloat(b.feeXlm) || 0), 0);
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <HugeiconsIcon icon={CalculatorIcon} size={12} className="text-ink-3" strokeWidth={1.5} />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">Cost Breakdown</span>
+        <HugeiconsIcon
+          icon={CalculatorIcon}
+          size={12}
+          className="text-ink-3"
+          strokeWidth={1.5}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+          Cost Breakdown
+        </span>
       </div>
       <div className="rounded-lg border border-line overflow-hidden">
         <table className="w-full text-[12px]">
           <thead>
             <tr className="bg-surface-2">
-              <th className="text-left px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">Operation</th>
-              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">Gas Units</th>
-              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">Fee</th>
-              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">XLM</th>
+              <th className="text-left px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                Operation
+              </th>
+              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                Gas Units
+              </th>
+              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                Fee
+              </th>
+              <th className="text-right px-3 py-2 font-semibold text-ink-3 text-[10px] uppercase tracking-wider">
+                XLM
+              </th>
             </tr>
           </thead>
           <tbody>
             {breakdown.map((item) => (
               <tr key={item.operationType} className="border-t border-line">
-                <td className="px-3 py-2 text-ink-2 capitalize">{item.operationType.replace("_", " ")}</td>
-                <td className="px-3 py-2 text-right text-ink font-mono">{item.gasUnits.toLocaleString()}</td>
-                <td className="px-3 py-2 text-right text-ink font-mono">{formatStroops(item.feeStroops)}</td>
-                <td className="px-3 py-2 text-right text-ink font-mono">{formatXlm(item.feeXlm)}</td>
+                <td className="px-3 py-2 text-ink-2 capitalize">
+                  {item.operationType.replace("_", " ")}
+                </td>
+                <td className="px-3 py-2 text-right text-ink font-mono">
+                  {item.gasUnits.toLocaleString()}
+                </td>
+                <td className="px-3 py-2 text-right text-ink font-mono">
+                  {formatStroops(item.feeStroops)}
+                </td>
+                <td className="px-3 py-2 text-right text-ink font-mono">
+                  {formatXlm(item.feeXlm)}
+                </td>
               </tr>
             ))}
             <tr className="border-t border-line bg-surface-2">
-              <td className="px-3 py-2 text-ink font-semibold capitalize">Total</td>
+              <td className="px-3 py-2 text-ink font-semibold capitalize">
+                Total
+              </td>
               <td className="px-3 py-2 text-right text-ink font-mono font-semibold">
                 {totalGasUnits.toLocaleString()}
               </td>
@@ -343,19 +1124,33 @@ function OperationBreakdown({ breakdown }: { breakdown: OperationGasBreakdown[] 
   );
 }
 
-function FeeScenarios({ scenarios, multiplier }: { scenarios: FeeScenario[]; multiplier: number }) {
+function FeeScenarios({
+  scenarios,
+  multiplier: _multiplier,
+}: {
+  scenarios: FeeScenario[];
+  multiplier: number;
+}) {
   const [activeScenario, setActiveScenario] = useState<string>("average");
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
-        <HugeiconsIcon icon={FlameIcon} size={12} className="text-ink-3" strokeWidth={1.5} />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">Fee Scenarios</span>
+        <HugeiconsIcon
+          icon={FlameIcon}
+          size={12}
+          className="text-ink-3"
+          strokeWidth={1.5}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+          Fee Scenarios
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2">
         {scenarios.map((scenario) => (
           <button
             key={scenario.label}
+            type="button"
             onClick={() => setActiveScenario(scenario.label)}
             className={cn(
               "rounded-lg border px-3 py-2 text-left transition-colors",
@@ -364,17 +1159,25 @@ function FeeScenarios({ scenarios, multiplier }: { scenarios: FeeScenario[]; mul
                 : "border-line bg-surface-2 hover:bg-surface",
             )}
           >
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-4 block">{scenario.label}</span>
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-ink-4 block">
+              {scenario.label}
+            </span>
             <span className="text-[15px] font-semibold text-ink block mt-0.5">
               {scenario.totalFeeStroops} str
             </span>
             <span className="text-[11px] text-ink-3 block">
               {formatXlm(scenario.totalFeeXlm)} XLM
             </span>
-            <span className={cn(
-              "text-[10px] font-semibold block mt-0.5",
-              scenario.label === "low" ? "text-green" : scenario.label === "high" ? "text-red" : "text-ink-3",
-            )}>
+            <span
+              className={cn(
+                "text-[10px] font-semibold block mt-0.5",
+                scenario.label === "low"
+                  ? "text-green"
+                  : scenario.label === "high"
+                    ? "text-red"
+                    : "text-ink-3",
+              )}
+            >
               {scenario.savings}
             </span>
           </button>
@@ -384,12 +1187,26 @@ function FeeScenarios({ scenarios, multiplier }: { scenarios: FeeScenario[]; mul
   );
 }
 
-function OptimizerSuggestions({ estimate, gasPriceData }: { estimate: GasEstimate; gasPriceData: GasPriceData }) {
+function OptimizerSuggestions({
+  estimate,
+  gasPriceData,
+}: {
+  estimate: GasEstimate;
+  gasPriceData: GasPriceData;
+}) {
   const suggestions: { icon: string; text: string; savings: string }[] = [];
 
   if (estimate.customMultiplier > 1) {
-    const totalStroops = estimate.breakdown.reduce((s, b) => s + parseInt(b.feeStroops, 10), 0);
-    const savingsStroops = String(Math.round(totalStroops * (estimate.customMultiplier - 1) / estimate.customMultiplier));
+    const totalStroops = estimate.breakdown.reduce(
+      (s, b) => s + (parseInt(b.feeStroops, 10) || 0),
+      0,
+    );
+    const savingsStroops = String(
+      Math.round(
+        (totalStroops * (estimate.customMultiplier - 1)) /
+          estimate.customMultiplier,
+      ),
+    );
     suggestions.push({
       text: "Reducing gas multiplier to 1.0x could save you stroops",
       savings: `${savingsStroops} stroops`,
@@ -414,7 +1231,10 @@ function OptimizerSuggestions({ estimate, gasPriceData }: { estimate: GasEstimat
     });
   }
 
-  const totalStroops = estimate.breakdown.reduce((s, b) => s + parseInt(b.feeStroops, 10), 0);
+  const totalStroops = estimate.breakdown.reduce(
+    (s, b) => s + (parseInt(b.feeStroops, 10) || 0),
+    0,
+  );
   if (totalStroops > 100000) {
     suggestions.push({
       text: "High total gas usage detected. Consider splitting into smaller transactions.",
@@ -434,15 +1254,24 @@ function OptimizerSuggestions({ estimate, gasPriceData }: { estimate: GasEstimat
   return (
     <div className="rounded-lg bg-brand-dim-subtle border border-brand-dim px-4 py-3 flex flex-col gap-2">
       <div className="flex items-center gap-2">
-          <HugeiconsIcon icon={BulbIcon} size={12} className="text-brand" strokeWidth={1.5} />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-brand">Optimization Tips</span>
+        <HugeiconsIcon
+          icon={BulbIcon}
+          size={12}
+          className="text-brand"
+          strokeWidth={1.5}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-brand">
+          Optimization Tips
+        </span>
       </div>
       <ul className="flex flex-col gap-1.5">
         {suggestions.map((s, i) => (
           <li key={i} className="flex items-start gap-2 text-[12px] text-ink-2">
             <span className="shrink-0 mt-0.5">{s.icon}</span>
             <span>{s.text}</span>
-            <span className="ml-auto shrink-0 text-[10px] font-semibold text-brand">{s.savings}</span>
+            <span className="ml-auto shrink-0 text-[10px] font-semibold text-brand">
+              {s.savings}
+            </span>
           </li>
         ))}
       </ul>
@@ -450,8 +1279,17 @@ function OptimizerSuggestions({ estimate, gasPriceData }: { estimate: GasEstimat
   );
 }
 
-function TotalFee({ estimate, multiplier }: { estimate: GasEstimate; multiplier: number }) {
-  const totalStroops = estimate.breakdown.reduce((s, b) => s + parseInt(b.feeStroops, 10), 0);
+function TotalFee({
+  estimate,
+  multiplier,
+}: {
+  estimate: GasEstimate;
+  multiplier: number;
+}) {
+  const totalStroops = estimate.breakdown.reduce(
+    (s, b) => s + (parseInt(b.feeStroops, 10) || 0),
+    0,
+  );
   const adjustedStroops = Math.round(totalStroops * multiplier);
   const adjustedXlm = (adjustedStroops / 10_000_000).toFixed(7);
 
@@ -459,19 +1297,33 @@ function TotalFee({ estimate, multiplier }: { estimate: GasEstimate; multiplier:
     <div className="rounded-lg bg-surface-2 border border-line px-4 py-3 flex items-center justify-between">
       <div className="flex items-center gap-3">
         <div className="w-8 h-8 rounded-lg bg-brand-dim flex items-center justify-center shrink-0">
-          <HugeiconsIcon icon={FlameIcon} size={14} color="currentColor" className="text-brand" strokeWidth={1.5} />
+          <HugeiconsIcon
+            icon={FlameIcon}
+            size={14}
+            color="currentColor"
+            className="text-brand"
+            strokeWidth={1.5}
+          />
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">Estimated Total Fee</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+            Estimated Total Fee
+          </span>
           <div className="flex items-baseline gap-2">
-            <span className="text-lg font-semibold text-ink">{formatStroops(String(adjustedStroops))}</span>
+            <span className="text-lg font-semibold text-ink">
+              {formatStroops(String(adjustedStroops))}
+            </span>
             <span className="text-[11px] text-ink-3">stroops</span>
           </div>
         </div>
       </div>
       <div className="text-right">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">XLM</span>
-        <span className="text-lg font-semibold text-ink ml-2">{formatXlm(adjustedXlm)}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+          XLM
+        </span>
+        <span className="text-lg font-semibold text-ink ml-2">
+          {formatXlm(adjustedXlm)}
+        </span>
       </div>
     </div>
   );

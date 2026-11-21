@@ -21,9 +21,15 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import type { Nft, NftCollection } from "@/lib/client";
-import { getClient } from "@/lib/client";
-import { cn } from "@/lib/utils";
+import {
+  IPFS_GATEWAY_COUNT,
+  IPFS_REQUEST_TIMEOUT_MS,
+  ipfsContentPath,
+  resolveIpfsUrl,
+} from "@/lib/ipfs";
+import { cn, validateStellarAddress } from "@/lib/utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +66,151 @@ function rarityLabel(nft: Nft): { label: string; variant: "error" | "warning" | 
 
 const ALL_COLLECTION_ID = "__all__";
 
+/** Stellar strkey check for a G... account address. */
+function isValidAddress(address: string): boolean {
+  return validateStellarAddress(address.trim());
+}
+
+function NftImage({
+  image,
+  alt,
+  className,
+  fallback,
+}: {
+  image?: string;
+  alt: string;
+  className?: string;
+  fallback: React.ReactNode;
+}) {
+  const source = image?.trim() ?? "";
+  const isIpfs = ipfsContentPath(source) !== null;
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [trackedSource, setTrackedSource] = useState(source);
+
+  if (trackedSource !== source) {
+    setTrackedSource(source);
+    setAttempt(0);
+    setFailed(false);
+  }
+
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  // `loading="lazy"` defers off-screen images, so the stall timer only runs
+  // while the image is actually in view (and therefore actually loading).
+  const [imgRef, inView] = useIsVisible<HTMLImageElement>();
+  const src = isIpfs ? resolveIpfsUrl(source, attempt) : source;
+
+  const handleFailure = useCallback(() => {
+    if (isIpfs && attempt + 1 < IPFS_GATEWAY_COUNT) {
+      setAttempt((current) => current + 1);
+      return;
+    }
+    setFailed(true);
+  }, [isIpfs, attempt]);
+
+  // An unresponsive gateway can hold a request open indefinitely without ever
+  // firing `error`. Give each gateway IPFS_REQUEST_TIMEOUT_MS; swapping `src`
+  // to the next gateway cancels the stalled request in the browser.
+  useEffect(() => {
+    if (!source || failed || !inView || loadedSrc === src) return;
+    const timer = window.setTimeout(handleFailure, IPFS_REQUEST_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [source, failed, inView, loadedSrc, src, handleFailure]);
+
+  if (!source || failed) return <>{fallback}</>;
+
+  return (
+    <img
+      ref={imgRef}
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onLoad={() => setLoadedSrc(src)}
+      onError={handleFailure}
+      className={className}
+    />
+  );
+}
+
+type MediaKind = "image" | "video" | "audio";
+
+const VIDEO_EXT = /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i;
+const AUDIO_EXT = /\.(mp3|wav|ogg|oga|flac|m4a|aac)(\?|#|$)/i;
+
+/** Detect the media kind from metadata MIME type, falling back to file extension. */
+function detectMediaKind(metadata: Nft["metadata"]): { kind: MediaKind; url?: string } {
+  const mime = metadata.mimeType?.toLowerCase() ?? "";
+  const url = metadata.animationUrl?.trim() || metadata.image?.trim() || undefined;
+  if (mime.startsWith("video/")) return { kind: "video", url };
+  if (mime.startsWith("audio/")) return { kind: "audio", url };
+  if (url && VIDEO_EXT.test(url)) return { kind: "video", url };
+  if (url && AUDIO_EXT.test(url)) return { kind: "audio", url };
+  return { kind: "image", url: metadata.image };
+}
+
+/** Renders an NFT's media: <video>/<audio> with controls for A/V assets, otherwise an image. */
+function NftMedia({
+  metadata,
+  className,
+  fallback,
+}: {
+  metadata: Nft["metadata"];
+  className?: string;
+  fallback: React.ReactNode;
+}) {
+  const { kind, url } = detectMediaKind(metadata);
+  const src = url && ipfsContentPath(url) !== null ? resolveIpfsUrl(url, 0) : url;
+
+  if (kind === "video" && src) {
+    return (
+      <video
+        src={src}
+        poster={metadata.image ? resolveIpfsUrl(metadata.image, 0) : undefined}
+        controls
+        preload="metadata"
+        playsInline
+        aria-label={metadata.name}
+        data-testid="nft-video"
+        className={className}
+      />
+    );
+  }
+
+  if (kind === "audio" && src) {
+    return (
+      <div className="relative w-full h-full flex flex-col items-center justify-center gap-3 p-3">
+        {metadata.image && (
+          <NftImage
+            image={metadata.image}
+            alt={metadata.name}
+            className="w-full flex-1 min-h-0 object-cover rounded-lg"
+            fallback={
+              <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
+            }
+          />
+        )}
+        <audio
+          src={src}
+          controls
+          preload="metadata"
+          aria-label={metadata.name}
+          data-testid="nft-audio"
+          className="w-full shrink-0"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <NftImage
+      image={metadata.image}
+      alt={metadata.name}
+      className={className}
+      fallback={fallback}
+    />
+  );
+}
+
 // ─── NFTCard ──────────────────────────────────────────────────────────────────
 
 interface NFTCardProps {
@@ -72,9 +223,7 @@ interface NFTCardProps {
 }
 
 export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: NFTCardProps) {
-  const [imgError, setImgError] = useState(false);
   const rarity = rarityLabel(nft);
-  const hasImage = !!nft.metadata.image && !imgError;
 
   return (
     <article
@@ -111,20 +260,16 @@ export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: N
 
       {/* Image */}
       <div className="aspect-square w-full bg-surface-2 flex items-center justify-center overflow-hidden">
-        {hasImage ? (
-          <img
-            src={nft.metadata.image}
-            alt={nft.metadata.name}
-            loading="lazy"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center gap-2 text-ink-4">
-            <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
-            <span className="text-[10px]">No image</span>
-          </div>
-        )}
+        <NftMedia
+          metadata={nft.metadata}
+          className="w-full h-full object-cover"
+          fallback={
+            <div className="flex flex-col items-center gap-2 text-ink-4">
+              <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
+              <span className="text-[10px]">No image</span>
+            </div>
+          }
+        />
       </div>
 
       {/* Info */}
@@ -161,12 +306,12 @@ export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: N
             {nft.metadata.attributes.slice(0, 3).map((attr) => (
               <span
                 key={attr.traitType}
-                title={attr.rarityPct !== undefined ? `${attr.rarityPct.toFixed(1)}% have this trait` : attr.traitType}
-                className="inline-flex items-center rounded-md bg-surface-2 border border-line px-1.5 py-0.5 text-[9px] text-ink-3"
+                title={`${attr.traitType}: ${attr.value}${attr.rarityPct !== undefined ? ` (${attr.rarityPct.toFixed(1)}% have this trait)` : ""}`}
+                className="inline-flex items-center max-w-full min-w-0 rounded-md bg-surface-2 border border-line px-1.5 py-0.5 text-[9px] text-ink-3"
               >
-                {attr.value}
+                <span className="truncate min-w-0">{attr.value}</span>
                 {attr.rarityPct !== undefined && (
-                  <span className="ml-1 text-brand font-semibold">{attr.rarityPct.toFixed(0)}%</span>
+                  <span className="ml-1 shrink-0 text-brand font-semibold">{attr.rarityPct.toFixed(0)}%</span>
                 )}
               </span>
             ))}
@@ -217,15 +362,16 @@ interface SendNftDialogProps {
 }
 
 function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [recipient, setRecipient] = useState("");
   const [recipientError, setRecipientError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
 
-  // Reset state when dialog opens/closes
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setRecipient("");
       setRecipientError("");
@@ -233,11 +379,11 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
       setSuccess(false);
       setTxError(null);
     }
-  }, [open]);
+  }
 
   const validate = () => {
     if (!recipient.trim()) { setRecipientError("Recipient address is required"); return false; }
-    if (!recipient.trim().startsWith("G") || recipient.trim().length < 56) {
+    if (!isValidAddress(recipient)) {
       setRecipientError("Enter a valid Stellar address (starts with G, 56 chars)");
       return false;
     }
@@ -246,11 +392,11 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
   };
 
   const handleSend = async () => {
-    if (!nft || !address || !validate()) return;
+    if (!nft || !address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     try {
-      const { data, error } = await getClient().nft.sendNft({
+      const { data, error } = await client.nft.sendNft({
         tokenId: nft.tokenId,
         contractId: nft.contractId,
         recipient: recipient.trim(),
@@ -308,7 +454,15 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
                 placeholder="GABC…"
                 value={recipient}
                 error={recipientError}
-                onChange={(e) => { setRecipient(e.target.value); setRecipientError(""); }}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setRecipient(next);
+                  if (!next.trim() || isValidAddress(next)) {
+                    setRecipientError("");
+                    return;
+                  }
+                  setRecipientError("Enter a valid Stellar address (starts with G, 56 chars)");
+                }}
               />
               {txError && (
                 <p role="alert" className="text-[12px] text-red">{txError}</p>
@@ -317,7 +471,13 @@ function SendNftDialog({ nft, open, onClose }: SendNftDialogProps) {
                 <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={loading}>
                   Cancel
                 </Button>
-                <Button size="md" className="flex-1" loading={loading} onClick={() => void handleSend()}>
+                <Button
+                  size="md"
+                  className="flex-1"
+                  loading={loading}
+                  disabled={loading || !isValidAddress(recipient)}
+                  onClick={() => void handleSend()}
+                >
                   Send
                 </Button>
               </div>
@@ -338,14 +498,16 @@ interface ListForSaleDialogProps {
 }
 
 function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [price, setPrice] = useState("");
   const [priceError, setPriceError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setPrice("");
       setPriceError("");
@@ -353,7 +515,7 @@ function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
       setSuccess(false);
       setTxError(null);
     }
-  }, [open]);
+  }
 
   const validate = () => {
     const n = parseFloat(price);
@@ -366,11 +528,11 @@ function ListForSaleDialog({ nft, open, onClose }: ListForSaleDialogProps) {
   };
 
   const handleList = async () => {
-    if (!nft || !address || !validate()) return;
+    if (!nft || !address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     try {
-      const { data, error } = await getClient().nft.listNftForSale({
+      const { data, error } = await client.nft.listNftForSale({
         tokenId: nft.tokenId,
         contractId: nft.contractId,
         price: price.trim(),
@@ -462,7 +624,7 @@ interface BulkSendDialogProps {
 }
 
 function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps) {
-  const { address } = useSorokit();
+  const { address, client } = useSorokit();
   const [recipient, setRecipient] = useState("");
   const [recipientError, setRecipientError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -470,20 +632,27 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
   const [txError, setTxError] = useState<string | null>(null);
   const abortRef = useRef(false);
 
-  useEffect(() => {
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
     if (!open) {
       setRecipient("");
       setRecipientError("");
       setLoading(false);
       setProgress(0);
       setTxError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
       abortRef.current = false;
     }
   }, [open]);
 
   const validate = () => {
     if (!recipient.trim()) { setRecipientError("Recipient address is required"); return false; }
-    if (!recipient.trim().startsWith("G") || recipient.trim().length < 56) {
+    if (!isValidAddress(recipient)) {
       setRecipientError("Enter a valid Stellar address");
       return false;
     }
@@ -492,14 +661,14 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
   };
 
   const handleBulkSend = async () => {
-    if (!address || !validate()) return;
+    if (!address || !client || !validate()) return;
     setLoading(true);
     setTxError(null);
     abortRef.current = false;
     for (let i = 0; i < nfts.length; i++) {
       if (abortRef.current) break;
       try {
-        const { error } = await getClient().nft.sendNft({
+        const { error } = await client.nft.sendNft({
           tokenId: nfts[i].tokenId,
           contractId: nfts[i].contractId,
           recipient: recipient.trim(),
@@ -544,7 +713,15 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
               value={recipient}
               error={recipientError}
               disabled={loading}
-              onChange={(e) => { setRecipient(e.target.value); setRecipientError(""); }}
+              onChange={(e) => {
+                const next = e.target.value;
+                setRecipient(next);
+                if (!next.trim() || isValidAddress(next)) {
+                  setRecipientError("");
+                  return;
+                }
+                setRecipientError("Enter a valid Stellar address");
+              }}
             />
             {loading && (
               <div role="status" aria-live="polite" className="flex flex-col gap-1.5">
@@ -565,7 +742,13 @@ function BulkSendDialog({ nfts, open, onClose, onSuccess }: BulkSendDialogProps)
               <Button variant="secondary" size="md" className="flex-1" onClick={onClose} disabled={loading}>
                 Cancel
               </Button>
-              <Button size="md" className="flex-1" loading={loading} onClick={() => void handleBulkSend()}>
+              <Button
+                size="md"
+                className="flex-1"
+                loading={loading}
+                disabled={loading || !isValidAddress(recipient)}
+                onClick={() => void handleBulkSend()}
+              >
                 Send all
               </Button>
             </div>
@@ -587,10 +770,8 @@ interface NFTDetailDialogProps {
 }
 
 function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialogProps) {
-  const [imgError, setImgError] = useState(false);
   if (!nft) return null;
   const rarity = rarityLabel(nft);
-  const hasImage = !!nft.metadata.image && !imgError;
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
@@ -602,13 +783,15 @@ function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialog
         >
           {/* Image */}
           <div className="aspect-square w-full bg-surface-2 overflow-hidden">
-            {hasImage ? (
-              <img src={nft.metadata.image} alt={nft.metadata.name} onError={() => setImgError(true)} className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-ink-4">
-                <HugeiconsIcon icon={Album01Icon} size={48} color="currentColor" strokeWidth={0.8} />
-              </div>
-            )}
+            <NftMedia
+              metadata={nft.metadata}
+              className="w-full h-full object-cover"
+              fallback={
+                <div className="w-full h-full flex items-center justify-center text-ink-4">
+                  <HugeiconsIcon icon={Album01Icon} size={48} color="currentColor" strokeWidth={0.8} />
+                </div>
+              }
+            />
           </div>
 
           <div className="p-5 flex flex-col gap-4">
@@ -652,9 +835,9 @@ function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialog
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {nft.metadata.attributes.map((attr) => (
-                    <div key={attr.traitType} className="rounded-lg border border-line bg-surface-2/50 px-3 py-2">
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-ink-4">{attr.traitType}</p>
-                      <p className="text-[12px] font-semibold text-ink mt-0.5">{attr.value}</p>
+                    <div key={attr.traitType} className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface-2/50 px-3 py-2">
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-ink-4 break-words [overflow-wrap:anywhere]">{attr.traitType}</p>
+                      <p data-testid="nft-trait-value" className="text-[12px] font-semibold text-ink mt-0.5 break-words [overflow-wrap:anywhere]">{attr.value}</p>
                       {attr.rarityPct !== undefined && (
                         <p className="text-[10px] text-brand">{attr.rarityPct.toFixed(1)}% have this</p>
                       )}
@@ -697,11 +880,26 @@ export interface NFTGalleryProps {
   className?: string;
 }
 
+function NftSkeletonCard() {
+  return (
+    <div
+      data-testid="nft-skeleton-card"
+      className="rounded-xl border border-line overflow-hidden"
+    >
+      <Skeleton className="aspect-square w-full" />
+      <div className="p-3 flex flex-col gap-2">
+        <Skeleton className="h-3.5 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+    </div>
+  );
+}
+
 type SortKey = "name" | "rarity" | "floor";
 type RarityFilter = "all" | "legendary" | "epic" | "rare" | "common";
 
 export function NFTGallery({ className }: NFTGalleryProps) {
-  const { address, isConnected } = useSorokit();
+  const { address, isConnected, client } = useSorokit();
 
   // ── Data state ────────────────────────────────────────────────────────────
   const [allNfts, setAllNfts] = useState<Nft[]>([]);
@@ -729,11 +927,11 @@ export function NFTGallery({ className }: NFTGalleryProps) {
 
   // ── Fetch NFTs ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!address) return;
+    if (!address || !client) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       setLoading(true);
-      getClient()
+      client
         .nft.getNfts(address)
         .then(({ data, error }) => {
           if (!active) return;
@@ -744,7 +942,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
         .finally(() => { if (active) setLoading(false); });
     }, 0);
     return () => { active = false; window.clearTimeout(timerId); };
-  }, [address]);
+  }, [address, client]);
 
   // ── Derived collections ───────────────────────────────────────────────────
   const collections = useMemo(() => groupByCollection(allNfts), [allNfts]);
@@ -1022,16 +1220,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
             {loading && allNfts.length === 0 ? (
               <div
                 data-testid="nft-loading-skeleton"
-                className="grid grid-cols-2 sm:grid-cols-3 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
               >
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="rounded-xl border border-line overflow-hidden">
-                    <Skeleton className="aspect-square w-full" />
-                    <div className="p-3 flex flex-col gap-2">
-                      <Skeleton className="h-3.5 w-3/4" />
-                      <Skeleton className="h-3 w-1/2" />
-                    </div>
-                  </div>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <NftSkeletonCard key={i} />
                 ))}
               </div>
             ) : displayedNfts.length === 0 ? (
@@ -1042,7 +1234,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
               <div
                 role="list"
                 aria-label="NFT grid"
-                className="grid grid-cols-2 sm:grid-cols-3 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
               >
                 {displayedNfts.map((nft) => (
                   <div
@@ -1061,6 +1253,8 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                     />
                   </div>
                 ))}
+                {loading &&
+                  [1, 2, 3, 4].map((i) => <NftSkeletonCard key={`more-${i}`} />)}
               </div>
             )}
           </div>

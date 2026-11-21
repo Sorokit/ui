@@ -222,4 +222,85 @@ describe("TransactionFeeCalculator", () => {
       ).toBeInTheDocument();
     });
   });
+
+  it("ceils fractional stroop values to the nearest integer", async () => {
+    const fractionalEstimate: GasEstimate = {
+      totalGasUnits: 750,
+      breakdown: [
+        // feeStroops with a decimal — surge multiplier can produce these
+        { operationType: "payment", gasUnits: 100, feeStroops: "100.45", feeXlm: "0.0000100" },
+      ],
+      scenarios: [
+        { label: "average", gasPrice: "100", totalFeeStroops: "100.45", totalFeeXlm: "0.0000100", savings: "0%" },
+      ],
+      customMultiplier: 1.5,
+    };
+    vi.mocked(getClient).mockReturnValue({
+      transaction: {
+        estimateDetailedFee: vi.fn().mockResolvedValue({ data: fractionalEstimate, error: null }),
+      },
+    } as unknown as SorokitClient);
+
+    render(<TransactionFeeCalculator />);
+    await waitFor(() => expect(screen.getByText("Payment")).toBeInTheDocument());
+
+    // 100.45 ceiled → 101 — should not appear as "100" or "100.45"
+    const stroopValues = screen.getAllByText("101");
+    expect(stroopValues.length).toBeGreaterThan(0);
+  });
+
+  it("toggles fee display between Stroops and XLM when toggle button is clicked", async () => {
+    mockClient();
+    render(<TransactionFeeCalculator />);
+    await waitFor(() => expect(screen.getByText("Payment")).toBeInTheDocument());
+
+    // Default unit label is "stroops"
+    const stroopLabels = screen.getAllByText("stroops");
+    expect(stroopLabels.length).toBeGreaterThan(0);
+
+    // Click the toggle to switch to XLM
+    fireEvent.click(screen.getByRole("button", { name: "Switch to XLM" }));
+
+    await waitFor(() => {
+      const xlmLabels = screen.getAllByText("XLM");
+      // At least one fee row now shows XLM as the unit
+      expect(xlmLabels.length).toBeGreaterThan(0);
+    });
+
+    // Toggle back to Stroops
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Stroops" }));
+    await waitFor(() => {
+      const stroopLabelsAgain = screen.getAllByText("stroops");
+      expect(stroopLabelsAgain.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("calculates correct total for multi-operation fee estimates", async () => {
+    const multiOpEstimate: GasEstimate = {
+      totalGasUnits: 600,
+      breakdown: [
+        { operationType: "payment", gasUnits: 200, feeStroops: "20000", feeXlm: "0.0020000" },
+        { operationType: "change_trust", gasUnits: 200, feeStroops: "20000", feeXlm: "0.0020000" },
+        { operationType: "manage_sell_offer", gasUnits: 200, feeStroops: "20000", feeXlm: "0.0020000" },
+      ],
+      scenarios: [
+        { label: "average", gasPrice: "100", totalFeeStroops: "60000", totalFeeXlm: "0.0060000", savings: "0%" },
+      ],
+      customMultiplier: 1,
+    };
+    vi.mocked(getClient).mockReturnValue({
+      transaction: {
+        estimateDetailedFee: vi.fn().mockResolvedValue({ data: multiOpEstimate, error: null }),
+      },
+    } as unknown as SorokitClient);
+
+    render(<TransactionFeeCalculator operations={["payment", "change_trust", "manage_sell_offer"]} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Payment")).toBeInTheDocument();
+      expect(screen.getByText("Change Trust")).toBeInTheDocument();
+      expect(screen.getByText("Manage Sell Offer")).toBeInTheDocument();
+      expect(screen.getByText("Total Estimated Fee")).toBeInTheDocument();
+    });
+  });
 });

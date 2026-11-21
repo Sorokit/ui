@@ -15,22 +15,45 @@ export interface ClientAdapterConfig {
   network?: 'testnet' | 'public';
 }
 
+export type SorobanClientFactory = () => {
+  invokeContract: (params: InvokeParams) => Promise<unknown>;
+  getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+};
+
 export interface AdapterResponse<T> {
   data: T | null;
   error: string | null;
   status: "success" | "error" | "pending";
 }
 
+import type { InvokeParams } from "./client";
+
 /**
  * Universal client adapter for Stellar wallet connections
  * Supports Freighter, xBull, Albedo, and testnet mocking
  */
 export class ClientAdapter {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private soroban: any = null;
+  private soroban: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+  } | null = null;
   private userAddress: string | null = null;
+  private sorobanClientOrFactory: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+  } | SorobanClientFactory | null = null;
+  private sorobanFactory: SorobanClientFactory | null = null;
 
-  constructor() {
+  constructor(sorobanClientOrFactory?: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+  } | SorobanClientFactory) {
+    if (sorobanClientOrFactory) {
+      this.sorobanClientOrFactory = sorobanClientOrFactory;
+      if (typeof sorobanClientOrFactory === "function") {
+        this.sorobanFactory = sorobanClientOrFactory;
+      }
+    }
   }
 
   /**
@@ -98,6 +121,19 @@ export class ClientAdapter {
       }
 
       this.userAddress = connectedAddress;
+
+      // Initialize the Soroban client from the client or factory provided in the constructor.
+      if (!this.soroban) {
+        if (this.sorobanClientOrFactory) {
+          this.soroban =
+            typeof this.sorobanClientOrFactory === "function"
+              ? this.sorobanClientOrFactory()
+              : this.sorobanClientOrFactory;
+        } else if (this.sorobanFactory) {
+          this.soroban = this.sorobanFactory();
+        }
+      }
+
       return {
         data: connectedAddress,
         error: null,
@@ -119,8 +155,11 @@ export class ClientAdapter {
    * @param params - Method parameters
    */
   async invokeContract(
-    contractId: string,
-    method: string,
+    params: InvokeParams
+  ): Promise<AdapterResponse<unknown>>;
+  async invokeContract(
+    contractId: string | InvokeParams,
+    method?: string,
     params: unknown[] = []
   ): Promise<AdapterResponse<unknown>> {
     try {
@@ -140,13 +179,12 @@ export class ClientAdapter {
         };
       }
 
-      // Actual implementation would invoke the contract
-      // This is a stub for now
-      const result = await this.soroban.invokeContract({
-        contractId,
-        method,
-        params,
-      });
+      const invokeParams: InvokeParams =
+        typeof contractId === "object"
+          ? contractId
+          : { contractId, method: method ?? "", args: params };
+
+      const result = await this.soroban.invokeContract(invokeParams);
 
       return {
         data: result,
@@ -170,7 +208,7 @@ export class ClientAdapter {
   async getEvents(
     contractId: string,
     limit: number = 100,
-    _fromLedger?: number
+    fromLedger?: number
   ): Promise<AdapterResponse<unknown[]>> {
     try {
       if (!this.userAddress) {
@@ -192,6 +230,7 @@ export class ClientAdapter {
       const events = await this.soroban.getEvents({
         contractId,
         limit,
+        ...(fromLedger !== undefined ? { fromLedger } : {}),
       });
 
       return {
@@ -222,9 +261,30 @@ export class ClientAdapter {
     this.userAddress = null;
     this.soroban = null;
   }
+
+  /**
+   * Test-only hook: inject a Soroban client without going through the
+   * wallet connect flow. `soroban` is `private` and never assigned in the
+   * constructor today (see #714), so tests that want to exercise the
+   * happy path of `invokeContract` / `getEvents` need a way to set it.
+   *
+   * Not part of the public API. Do not call from application code.
+   *
+   * @internal
+   */
+  __setSorobanForTests(
+    soroban: ClientAdapter['soroban']
+  ): void {
+    this.soroban = soroban;
+  }
 }
 
 // Factory for creating adapters
-export function createClientAdapter(): ClientAdapter {
-  return new ClientAdapter();
+export function createClientAdapter(
+  sorobanClientOrFactory?: {
+    invokeContract: (params: InvokeParams) => Promise<unknown>;
+    getEvents: (params: { contractId: string; limit: number; fromLedger?: number }) => Promise<unknown[]>;
+  } | SorobanClientFactory,
+): ClientAdapter {
+  return new ClientAdapter(sorobanClientOrFactory);
 }

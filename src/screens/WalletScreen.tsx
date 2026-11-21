@@ -6,8 +6,8 @@ import { QRCode } from "@/components/QRCode";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { InfoCell } from "@/components/ui/InfoCell";
+import { useToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
-import { truncateAddress } from "@/lib/utils";
 
 /**
  * Full-screen QR code for scanning. Built on Radix Dialog so it traps focus,
@@ -52,8 +52,8 @@ function QRModal({
 
 export function WalletScreen() {
   const { address, isConnected, disconnectWallet, network, account } = useSorokit();
+  const { success } = useToast();
   const [isConfirming, setIsConfirming] = useState(false);
-  const [toastVisible, setToastVisible] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const timeoutRef = useRef<number | null>(null);
 
@@ -84,12 +84,6 @@ export function WalletScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!toastVisible) return;
-    const id = window.setTimeout(() => setToastVisible(false), 3000);
-    return () => window.clearTimeout(id);
-  }, [toastVisible]);
-
   // createdAt is inferred rather than authoritative, so an unparseable value is
   // dropped instead of rendering "NaN".
   const createdAtDate = account?.createdAt
@@ -119,7 +113,7 @@ export function WalletScreen() {
                 </Badge>
               </div>
               {address && (
-                <span data-address>{truncateAddress(address, 14, 6)}</span>
+                <AddressDisplay address={address} />
               )}
             </div>
           </div>
@@ -182,22 +176,14 @@ export function WalletScreen() {
                 address={address}
                 showFull
                 label="Address"
-                onCopy={() => setToastVisible(true)}
+                onCopy={() =>
+                  success("Address Copied", {
+                    message: "The address has been copied to your clipboard.",
+                  })
+                }
               />
             </div>
           </div>
-        </div>
-      )}
-
-      {toastVisible && (
-        <div
-          role="status"
-          className="fixed bottom-6 right-6 z-50 bg-surface border border-line rounded-md px-4 py-3 shadow-lg animate-in fade-in slide-in-from-bottom-2"
-        >
-          <p className="text-[13px] font-semibold text-ink">Address Copied</p>
-          <p className="text-[12px] text-ink-3">
-            The address has been copied to your clipboard.
-          </p>
         </div>
       )}
 

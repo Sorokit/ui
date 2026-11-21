@@ -1,11 +1,11 @@
 import { Copy01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 
 import { Input } from "@/components/ui/Input";
 import { cn } from "@/lib/utils";
 
-const SOROBAN_TYPES = [
+export const SOROBAN_TYPES = [
   "address",
   "bool",
   "bytes",
@@ -31,6 +31,18 @@ const SOROBAN_TYPES = [
 
 type SorobanType = (typeof SOROBAN_TYPES)[number];
 
+/** Soroban argument types that take a structured JSON value (issue #653). */
+const COMPLEX_ARG_TYPES: ReadonlySet<string> = new Set([
+  "vec",
+  "map",
+  "struct",
+  "tuple",
+  "sequence",
+]);
+
+/** Soroban contract IDs are exactly 56 chars: `C` + 55 base32 characters. */
+const CONTRACT_ID_PATTERN = /^C[A-Z2-7]{55}$/;
+
 interface ContractMethodArg {
   name: string;
   type: SorobanType;
@@ -49,23 +61,60 @@ export interface ContractSpec {
   methods: ContractMethod[];
 }
 
-interface ContractInteractionBuilderProps {
+/**
+ * A reviewable stand-in for a Soroban authorization entry (#906). Methods
+ * that take more than one `address` argument commonly need a signature from
+ * each one (a multi-auth invocation), not just the account submitting the
+ * transaction. Full XDR SorobanAuthorizationEntry parsing/encoding isn't
+ * available anywhere in this client layer (sorokit-core's client.ts has no
+ * auth-entry API to build on), so this stays a client-side review step: the
+ * `address`-typed argument values on the selected method, each reviewable and
+ * individually markable as "needs authorization" before the call is handed
+ * off to whatever actually signs and submits it.
+ */
+export interface AuthEntryReview {
+  argName: string;
+  address: string;
+  needsAuth: boolean;
+}
+
+export interface ContractInteractionBuilderProps {
   className?: string;
-  /** Pre-populated contract spec. When provided, the component uses this instead of fetching. */
+  spec?: ContractSpec;
   contractSpec?: ContractSpec;
-  /** Called with the constructed XDR/params when ready */
+  onInvoke?: (contractId: string, method: string, args: unknown[]) => void;
   onParamsReady?: (params: {
     contractId: string;
     method: string;
     args: unknown[];
     xdr: string;
+    authEntries: AuthEntryReview[];
   }) => void;
 }
 
+/** The `address`-typed arguments of a method, in declaration order, each
+ *  paired with its current raw value (blank if not yet filled in). These are
+ *  the candidates a multi-auth invocation may need a signature from. */
+function deriveAddressArgs(
+  method: ContractMethod | undefined,
+  argValues: Record<string, string>,
+): { argName: string; address: string }[] {
+  if (!method) return [];
+  return method.args
+    .filter((arg) => arg.type === "address")
+    .map((arg) => ({ argName: arg.name, address: (argValues[arg.name] ?? "").trim() }));
+}
+
 function validateContractId(id: string): string | null {
-  if (!id) return "Contract address is required";
-  if (!id.startsWith("C")) return "Contract address must start with 'C'";
-  if (id.length < 10) return "Contract address is too short";
+  const value = id.trim();
+  if (!value) return "Contract address is required";
+  if (!value.startsWith("C")) return "Contract address must start with 'C'";
+  if (value.length < 56) return "Contract address is too short";
+  // Issue #653: enforce the full 56-char base32 format instead of the old
+  // "starts with C and is at least 10 chars" check, which accepted invalid IDs.
+  if (!CONTRACT_ID_PATTERN.test(value)) {
+    return "Contract address is not a valid Soroban contract ID";
+  }
   return null;
 }
 
@@ -77,16 +126,112 @@ function buildXdrPreview(
 ): string {
   if (!contractId || !method) return "";
   const formattedArgs = methodDef
-    ? methodDef.args
-        .map(
-          (arg) => `  ${arg.name}: ${args[arg.name] ?? `<${arg.type}>`}`,
-        )
-        .join(",\n")
-    : Object.entries(args)
-        .map(([k, v]) => `  ${k}: ${v || "<value>"}`)
-        .join(",\n");
+    ? methodDef.args.map((arg) => ({
+        name: arg.name,
+        type: arg.type,
+        value: args[arg.name] ?? null,
+      }))
+    : Object.entries(args).map(([name, value]) => ({
+        name,
+        value: value || null,
+      }));
 
-  return `${contractId}.${method}(\n${formattedArgs}\n)`;
+  // Issue #653: return a base64 SCVal/call preview rather than a pseudo-string,
+  // so it can be copied into tools that expect an encoded payload.
+  const json = JSON.stringify({ contractId, method, args: formattedArgs });
+  try {
+    return btoa(json);
+  } catch {
+    return json;
+  }
+}
+
+/**
+ * Recursively checks a parsed JSON value for the nested `vec`/`map`/`tuple`/
+ * `struct` argument types (#906). `JSON.parse` alone only proves the text is
+ * syntactically valid JSON; it says nothing about whether an element nested
+ * several levels deep is actually usable as a Soroban value. Soroban has no
+ * implicit null inside a vec/tuple/map entry the way JSON does, so `null`,
+ * `undefined`, and empty-string elements anywhere in the structure, however
+ * deeply nested, are flagged as a value the caller still needs to fill in
+ * rather than being silently accepted (and later failing at the RPC layer
+ * with a much less actionable error). An explicit Soroban `option` argument
+ * is its own top-level type with its own input, not a bare null nested inside
+ * one of these composite types, so there is no legitimate case where a
+ * nested null/empty slot is intentional here.
+ */
+function findInvalidNestedValue(value: unknown, path: string): string | null {
+  if (value === null || value === undefined) {
+    return `${path} is empty — provide a value or remove this element`;
+  }
+  if (typeof value === "string" && value.trim() === "") {
+    return `${path} is empty — provide a value or remove this element`;
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const nested = findInvalidNestedValue(value[i], `${path}[${i}]`);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    for (const [key, entry] of Object.entries(value)) {
+      const nested = findInvalidNestedValue(entry, `${path}.${key}`);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  return null;
+}
+
+/** Validates a complex-type argument's raw text: syntactic JSON first, then a
+ *  recursive structural pass. Returns null when the value is valid (or
+ *  blank — an empty complex-type field is caught by the "all args filled"
+ *  check elsewhere, not here). */
+function validateComplexArgValue(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return "Invalid JSON";
+  }
+  return findInvalidNestedValue(parsed, "value");
+}
+
+const I128_MIN = -(2n ** 127n);
+const I128_MAX = 2n ** 127n - 1n;
+const U128_MIN = 0n;
+const U128_MAX = 2n ** 128n - 1n;
+
+/**
+ * Safely parses a u128/i128 argument's raw text into a BigInt (#906). A bare
+ * `BigInt(str)` call throws `SyntaxError: Cannot convert <value> to a BigInt`
+ * on anything that isn't a clean integer literal (decimals, empty strings,
+ * stray whitespace, "0x" prefixes BigInt doesn't accept the way parseInt
+ * does, or plain non-numeric text), which would otherwise crash the render
+ * instead of showing the user an inline error. Also range-checks the result
+ * against the signed/unsigned 128-bit bounds so an out-of-range value is
+ * caught here rather than failing opaquely once it reaches the contract.
+ */
+function parseSorobanInt128(raw: string, type: "i128" | "u128"): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!/^-?\d+$/.test(trimmed)) {
+    return `Enter a whole number for ${type} (no decimals, letters, or symbols)`;
+  }
+  let parsed: bigint;
+  try {
+    parsed = BigInt(trimmed);
+  } catch {
+    return `"${trimmed}" is not a valid ${type} value`;
+  }
+  const [min, max] = type === "i128" ? [I128_MIN, I128_MAX] : [U128_MIN, U128_MAX];
+  if (parsed < min || parsed > max) {
+    return `Value is out of range for ${type} (${min} to ${max})`;
+  }
+  return null;
 }
 
 function renderArgInput(
@@ -124,14 +269,26 @@ function renderArgInput(
   }
 
   if (type === "i128" || type === "u128") {
+    // Issue #906: u128/i128 need BigInt-range validation — a plain `number`
+    // input silently loses precision above 2^53, and a bare `BigInt(value)`
+    // call throws on anything that isn't a clean integer literal.
+    const int128Error = parseSorobanInt128(value, type);
     return (
-      <Input
-        type="text"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={`Enter ${arg.type} (e.g. 1000000)`}
-        aria-label={arg.name}
-      />
+      <div className="flex flex-col gap-1">
+        <Input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={`Enter ${arg.type} (e.g. 1000000)`}
+          aria-label={arg.name}
+          aria-invalid={int128Error ? true : undefined}
+        />
+        {int128Error && (
+          <p role="alert" className="text-[11px] text-red">
+            {int128Error}
+          </p>
+        )}
+      </div>
     );
   }
 
@@ -171,6 +328,32 @@ function renderArgInput(
     );
   }
 
+  if (COMPLEX_ARG_TYPES.has(type)) {
+    // Issue #653: complex Soroban types get a structured JSON input with live
+    // validation instead of a plain unvalidated text field. Issue #906: that
+    // validation is now recursive, so an empty/null element nested inside a
+    // vec, tuple, map, or struct is caught too, not just top-level syntax.
+    const jsonError = validateComplexArgValue(value);
+    return (
+      <div className="flex flex-col gap-1">
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={`Enter ${type} as JSON`}
+          aria-label={arg.name}
+          aria-invalid={jsonError ? true : undefined}
+          rows={3}
+          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] font-mono text-ink outline-none focus:ring-1 focus:ring-brand"
+        />
+        {jsonError && (
+          <p role="alert" className="text-[11px] text-red">
+            {jsonError}
+          </p>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Input
       type="text"
@@ -184,9 +367,12 @@ function renderArgInput(
 
 export function ContractInteractionBuilder({
   className,
-  contractSpec: externalSpec,
+  spec: externalSpecProp,
+  contractSpec,
+  onInvoke,
   onParamsReady,
 }: ContractInteractionBuilderProps) {
+  const externalSpec = externalSpecProp ?? contractSpec;
   const titleId = useId();
   const [contractId, setContractId] = useState(
     externalSpec?.contractId ?? "",
@@ -194,28 +380,52 @@ export function ContractInteractionBuilder({
   const [contractError, setContractError] = useState<string | null>(null);
   const [selectedMethod, setSelectedMethod] = useState<string>("");
   const [argValues, setArgValues] = useState<Record<string, string>>({});
-  const [xdrPreview, setXdrPreview] = useState("");
+  /** argName -> whether the user has marked that address argument as
+   *  requiring its own authorization entry. Defaults to true whenever a new
+   *  address-typed argument appears, since a multi-auth method's whole point
+   *  is that more than one party needs to sign. */
+  const [authRequired, setAuthRequired] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
+  const [prevExternalSpec, setPrevExternalSpec] = useState(externalSpec);
+  if (prevExternalSpec !== externalSpec) {
+    setPrevExternalSpec(externalSpec);
     if (externalSpec) {
       setContractId(externalSpec.contractId);
     }
-  }, [externalSpec]);
+  }
 
   const activeMethod = useMemo(() => {
     if (!externalSpec || !selectedMethod) return undefined;
-    return externalSpec.methods.find((m) => m.name === selectedMethod);
+    return externalSpec.methods.find((m: ContractMethod) => m.name === selectedMethod);
   }, [externalSpec, selectedMethod]);
 
-  useEffect(() => {
-    const preview = buildXdrPreview(
+  const xdrPreview = useMemo(() => {
+    return buildXdrPreview(
       contractId,
       selectedMethod,
       argValues,
       activeMethod,
     );
-    setXdrPreview(preview);
   }, [contractId, selectedMethod, argValues, activeMethod]);
+
+  const addressArgs = useMemo(
+    () => deriveAddressArgs(activeMethod, argValues),
+    [activeMethod, argValues],
+  );
+
+  const authEntries: AuthEntryReview[] = useMemo(
+    () =>
+      addressArgs.map(({ argName, address }) => ({
+        argName,
+        address,
+        needsAuth: authRequired[argName] ?? true,
+      })),
+    [addressArgs, authRequired],
+  );
+
+  const handleAuthToggle = useCallback((argName: string) => {
+    setAuthRequired((prev) => ({ ...prev, [argName]: !(prev[argName] ?? true) }));
+  }, []);
 
   const handleContractIdChange = useCallback(
     (value: string) => {
@@ -228,11 +438,12 @@ export function ContractInteractionBuilder({
   const handleMethodSelect = useCallback(
     (method: string) => {
       setSelectedMethod(method);
+      setAuthRequired({});
       if (externalSpec) {
-        const methodDef = externalSpec.methods.find((m) => m.name === method);
+        const methodDef = externalSpec.methods.find((m: ContractMethod) => m.name === method);
         if (methodDef) {
           const initial: Record<string, string> = {};
-          methodDef.args.forEach((arg) => {
+          methodDef.args.forEach((arg: ContractMethodArg) => {
             initial[arg.name] = "";
           });
           setArgValues(initial);
@@ -268,25 +479,29 @@ export function ContractInteractionBuilder({
   const handleGenerateParams = useCallback(() => {
     if (!contractId || !selectedMethod) return;
     const args = activeMethod
-      ? activeMethod.args.map((arg) => argValues[arg.name] ?? "")
+      ? activeMethod.args.map((arg: ContractMethodArg) => argValues[arg.name] ?? "")
       : Object.values(argValues);
     onParamsReady?.({
       contractId,
       method: selectedMethod,
       args,
       xdr: xdrPreview,
+      authEntries,
     });
+    onInvoke?.(contractId, selectedMethod, args);
   }, [
     contractId,
     selectedMethod,
     activeMethod,
     argValues,
     xdrPreview,
+    authEntries,
     onParamsReady,
+    onInvoke,
   ]);
 
   const allArgsFilled = activeMethod
-    ? activeMethod.args.every((arg) => argValues[arg.name]?.trim())
+    ? activeMethod.args.every((arg: ContractMethodArg) => argValues[arg.name]?.trim())
     : true;
 
   return (
@@ -321,7 +536,6 @@ export function ContractInteractionBuilder({
             value={contractId}
             onChange={(e) => handleContractIdChange(e.target.value)}
             placeholder="C…"
-            invalid={!!contractError}
             aria-invalid={!!contractError || undefined}
             aria-describedby={contractError ? "contract-id-error" : undefined}
           />
@@ -351,7 +565,7 @@ export function ContractInteractionBuilder({
               className="h-9 w-full rounded-lg border border-line bg-surface px-3 text-[13px] text-ink focus:outline-none focus:ring-1 focus:ring-brand"
             >
               <option value="">Select a method…</option>
-              {externalSpec.methods.map((method) => (
+              {externalSpec.methods.map((method: ContractMethod) => (
                 <option key={method.name} value={method.name}>
                   {method.name}
                   {method.description ? ` — ${method.description}` : ""}
@@ -366,7 +580,7 @@ export function ContractInteractionBuilder({
             <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
               Arguments
             </span>
-            {activeMethod.args.map((arg) => (
+            {activeMethod.args.map((arg: ContractMethodArg) => (
               <div key={arg.name} className="flex flex-col gap-1">
                 <div className="flex items-center gap-1.5">
                   <span className="text-[12px] font-medium text-ink-2">
@@ -397,6 +611,41 @@ export function ContractInteractionBuilder({
           <p className="text-[12px] text-ink-3">
             This method takes no arguments.
           </p>
+        )}
+
+        {authEntries.length > 1 && (
+          <div className="flex flex-col gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-4">
+              Authorization Entries
+            </span>
+            <p className="text-[11px] text-ink-3">
+              This method takes {authEntries.length} address arguments. Review which ones need their own authorization entry before invoking.
+            </p>
+            <div className="flex flex-col gap-2">
+              {authEntries.map((entry) => (
+                <div
+                  key={entry.argName}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2"
+                >
+                  <div className="flex flex-col gap-0.5 min-w-0">
+                    <span className="text-[11px] font-medium text-ink-2">Signer: {entry.argName}</span>
+                    <span className="text-[11px] font-mono text-ink-3 truncate">
+                      {entry.address || "(not set)"}
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-1.5 text-[11px] text-ink-2 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={entry.needsAuth}
+                      onChange={() => handleAuthToggle(entry.argName)}
+                      aria-label={`${entry.argName} requires authorization`}
+                    />
+                    Requires auth
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
 
         {xdrPreview && (

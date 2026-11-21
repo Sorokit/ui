@@ -1,15 +1,21 @@
 import {
   ArrowDataTransferHorizontalIcon,
   Blockchain01Icon,
+  ChartLineDataIcon,
   CodeIcon,
   Globe02Icon,
+  Legal01Icon,
+  Plant01Icon,
+  Shield02Icon,
   User02Icon,
   Wallet01Icon,
+  Wallet03Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
 import { AccountCardCompact } from "@/components/AccountCard";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { useSorokit } from "@/context/useSorokit";
 import { cn } from "@/lib/utils";
 
@@ -25,9 +31,10 @@ export type NavSection =
   | "charts"
   | "farming"
   | "budget"
-  | "nfts";
+  | "nfts"
+  | "governance";
 
-const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
+export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "wallet", label: "Wallet", icon: Wallet01Icon },
   { id: "account", label: "Account", icon: User02Icon },
   {
@@ -37,17 +44,29 @@ const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   },
   { id: "soroban", label: "Soroban", icon: CodeIcon },
   { id: "network", label: "Network", icon: Globe02Icon },
-  { id: "recovery", label: "Recovery Assistant", icon: User02Icon },
-  { id: "charts", label: "Advanced Charting", icon: ArrowDataTransferHorizontalIcon },
-  { id: "farming", label: "Yield Farming", icon: CodeIcon },
-  { id: "budget", label: "Budget Manager", icon: Wallet01Icon },
+  { id: "recovery", label: "Recovery Assistant", icon: Shield02Icon },
+  { id: "charts", label: "Advanced Charting", icon: ChartLineDataIcon },
+  { id: "farming", label: "Yield Farming", icon: Plant01Icon },
+  { id: "budget", label: "Budget Manager", icon: Wallet03Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
+  { id: "governance", label: "Governance", icon: Legal01Icon },
 ];
 
+export function isItemActive(itemId: string, active: string): boolean {
+  if (!active || !itemId) return false;
+  if (active === itemId) return true;
+  const cleanId = itemId.replace(/^\//, "");
+  const cleanActive = active.replace(/^\//, "");
+  if (cleanActive === cleanId) return true;
+  return cleanActive.startsWith(cleanId + "/");
+}
+
 interface SidebarProps {
-  active: NavSection;
+  active: NavSection | string;
+  /** Fired before closing the drawer so the destination screen can mount while the menu dismisses. */
   onNavigate: (s: NavSection) => void;
   open: boolean;
+  /** Called immediately after navigation when a section is selected. */
   onClose: () => void;
 }
 
@@ -55,6 +74,15 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   const { isConnected } = useSorokit();
   const sidebarRef = useRef<HTMLElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const initialActive = useRef(active);
+
+  // Initialize visual highlight from localStorage without firing onNavigate on mount (#850).
+  // Controlled activeSection navigation (e.g. deep-linking to /soroban) must not be overridden on initial render.
+  const [visualActive, setVisualActive] = useState<NavSection | string>(() => {
+    if (typeof localStorage === "undefined") return active;
+    const saved = localStorage.getItem("sorokit-active-nav");
+    return saved && NAV.some((item) => item.id === saved) ? saved : active;
+  });
 
   const [collapsed, setCollapsed] = useState(() => {
     if (typeof localStorage === "undefined") return false;
@@ -67,13 +95,28 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
   }, [collapsed]);
 
   useEffect(() => {
-    const saved = localStorage.getItem("sorokit-active-nav");
-    if (saved && saved !== active) {
-      onNavigate(saved as NavSection);
-    }
-  }, [active, onNavigate]);
+    if (initialActive.current === active) return;
+    setVisualActive(active);
+    initialActive.current = active;
+  }, [active]);
+
+  // Lock background body scroll while mobile navigation drawer is active
+  useEffect(() => {
+    if (!open) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [open]);
 
   function handleNav(id: NavSection) {
+    setVisualActive(id);
+    if (active === id) {
+      onClose();
+      return;
+    }
     localStorage.setItem("sorokit-active-nav", id);
     onNavigate(id);
     onClose();
@@ -139,14 +182,26 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
       {/* Mobile backdrop */}
       {open && (
         <div
+          role="button"
+          tabIndex={0}
+          aria-label="Close navigation"
           className="fixed inset-0 z-20 bg-black/60 lg:hidden"
           onClick={onClose}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onClose();
+            }
+          }}
         />
       )}
 
       {/* Sidebar panel */}
       <aside
         ref={sidebarRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Navigation"
         className={cn(
           "fixed top-0 left-0 z-30 h-full flex flex-col",
           "bg-surface border-r border-line",
@@ -156,27 +211,6 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
           "lg:relative lg:translate-x-0 lg:z-auto",
         )}
       >
-        {/* Logo */}
-        <button
-          type="button"
-          onClick={() => onNavigate("wallet")}
-          className="flex items-center gap-3 px-5 h-[var(--sorokit-nav-height)] border-b border-line shrink-0 text-left cursor-pointer"
-        >
-          <div className="w-8 h-8 rounded-lg bg-brand flex items-center justify-center shrink-0">
-            <svg width="16" height="16" viewBox="0 0 12 12" fill="none">
-              <path
-                d="M2 6C2 3.79 3.79 2 6 2C8.21 2 10 3.79 10 6C10 8.21 8.21 10 6 10"
-                stroke="white"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <path
-                d="M6 10C4.9 10 4 9.1 4 8C4 6.9 4.9 6 6 6"
-                stroke="white"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <circle cx="6" cy="6" r="1" fill="white" />
         {/* Logo + collapse toggle */}
         <div className="flex items-center justify-between px-3 h-[60px] border-b border-line shrink-0">
           <button
@@ -233,37 +267,52 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
             </p>
           )}
           <div className="flex flex-col gap-0.5">
-            {NAV.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleNav(item.id)}
-                aria-current={active === item.id ? "page" : undefined}
-                className={cn(
-                  "relative w-full flex items-center rounded-lg transition-all cursor-pointer overflow-hidden",
-                  "text-[13px] focus-visible:outline-none mb-0.5",
-                  collapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2.5 text-left",
-                  active === item.id
-                    ? "bg-surface-3 text-ink font-medium border border-line-2"
-                    : "text-ink-3 hover:bg-surface-2 hover:text-ink-2 border border-transparent",
-                )}
-              >
-                {/* Active indicator bar */}
-                {active === item.id && (
-                  <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-brand rounded-r-full" />
-                )}
-                <HugeiconsIcon
-                  icon={item.icon}
-                  size={16}
-                  color="currentColor"
-                  strokeWidth={active === item.id ? 2 : 1.5}
+            {NAV.map((item) => {
+              const activeItem = isItemActive(item.id, visualActive);
+              const navButton = (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleNav(item.id)}
+                  aria-label={collapsed ? item.label : undefined}
+                  aria-current={activeItem ? "page" : undefined}
                   className={cn(
-                    "shrink-0",
-                    active === item.id ? "text-brand" : "",
+                    "relative w-full flex items-center rounded-lg transition-all cursor-pointer overflow-hidden",
+                    "text-[13px] focus-visible:outline-none mb-0.5",
+                    collapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2.5 text-left",
+                    activeItem
+                      ? "bg-surface-3 text-ink font-medium border border-line-2"
+                      : "text-ink-3 hover:bg-surface-2 hover:text-ink-2 border border-transparent",
                   )}
-                />
-                {!collapsed && item.label}
-              </button>
-            ))}
+                >
+                  {/* Active indicator bar */}
+                  {activeItem && (
+                    <span className="absolute left-0 top-0 bottom-0 w-[2px] bg-brand rounded-r-full" />
+                  )}
+                  <HugeiconsIcon
+                    icon={item.icon}
+                    size={16}
+                    color="currentColor"
+                    strokeWidth={1.5}
+                    className={cn(
+                      "shrink-0",
+                      activeItem ? "text-brand" : "",
+                    )}
+                  />
+                  {!collapsed && item.label}
+                </button>
+              );
+
+              if (collapsed) {
+                return (
+                  <Tooltip key={item.id} content={item.label} side="right">
+                    {navButton}
+                  </Tooltip>
+                );
+              }
+
+              return navButton;
+            })}
           </div>
         </nav>
 

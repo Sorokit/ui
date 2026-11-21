@@ -44,11 +44,224 @@ describe("mock-client", () => {
   it("verifies getHistory respects the limit parameter", async () => {
     const { createMockClient } = await import("./mock-client");
     const client = createMockClient();
-    
+
     const limit = 3;
     const res = await client.transaction.getHistory("address", 1, limit);
-    
+
     expect(res.data).toBeDefined();
     expect(res.data?.length).toBe(limit);
+    expect(res.total).toBe(25);
+  });
+
+  it("verifies getHistory correctly paginates across multiple pages with page and limit", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+
+    const pageSize = 10;
+    const page1 = await client.transaction.getHistory("address", 1, pageSize);
+    const page2 = await client.transaction.getHistory("address", 2, pageSize);
+    const page3 = await client.transaction.getHistory("address", 3, pageSize);
+    const page4 = await client.transaction.getHistory("address", 4, pageSize);
+
+    expect(page1.data).toHaveLength(10);
+    expect(page2.data).toHaveLength(10);
+    expect(page3.data).toHaveLength(5);
+    expect(page4.data).toHaveLength(0);
+
+    expect(page1.total).toBe(25);
+    expect(page2.total).toBe(25);
+    expect(page3.total).toBe(25);
+
+    // Verify page slices do not overlap
+    const page1Hashes = page1.data?.map((tx) => tx.hash);
+    const page2Hashes = page2.data?.map((tx) => tx.hash);
+    const page3Hashes = page3.data?.map((tx) => tx.hash);
+
+    expect(page1Hashes?.some((h) => page2Hashes?.includes(h))).toBe(false);
+    expect(page2Hashes?.some((h) => page3Hashes?.includes(h))).toBe(false);
+  });
+
+  it("verifies getHistory defaults to page 1 and all items when page/limit not provided", async () => {
+    const { createMockClient, MOCK_HISTORY } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.transaction.getHistory("address");
+    expect(res.data).toHaveLength(MOCK_HISTORY.length);
+    expect(res.total).toBe(MOCK_HISTORY.length);
+  });
+
+  it("verifies getHistory paginates correctly across multiple pages", async () => {
+    const { createMockClient, MOCK_HISTORY } = await import("./mock-client");
+    const client = createMockClient();
+
+    const limit = 2;
+    const page1 = await client.transaction.getHistory("address", 1, limit);
+    const page2 = await client.transaction.getHistory("address", 2, limit);
+
+    expect(page1.data?.length).toBe(limit);
+    expect(page2.data?.length).toBe(limit);
+    expect(page1.data?.map((tx) => tx.hash)).not.toEqual(
+      page2.data?.map((tx) => tx.hash),
+    );
+    expect(page1.data?.[0].hash).toBe(MOCK_HISTORY[0].hash);
+    expect(page2.data?.[0].hash).toBe(MOCK_HISTORY[limit].hash);
+    expect(page1.total).toBe(MOCK_HISTORY.length);
+  });
+
+  // Issue #573 — the Soroban screen must be functional against the mock
+  // client: invokeContract/simulateContract return real result data (never
+  // "Not implemented") and getEvents returns actual events.
+  it("verifySoroban invokeContract resolves with result data, not 'Not implemented'", async () => {
+    const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.invokeContract({
+      contractId: "C123",
+      method: "transfer",
+      args: [],
+      sourceAccount: mockAddress,
+    });
+
+    expect(res.error).toBeNull();
+    expect(res.status).toBe("success");
+    expect(res.data).not.toBeNull();
+    expect(res.data).not.toBe("Not implemented");
+    expect(res.data).toHaveProperty("success", true);
+    expect(res.data).toHaveProperty("txHash");
+  });
+
+  it("verifySoroban simulateContract resolves with result data", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.simulateContract({
+      contractId: "C123",
+      method: "balance",
+      args: [{ address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA" }],
+    });
+
+    expect(res.error).toBeNull();
+    expect(res.status).toBe("success");
+    expect(res.data).not.toBeNull();
+  });
+
+  it("verifySoroban getEvents returns event data for a contract", async () => {
+    const { createMockClient } = await import("./mock-client");
+    const client = createMockClient();
+
+    const res = await client.soroban.getEvents("C123", 10);
+
+    expect(res.error).toBeNull();
+    expect(Array.isArray(res.data)).toBe(true);
+    expect(res.data!.length).toBeGreaterThan(0);
+  });
+
+  describe("account.claimBalance coverage (#773)", () => {
+    it("returns correct TxResult shape for valid claim balance ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.account.claimBalance("cb-12345");
+      expect(res.error).toBeNull();
+      expect(res.data).not.toBeNull();
+      expect(res.data).toHaveProperty("hash");
+      expect(res.data).toHaveProperty("ledger", 12345);
+      expect(res.data).toHaveProperty("successful", true);
+      expect(res.data?.hash).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("returns error response for invalid claim balance ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.account.claimBalance("invalid");
+      expect(res.data).toBeNull();
+      expect(res.error).toContain("Invalid claimable balance ID");
+    });
+  });
+
+  describe("batch namespace methods coverage (#773)", () => {
+    it("submitBatch returns correct BatchResult shape for valid entries", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.batch.submitBatch({
+        entries: [
+          { address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", amount: "10.0" },
+          { address: "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", amount: "20.0" },
+        ],
+        sourceAccount: mockAddress,
+      });
+
+      expect(res.error).toBeNull();
+      expect(res.batchId).toMatch(/^batch-mock-/);
+      expect(res.data).not.toBeNull();
+      expect(res.data?.totalEntries).toBe(2);
+      expect(res.data?.successful).toBe(2);
+      expect(res.data?.failed).toBe(0);
+      expect(res.data?.entries).toHaveLength(2);
+      expect(res.data?.entries[0].status).toBe("confirmed");
+    });
+
+    it("submitBatch returns error for empty entries or invalid source account", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const emptyRes = await client.batch.submitBatch({
+        entries: [],
+        sourceAccount: mockAddress,
+      });
+      expect(emptyRes.data).toBeNull();
+      expect(emptyRes.error).toBe("Batch entries cannot be empty");
+
+      const invalidAccRes = await client.batch.submitBatch({
+        entries: [{ address: "GCCC...", amount: "5.0" }],
+        sourceAccount: "invalid",
+      });
+      expect(invalidAccRes.data).toBeNull();
+      expect(invalidAccRes.error).toBe("Invalid source account");
+    });
+
+    it("getBatchStatus returns BatchProgress shape and progresses on repeated calls", async () => {
+      const { createMockClient, MOCK_ADDRESS: mockAddress } = await import("./mock-client");
+      const client = createMockClient();
+
+      const submitRes = await client.batch.submitBatch({
+        entries: [{ address: "GCCC...", amount: "10.0" }],
+        sourceAccount: mockAddress,
+      });
+      const batchId = submitRes.batchId;
+
+      // Call 1
+      const status1 = await client.batch.getBatchStatus(batchId);
+      expect(status1.error).toBeNull();
+      expect(status1.data?.batchId).toBe(batchId);
+      expect(status1.data?.completed).toBe(4);
+      expect(status1.data?.total).toBe(10);
+      expect(status1.data?.percentage).toBe(40);
+      expect(status1.data?.status).toBe("processing");
+
+      // Call 2: progresses further
+      const status2 = await client.batch.getBatchStatus(batchId);
+      expect(status2.data?.completed).toBe(8);
+      expect(status2.data?.percentage).toBe(80);
+      expect(status2.data?.status).toBe("processing");
+
+      // Call 3: reaches completed status
+      const status3 = await client.batch.getBatchStatus(batchId);
+      expect(status3.data?.completed).toBe(10);
+      expect(status3.data?.percentage).toBe(100);
+      expect(status3.data?.status).toBe("completed");
+    });
+
+    it("getBatchStatus returns error for invalid batch ID", async () => {
+      const { createMockClient } = await import("./mock-client");
+      const client = createMockClient();
+
+      const res = await client.batch.getBatchStatus("invalid");
+      expect(res.data).toBeNull();
+      expect(res.error).toContain("Batch not found");
+    });
   });
 });
+

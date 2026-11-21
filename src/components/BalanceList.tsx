@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useCallback, useMemo, useState } from "react";
 
 import { AssetBadge } from "@/components/AssetBadge";
 import { Badge } from "@/components/ui/Badge";
@@ -11,7 +11,30 @@ import { cn, safeFormat } from "@/lib/utils";
 type SortMode = "default" | "balance-desc" | "alpha";
 
 function getAssetCode(balance: Balance) {
-  return balance.assetType === "native" ? "XLM" : balance.assetCode ?? balance.asset;
+  return balance.assetType === "native"
+    ? "XLM"
+    : (balance.assetCode ?? balance.asset);
+}
+
+/**
+ * Parse a balance string to a number, tolerating scientific notation and
+ * non-numeric values (issue #665). Returns 0 for anything unparseable so a
+ * single malformed balance can never poison a sort with NaN.
+ */
+function parseAmount(value: string | undefined): number {
+  const parsed = Number.parseFloat(value ?? "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * Composite React key for a balance row: `asset` alone collides for two
+ * balances with the same code but different issuers (e.g. two USDC
+ * balances from different issuers), silently dropping re-renders and
+ * mixing up row state (issue #524). `assetIssuer` is undefined for native
+ * XLM and for liquidity-pool-share balances, hence the "native" fallback.
+ */
+export function balanceKey(balance: Balance): string {
+  return `${getAssetCode(balance)}-${balance.assetIssuer ?? "native"}`;
 }
 
 function compareBalances(a: Balance, b: Balance) {
@@ -21,8 +44,8 @@ function compareBalances(a: Balance, b: Balance) {
     return aIsXlm ? -1 : 1;
   }
 
-  const aZero = Number(a.balance) === 0;
-  const bZero = Number(b.balance) === 0;
+  const aZero = parseAmount(a.balance) === 0;
+  const bZero = parseAmount(b.balance) === 0;
   if (aZero !== bZero) {
     return aZero ? 1 : -1;
   }
@@ -32,7 +55,9 @@ function compareBalances(a: Balance, b: Balance) {
 
 function sortBalances(balances: Balance[], mode: SortMode) {
   if (mode === "balance-desc") {
-    return [...balances].sort((a, b) => Number(b.balance) - Number(a.balance));
+    return [...balances].sort(
+      (a, b) => parseAmount(b.balance) - parseAmount(a.balance),
+    );
   }
   if (mode === "alpha") {
     return [...balances].sort((a, b) =>
@@ -48,22 +73,33 @@ const sortLabels: Record<SortMode, string> = {
   alpha: "A-Z",
 };
 
-function AssetRow({
+const AssetRow = memo(function AssetRow({
   b,
-  onClick,
+  onAssetClick,
+  detailRef,
+  showIssuerSuffix,
 }: {
   b: Balance;
-  onClick?: () => void;
+  onAssetClick?: (balance: Balance) => void;
+  detailRef?: React.RefObject<HTMLElement | null>;
+  showIssuerSuffix?: boolean;
 }) {
-  const isZeroBalance = Number(b.balance) === 0;
+  const isZeroBalance = parseAmount(b.balance) === 0;
+  const onClick = useCallback(() => {
+    onAssetClick?.(b);
+    requestAnimationFrame(() => {
+      detailRef?.current?.focus();
+    });
+  }, [b, detailRef, onAssetClick]);
+  const hasClickHandler = Boolean(onAssetClick);
 
   return (
     <div
-      role={onClick ? "button" : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
+      role={hasClickHandler ? "button" : undefined}
+      tabIndex={hasClickHandler ? 0 : undefined}
+      onClick={hasClickHandler ? onClick : undefined}
       onKeyDown={
-        onClick
+        hasClickHandler
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -75,10 +111,11 @@ function AssetRow({
       className={cn(
         "flex items-center justify-between px-5 py-4 border-b border-line last:border-0",
         isZeroBalance && "opacity-50",
-        onClick && "cursor-pointer hover:bg-surface-2 transition-colors",
+        hasClickHandler &&
+          "cursor-pointer hover:bg-surface-2 transition-colors",
       )}
     >
-      <AssetBadge balance={b} />
+      <AssetBadge balance={b} showIssuerSuffix={showIssuerSuffix} />
       <div className="flex flex-col items-end gap-0.5">
         <span
           className={cn(
@@ -94,66 +131,97 @@ function AssetRow({
       </div>
     </div>
   );
-}
+});
 
 export interface BalanceListProps {
   onAssetClick?: (balance: Balance) => void;
   detailRef?: React.RefObject<HTMLElement | null>;
   /** When true, renders an approximate XLM-equivalent portfolio total in the header. */
   showTotal?: boolean;
-  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a USD-equivalent figure. */
+  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a fiat-equivalent figure. */
   xlmPrice?: number;
+  /** Fiat currency used to format the XLM-equivalent total (issue #665).
+   * Defaults to USD; EUR and GBP are also supported.
+   */
+  currency?: string;
 }
+
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+};
 
 export function BalanceList({
   onAssetClick,
   detailRef,
   showTotal,
   xlmPrice,
+  currency = "USD",
 }: BalanceListProps) {
   const { balances, isLoadingAccount, isConnected, network } = useSorokit();
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
+  // Issue #665: let users hide zero-balance trustlines.
+  const [hideZero, setHideZero] = useState(false);
 
   const isTestnet = network?.name === "testnet";
-  const showFriendbot = isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
+  const showFriendbot =
+    isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
 
   const skeletonCount = balances.length > 0 ? balances.length : 3;
 
-  const filtered = search
-    ? balances.filter((b) =>
-        getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
-      )
-    : balances;
+  const codeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of balances) {
+      const code = getAssetCode(b);
+      counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+    return counts;
+  }, [balances]);
 
-  const regularBalances = filtered.filter(
-    (b) => b.assetType !== "liquidity_pool_shares",
-  );
-  const lpBalances = filtered.filter(
-    (b) => b.assetType === "liquidity_pool_shares",
-  );
+  const filtered = useMemo(() => {
+    const bySearch = search
+      ? balances.filter((b) =>
+          getAssetCode(b).toLowerCase().includes(search.toLowerCase()),
+        )
+      : balances;
+    return hideZero
+      ? bySearch.filter((b) => parseAmount(b.balance) !== 0)
+      : bySearch;
+  }, [balances, hideZero, search]);
 
-  const sorted = sortBalances(regularBalances, sortMode);
-  const sortedLp = sortBalances(lpBalances, sortMode);
+  const { sorted, sortedLp } = useMemo(() => {
+    const regularBalances = filtered.filter(
+      (b) => b.assetType !== "liquidity_pool_shares",
+    );
+    const lpBalances = filtered.filter(
+      (b) => b.assetType === "liquidity_pool_shares",
+    );
+    return {
+      sorted: sortBalances(regularBalances, sortMode),
+      sortedLp: sortBalances(lpBalances, sortMode),
+    };
+  }, [filtered, sortMode]);
 
   // Approximate — only native XLM balances are summed since other assets
   // have no price feed available here.
-  const xlmTotal = balances
-    .filter((b) => b.assetType === "native")
-    .reduce((sum, b) => sum + Number(b.balance), 0);
+  const xlmTotal = useMemo(
+    () =>
+      balances
+        .filter((b) => b.assetType === "native")
+        .reduce((sum, b) => sum + parseAmount(b.balance), 0),
+    [balances],
+  );
 
   const cycleSort = () => {
     setSortMode((m) =>
-      m === "default" ? "balance-desc" : m === "balance-desc" ? "alpha" : "default",
+      m === "default"
+        ? "balance-desc"
+        : m === "balance-desc"
+          ? "alpha"
+          : "default",
     );
-  };
-
-  const handleAssetClick = (b: Balance) => {
-    onAssetClick?.(b);
-    // Move focus to the detail view if a ref is provided
-    requestAnimationFrame(() => {
-      detailRef?.current?.focus();
-    });
   };
 
   return (
@@ -166,13 +234,22 @@ export function BalanceList({
             <p className="text-[11px] text-ink-3 mt-0.5">
               ~{xlmTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM
               {typeof xlmPrice === "number"
-                ? ` (~$${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
+                ? ` (~${CURRENCY_SYMBOLS[currency] ?? `${currency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
                 : ""}
             </p>
           )}
         </div>
         {isConnected && !isLoadingAccount && (
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setHideZero((v) => !v)}
+              aria-pressed={hideZero}
+              title={hideZero ? "Show zero balances" : "Hide zero balances"}
+              className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
+              type="button"
+            >
+              {hideZero ? "Show zero" : "Hide zero"}
+            </button>
             <button
               onClick={cycleSort}
               className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
@@ -228,9 +305,13 @@ export function BalanceList({
             <div>
               {sorted.map((b) => (
                 <AssetRow
-                  key={b.asset}
+                  key={balanceKey(b)}
                   b={b}
-                  onClick={onAssetClick ? () => handleAssetClick(b) : undefined}
+                  showIssuerSuffix={Boolean(
+                    b.assetIssuer && (codeCounts.get(getAssetCode(b)) ?? 0) > 1,
+                  )}
+                  onAssetClick={onAssetClick}
+                  detailRef={detailRef}
                 />
               ))}
             </div>
@@ -244,9 +325,13 @@ export function BalanceList({
               </div>
               {sortedLp.map((b) => (
                 <AssetRow
-                  key={b.asset}
+                  key={balanceKey(b)}
                   b={b}
-                  onClick={onAssetClick ? () => handleAssetClick(b) : undefined}
+                  showIssuerSuffix={Boolean(
+                    b.assetIssuer && (codeCounts.get(getAssetCode(b)) ?? 0) > 1,
+                  )}
+                  onAssetClick={onAssetClick}
+                  detailRef={detailRef}
                 />
               ))}
             </div>

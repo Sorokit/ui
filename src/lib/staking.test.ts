@@ -6,8 +6,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateDailyRewards,
+  computeUptimePct,
   createDefaultFilter,
+  DEFAULT_XLM_PRICE_USD,
   estimateDelegationFeeXlm,
+  estimateHistoricalXlmPriceUsd,
+  estimateRewardUsdValue,
   filterValidators,
   formatPct,
   formatXlm,
@@ -263,6 +267,56 @@ describe("generateMockRewardHistory", () => {
       expect(new Date(e.date).getTime()).toBeGreaterThan(cutoff.getTime());
     }
   });
+
+  it("includes estimated historical priceUsd and usdValue on generated events", () => {
+    const events = generateMockRewardHistory();
+    for (const e of events) {
+      expect(e.priceUsd).toBeGreaterThan(0);
+      expect(e.usdValue).toBeGreaterThan(0);
+    }
+  });
+});
+
+// ─── estimateHistoricalXlmPriceUsd & estimateRewardUsdValue ──────────────────
+
+describe("estimateHistoricalXlmPriceUsd & estimateRewardUsdValue", () => {
+  it("returns a deterministic price around DEFAULT_XLM_PRICE_USD", () => {
+    const p1 = estimateHistoricalXlmPriceUsd("2026-10-15");
+    const p2 = estimateHistoricalXlmPriceUsd("2026-10-15");
+    expect(p1).toBe(p2);
+    expect(p1).toBeGreaterThan(0.08);
+    expect(p1).toBeLessThan(0.15);
+  });
+
+  it("falls back to DEFAULT_XLM_PRICE_USD for invalid date strings", () => {
+    expect(estimateHistoricalXlmPriceUsd("not-a-date")).toBe(
+      DEFAULT_XLM_PRICE_USD,
+    );
+  });
+
+  it("calculates usdValue from event amount and historical price when not explicitly set", () => {
+    const result = estimateRewardUsdValue({
+      id: "r1",
+      date: "2026-10-15",
+      amount: "100",
+      validatorId: "VALIDATOR_ALPHA",
+    });
+    expect(result.priceUsd).toBeGreaterThan(0);
+    expect(result.usdValue).toBeCloseTo(100 * result.priceUsd, 3);
+  });
+
+  it("preserves explicit priceUsd and usdValue when provided on the event", () => {
+    const result = estimateRewardUsdValue({
+      id: "r2",
+      date: "2026-10-15",
+      amount: "50",
+      validatorId: "VALIDATOR_ALPHA",
+      priceUsd: 0.2,
+      usdValue: 10,
+    });
+    expect(result.priceUsd).toBe(0.2);
+    expect(result.usdValue).toBe(10);
+  });
 });
 
 // ─── filterValidators ────────────────────────────────────────────────────────
@@ -413,5 +467,48 @@ describe("createDefaultFilter", () => {
     expect(f.sortField).toBe("apy");
     expect(f.sortDirection).toBe("desc");
     expect(f.status).toBe("all");
+  });
+});
+
+describe("computeUptimePct (#689)", () => {
+  it("returns null for a new validator with 0 recorded pings", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 0, successfulPings: 0 }),
+    ).toBeNull();
+  });
+
+  it("returns null when pingCount is 0 even if uptimePct is set", () => {
+    expect(computeUptimePct({ uptimePct: 100, pingCount: 0 })).toBeNull();
+  });
+
+  it("derives the percentage from ping counts", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 400, successfulPings: 398 }),
+    ).toBeCloseTo(99.5);
+  });
+
+  it("clamps inconsistent ping counts into 0–100", () => {
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 10, successfulPings: 12 }),
+    ).toBe(100);
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: 10, successfulPings: -1 }),
+    ).toBe(0);
+  });
+
+  it("falls back to uptimePct when only pingCount is known", () => {
+    expect(computeUptimePct({ uptimePct: 97.2, pingCount: 50 })).toBe(97.2);
+  });
+
+  it("uses uptimePct when no ping data is provided", () => {
+    expect(computeUptimePct({ uptimePct: 99.9 })).toBe(99.9);
+  });
+
+  it("returns null instead of NaN or Infinity", () => {
+    expect(computeUptimePct({ uptimePct: Number.NaN })).toBeNull();
+    expect(computeUptimePct({ uptimePct: Infinity })).toBeNull();
+    expect(
+      computeUptimePct({ uptimePct: 0, pingCount: Number.NaN }),
+    ).toBeNull();
   });
 });

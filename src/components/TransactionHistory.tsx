@@ -3,12 +3,18 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle01Icon,
+  CoinsSwapIcon,
+  ContractsIcon,
+  Copy01Icon,
+  GiftIcon,
+  Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
@@ -16,7 +22,6 @@ import { cn, getExplorerUrl, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 const MEMO_TRUNCATE_LENGTH = 20;
-const PAGE_STORAGE_PREFIX = "sorokit-transaction-history-page:";
 const STROOPS_PER_XLM = 10_000_000;
 const TREND_DAYS = 7;
 const MS_PER_DAY = 86_400_000;
@@ -95,35 +100,32 @@ function TrendSparkline({ counts }: { counts: number[] }) {
   );
 }
 
-function readStoredPage(address: string | null): number {
-  if (!address) return 1;
-  try {
-    const storedPage = Number.parseInt(
-      sessionStorage.getItem(`${PAGE_STORAGE_PREFIX}${address}`) ?? "",
-      10,
-    );
-    return Number.isInteger(storedPage) && storedPage > 0 ? storedPage : 1;
-  } catch {
-    return 1;
-  }
-}
-
-function storePage(address: string | null, page: number): void {
-  if (!address) return;
-  try {
-    sessionStorage.setItem(`${PAGE_STORAGE_PREFIX}${address}`, String(page));
-  } catch {
-    // sessionStorage may be unavailable; pagination still works for this render.
-  }
-}
-
 function truncateMemo(memo: string): string {
   return memo.length > MEMO_TRUNCATE_LENGTH
     ? `${memo.slice(0, MEMO_TRUNCATE_LENGTH)}…`
     : memo;
 }
 
-export function TxRow({
+/**
+ * Detects a 404 "account not found" response from the client's plain-string
+ * error message - what Horizon returns for an account that hasn't been
+ * funded (created) on the network yet, as opposed to a real network or
+ * server failure. The SorokitClient contract surfaces errors as strings
+ * rather than structured HTTP responses, so this follows the same
+ * substring-matching convention as `friendlyError()` in lib/utils.ts.
+ */
+function isUnfundedAccountError(error: string | null): boolean {
+  if (!error) return false;
+  const normalized = error.toLowerCase();
+  return (
+    normalized.includes("404") ||
+    normalized.includes("not found") ||
+    normalized.includes("not funded") ||
+    normalized.includes("unfunded")
+  );
+}
+
+export const TxRow = memo(function TxRow({
   tx,
   networkName,
 }: {
@@ -139,6 +141,7 @@ export function TxRow({
     month: "short",
     day: "numeric",
   });
+  const utcStr = date.toUTCString();
 
   const explorerUrl = getExplorerUrl(networkName, tx.hash);
 
@@ -147,20 +150,70 @@ export function TxRow({
     ? { href: explorerUrl, target: "_blank", rel: "noopener noreferrer" }
     : {};
 
+  const rowLabel = `Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`;
+
+  const opType = (tx.operationType || tx.type || "").toLowerCase();
+  const isContract =
+    opType.includes("invoke") ||
+    opType.includes("contract") ||
+    opType.includes("soroban") ||
+    Boolean(tx.contractId);
+
+  const isLpDeposit =
+    opType.includes("liquidity_pool_deposit") || opType === "lp_deposit";
+  const isLpWithdraw =
+    opType.includes("liquidity_pool_withdraw") || opType === "lp_withdraw";
+  const isLp =
+    isLpDeposit ||
+    isLpWithdraw ||
+    opType.includes("liquidity_pool") ||
+    opType.includes("lp");
+
+  const isClaimable =
+    opType.includes("claimable") || opType.includes("claim_claimable");
+
+  let OpIcon = tx.successful ? CheckmarkCircle01Icon : Cancel01Icon;
+  let opBadgeText: string | null = null;
+
+  if (isContract) {
+    OpIcon = ContractsIcon;
+    opBadgeText = "Soroban";
+  } else if (isLpDeposit) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "LP Deposit";
+  } else if (isLpWithdraw) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "LP Withdraw";
+  } else if (isLp) {
+    OpIcon = CoinsSwapIcon;
+    opBadgeText = "Liquidity Pool";
+  } else if (isClaimable) {
+    OpIcon = GiftIcon;
+    opBadgeText = "Claimable";
+  }
+
   return (
     <RowWrapper
       {...(wrapperProps as Record<string, string>)}
       role="article"
-      aria-label={`Transaction ${truncateAddress(tx.hash, 10, 6)} — ${tx.successful ? "Success" : "Failed"} — Fee: ${tx.feePaid} stroops`}
+      aria-label={
+        explorerUrl
+          ? `${rowLabel} — view on Stellar Expert (opens in a new tab)`
+          : rowLabel
+      }
       className="flex items-center justify-between px-5 py-3.5 border-b border-line last:border-0 gap-4 hover:bg-surface-2 transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 min-w-0">
-        {/* Status icon */}
+        {/* Status icon: purely decorative, hidden from the accessibility
+            tree since the Success/Failed badge below already announces
+            the same status as real text (issue #961). */}
         <div
+          aria-hidden="true"
+          data-testid="status-icon-container"
           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${tx.successful ? "bg-success-dim" : "bg-error-dim"}`}
         >
           <HugeiconsIcon
-            icon={tx.successful ? CheckmarkCircle01Icon : Cancel01Icon}
+            icon={OpIcon}
             size={14}
             color="currentColor"
             strokeWidth={1.5}
@@ -172,10 +225,13 @@ export function TxRow({
           <span data-txhash className="truncate">
             {truncateAddress(tx.hash, 10, 6)}
           </span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-ink-3">Ledger {tx.ledger}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] text-ink-3 shrink-0">Ledger {tx.ledger}</span>
             {tx.memo && (
-              <span className="text-[10px] text-ink-3" title={tx.memo}>
+              <span
+                className="text-[10px] text-ink-3 truncate min-w-0"
+                title={tx.memo}
+              >
                 · {truncateMemo(tx.memo)}
               </span>
             )}
@@ -188,14 +244,52 @@ export function TxRow({
           <Badge variant={tx.successful ? "success" : "error"} live>
             {tx.successful ? "Success" : "Failed"}
           </Badge>
+          {opBadgeText && (
+            <Badge
+              variant="primary"
+              className="text-[10px] px-1.5 py-0.5"
+              data-testid="op-badge"
+            >
+              {opBadgeText}
+            </Badge>
+          )}
           {tx.operationCount > 1 && (
             <Badge variant="default" className="text-[10px] px-1.5 py-0.5">
               {tx.operationCount} ops
             </Badge>
           )}
+          {/* A real <button> would be invalid HTML nested inside the row's
+              own <a> wrapper (when it links to the explorer), so this
+              uses role="button" on a <span> instead, with the same click
+              and keyboard handling a native button gets for free. */}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              navigator.clipboard?.writeText(tx.hash).catch(() => {});
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                navigator.clipboard?.writeText(tx.hash).catch(() => {});
+              }
+            }}
+            className="p-1 rounded hover:bg-surface-2 text-ink-3 hover:text-ink transition-colors cursor-pointer"
+            aria-label={`Copy transaction hash ${truncateAddress(tx.hash, 10, 6)}`}
+            title="Copy transaction hash"
+          >
+            <HugeiconsIcon icon={Copy01Icon} size={12} strokeWidth={1.5} />
+          </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-ink-3">
+          <span
+            className="text-[10px] text-ink-3 cursor-help"
+            title={utcStr}
+            data-testid="tx-timestamp"
+          >
             {dateStr} {timeStr}
           </span>
           <span className="text-[10px] text-ink-3">· {tx.feePaid} stroops</span>
@@ -203,7 +297,7 @@ export function TxRow({
       </div>
     </RowWrapper>
   );
-}
+});
 
 type StatusFilter = "all" | "success" | "failed";
 
@@ -219,33 +313,42 @@ export function TransactionHistory({
   endDate,
   showTrend,
 }: TransactionHistoryProps = {}) {
-  const { address, isConnected, network } = useSorokit();
+  const { address, isConnected, network, client: contextClient } = useSorokit();
+  const client = contextClient ?? getClient();
+  const [prevAddress, setPrevAddress] = useState(address);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [multiOpOnly, setMultiOpOnly] = useState(false);
+  const [memoQuery, setMemoQuery] = useState("");
   const [txs, setTxs] = useState<Transaction[]>([]);
-  const [page, setPage] = useState(() => readStoredPage(address));
+  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-   
-  useEffect(() => {
-    setPage((prev) => {
-      const stored = readStoredPage(address);
-      return prev !== stored ? stored : prev;
-    });
-  }, [address]);
+  // Shared fetch counter to guard against stale responses when rapid address
+  // or page changes occur (e.g., address change triggering a page-reset cycle).
+  // Responses from superseded fetch IDs are discarded regardless of execution order.
+  // See docs/async-race-conditions.md for background on async race conditions.
+  const fetchIdRef = useRef(0);
+
+  if (prevAddress !== address) {
+    setPrevAddress(address);
+    setPage(1);
+    setTotal(0);
+    setTxs([]);
+  }
 
   useEffect(() => {
-    if (!address) return;
+    if (!address || !client) return;
 
-    let active = true;
+    const fetchId = ++fetchIdRef.current;
     const timerId = window.setTimeout(() => {
+      if (fetchId !== fetchIdRef.current) return;
       setLoading(true);
-      getClient()
+      client
         .transaction.getHistory(address, page, PAGE_SIZE)
         .then(({ data, error: err, total: t }) => {
-          if (!active) return;
+          if (fetchId !== fetchIdRef.current) return;
           if (err) {
             setError(err);
             return;
@@ -255,32 +358,36 @@ export function TransactionHistory({
           setError(null);
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (fetchId === fetchIdRef.current) setLoading(false);
         });
     }, 0);
 
+    const activeFetchIdRef = fetchIdRef;
     return () => {
-      active = false;
+      activeFetchIdRef.current++;
       window.clearTimeout(timerId);
     };
-  }, [address, page]);
+  }, [address, client, page]);
 
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 0;
 
   function changePage(nextPage: number) {
     setPage(nextPage);
-    storePage(address, nextPage);
   }
 
-  const filteredTxs = txs.filter((tx) => {
-    if (statusFilter === "success" && !tx.successful) return false;
-    if (statusFilter === "failed" && tx.successful) return false;
-    if (multiOpOnly && tx.operationCount <= 1) return false;
-    if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
-    if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
-      return false;
-    return true;
-  });
+  const filteredTxs = useMemo(() => {
+    const q = memoQuery.trim().toLowerCase();
+    return txs.filter((tx) => {
+      if (statusFilter === "success" && !tx.successful) return false;
+      if (statusFilter === "failed" && tx.successful) return false;
+      if (multiOpOnly && tx.operationCount <= 1) return false;
+      if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
+      if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
+        return false;
+      if (q && !(tx.memo ?? "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [endDate, memoQuery, multiOpOnly, startDate, statusFilter, txs]);
 
   const feeTotal = totalFeeStroops(filteredTxs);
 
@@ -335,11 +442,62 @@ export function TransactionHistory({
           Multi-op
         </button>
       </div>
+      <div className="px-5 py-2.5 border-b border-line">
+        <Input
+          value={memoQuery}
+          onChange={(e) => setMemoQuery(e.target.value)}
+          placeholder="Search by memo…"
+          aria-label="Search transactions by memo"
+          prefix={
+            <HugeiconsIcon
+              icon={Search01Icon}
+              size={14}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          }
+          clearable
+          onClear={() => setMemoQuery("")}
+          clearLabel="Clear memo search"
+          className="h-8 text-[12px]"
+        />
+      </div>
 
       {!isConnected ? (
         <p className="text-[13px] text-ink-3 text-center py-10">
           Connect your wallet to view history
         </p>
+      ) : error && isUnfundedAccountError(error) ? (
+        <div className="flex flex-col items-center px-5 py-10 text-center">
+          <div
+            aria-hidden="true"
+            className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-3"
+          >
+            <HugeiconsIcon
+              icon={GiftIcon}
+              size={18}
+              color="currentColor"
+              strokeWidth={1.5}
+            />
+          </div>
+          <p className="text-[13px] font-medium text-ink">
+            Unfunded account - no transactions yet
+          </p>
+          <p className="text-[12px] text-ink-3 mt-1 max-w-[280px]">
+            This account hasn't been created on the network yet. Fund it with
+            at least the minimum reserve to start transacting.
+          </p>
+          {network?.name === "testnet" && (
+            <a
+              href="https://friendbot.stellar.org"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 text-[12px] font-medium text-brand hover:underline"
+            >
+              Fund with Friendbot →
+            </a>
+          )}
+        </div>
       ) : error ? (
         <p className="text-[13px] text-red text-center py-10">{error}</p>
       ) : loading && txs.length === 0 ? (
