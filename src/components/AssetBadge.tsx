@@ -272,8 +272,11 @@ export function AssetBadge({
           ) : balance.assetIssuer ? (
             // The full issuer key is exposed as a tooltip since only a
             // truncated form fits in the badge.
-            <span data-address className={subSize} title={balance.assetIssuer}>
-            <span data-address className={cn("truncate", subSize)}>
+            <span
+              data-address
+              className={cn("truncate", subSize)}
+              title={balance.assetIssuer}
+            >
               {truncateAddress(balance.assetIssuer, 6, 4)}
             </span>
           ) : null)}

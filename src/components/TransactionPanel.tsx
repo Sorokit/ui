@@ -46,6 +46,16 @@ export const MEMO_TYPES: { value: MemoType; label: string }[] = [
 const MEMO_HASH_HEX_LENGTH = 64;
 const MEMO_HASH_HEX_PATTERN = /^[0-9a-fA-F]{64}$/;
 
+export interface MultiSendRow {
+  id: string;
+  destination: string;
+  amount: string;
+  asset: string;
+  status: "idle" | "submitting" | "success" | "error";
+  error?: string;
+  txHash?: string;
+}
+
 export interface TransactionPanelProps {
   defaultDestination?: string;
   defaultAmount?: string;
@@ -55,6 +65,7 @@ export interface TransactionPanelProps {
   onSuccess?: (result: TxResult) => void;
   onError?: (error: string) => void;
   className?: string;
+  defaultMode?: "single" | "multi";
 }
 
 export function TransactionPanel({
@@ -66,6 +77,7 @@ export function TransactionPanel({
   onSuccess,
   onError,
   className,
+  defaultMode = "single",
 }: TransactionPanelProps = {}) {
   const {
     address,
@@ -91,7 +103,47 @@ export function TransactionPanel({
   const [estimatedFeeXlm, setEstimatedFeeXlm] = useState(0);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isSubmittingRef = useRef(false);
+  const isBatchSubmittingRef = useRef(false);
   const formId = useId();
+
+  const [mode, setMode] = useState<"single" | "multi">(defaultMode);
+  const [multiRows, setMultiRows] = useState<MultiSendRow[]>([
+    { id: "row-1", destination: "", amount: "", asset: "XLM", status: "idle" },
+    { id: "row-2", destination: "", amount: "", asset: "XLM", status: "idle" },
+  ]);
+  const [isBatchSubmitting, setIsBatchSubmitting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{
+    current: number;
+    total: number;
+    successful: number;
+    failed: number;
+  } | null>(null);
+  const [batchCompleted, setBatchCompleted] = useState(false);
+
+  // Cancel and reset in-flight transaction or batch if the network switches mid-transaction (#1166)
+  const prevNetworkRef = useRef(network?.name);
+  useEffect(() => {
+    if (prevNetworkRef.current && network?.name && prevNetworkRef.current !== network.name) {
+      if (
+        isSubmittingRef.current ||
+        state === "loading" ||
+        isBatchSubmittingRef.current ||
+        isBatchSubmitting ||
+        preview !== null
+      ) {
+        abortControllerRef.current?.abort();
+        isSubmittingRef.current = false;
+        isBatchSubmittingRef.current = false;
+        setIsBatchSubmitting(false);
+        setState("error");
+        setError("Transaction cancelled due to network switch");
+        setPreview(null);
+        setBatchProgress(null);
+        setBatchCompleted(false);
+      }
+    }
+    prevNetworkRef.current = network?.name;
+  }, [network?.name, state, isBatchSubmitting, preview]);
 
   // Fetch the current network fee estimate once a wallet is connected so the
   // balance check below can warn the user before they submit, rather than
@@ -168,6 +220,170 @@ export function TransactionPanel({
     isMemoIdValid &&
     isMemoHashValid;
 
+  function addMultiRow() {
+    setMultiRows((prev) => [
+      ...prev,
+      {
+        id: `row-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        destination: "",
+        amount: "",
+        asset: selectedAsset,
+        status: "idle",
+      },
+    ]);
+  }
+
+  function removeMultiRow(id: string) {
+    if (multiRows.length <= 1) return;
+    setMultiRows((prev) => prev.filter((r) => r.id !== id));
+  }
+
+  function updateMultiRow(id: string, updates: Partial<MultiSendRow>) {
+    setMultiRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, ...updates } : r)),
+    );
+  }
+
+  function resetMultiSend() {
+    setMultiRows([
+      { id: "row-1", destination: "", amount: "", asset: "XLM", status: "idle" },
+      { id: "row-2", destination: "", amount: "", asset: "XLM", status: "idle" },
+    ]);
+    setBatchProgress(null);
+    setBatchCompleted(false);
+    setIsBatchSubmitting(false);
+  }
+
+  const isMultiValid =
+    multiRows.length > 0 &&
+    multiRows.every((r) => {
+      const destValid = validateStellarAddress(r.destination.trim());
+      const parsed = parseFloat(r.amount);
+      const amountValid = !isNaN(parsed) && parsed > 0;
+      return destValid && amountValid;
+    });
+
+  const hasFailedRows = multiRows.some((r) => r.status === "error");
+
+  async function handleBatchSubmit(onlyFailed = false) {
+    if (isBatchSubmitting || isBatchSubmittingRef.current || !address || !client) return;
+
+    const targetRows = onlyFailed
+      ? multiRows.filter((r) => r.status === "error")
+      : multiRows;
+    if (targetRows.length === 0) return;
+
+    setIsBatchSubmitting(true);
+    isBatchSubmittingRef.current = true;
+    setBatchCompleted(false);
+
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
+    let successfulCount = onlyFailed
+      ? multiRows.filter((r) => r.status === "success").length
+      : 0;
+    let failedCount = 0;
+    const totalCount = onlyFailed ? targetRows.length : multiRows.length;
+
+    setBatchProgress({
+      current: 0,
+      total: totalCount,
+      successful: successfulCount,
+      failed: 0,
+    });
+
+    for (let i = 0; i < targetRows.length; i++) {
+      if (signal.aborted) break;
+      const row = targetRows[i];
+
+      setBatchProgress({
+        current: i + 1,
+        total: totalCount,
+        successful: successfulCount,
+        failed: failedCount,
+      });
+
+      setMultiRows((prev) =>
+        prev.map((r) =>
+          r.id === row.id ? { ...r, status: "submitting", error: undefined } : r,
+        ),
+      );
+
+      try {
+        const rowAssetBalance = assetOptions.find((b) => b.asset === row.asset);
+        const submitPromise = client.transaction.submit({
+          source: address,
+          destination: row.destination.trim(),
+          amount: row.amount.trim(),
+          asset: row.asset,
+          assetIssuer: rowAssetBalance?.assetIssuer,
+          memoType: "none",
+        });
+
+        const abortPromise = new Promise<{
+          data: TxResult | null;
+          error: string | null;
+        }>((resolve) => {
+          signal.addEventListener("abort", () => {
+            resolve({ data: null, error: "Transaction aborted" });
+          });
+        });
+
+        const { data, error: err } = await Promise.race([
+          submitPromise,
+          abortPromise,
+        ]);
+
+        if (signal.aborted) break;
+
+        if (err || (data && data.successful === false)) {
+          failedCount++;
+          const message = friendlyError(err ?? "Transaction failed");
+          setMultiRows((prev) =>
+            prev.map((r) =>
+              r.id === row.id ? { ...r, status: "error", error: message } : r,
+            ),
+          );
+        } else {
+          successfulCount++;
+          setMultiRows((prev) =>
+            prev.map((r) =>
+              r.id === row.id
+                ? { ...r, status: "success", txHash: data?.hash }
+                : r,
+            ),
+          );
+        }
+      } catch (e) {
+        if (signal.aborted) break;
+        failedCount++;
+        const message = friendlyError(
+          e instanceof Error ? e.message : "Submission error",
+        );
+        setMultiRows((prev) =>
+          prev.map((r) =>
+            r.id === row.id ? { ...r, status: "error", error: message } : r,
+          ),
+        );
+      }
+
+      setBatchProgress({
+        current: i + 1,
+        total: totalCount,
+        successful: successfulCount,
+        failed: failedCount,
+      });
+    }
+
+    isBatchSubmittingRef.current = false;
+    setIsBatchSubmitting(false);
+    if (!signal.aborted) {
+      setBatchCompleted(true);
+    }
+  }
+
   /** The actual submission — only ever called from the confirm modal. */
   async function submitTransaction() {
     if (state === "loading" || isSubmittingRef.current) return;
@@ -187,7 +403,7 @@ export function TransactionPanel({
     setError(null);
     setResult(null);
     try {
-      const { data, error: err } = await client.transaction.submit({
+      const submitPromise = client.transaction.submit({
         source: address,
         destination: dest.trim(),
         amount: amount.trim(),
@@ -197,6 +413,20 @@ export function TransactionPanel({
         memo:
           memoType !== "none" && memo.trim() !== "" ? memo.trim() : undefined,
       });
+
+      const abortPromise = new Promise<{
+        data: TxResult | null;
+        error: string | null;
+      }>((resolve) => {
+        signal.addEventListener("abort", () => {
+          resolve({ data: null, error: "Transaction aborted" });
+        });
+      });
+
+      const { data, error: err } = await Promise.race([
+        submitPromise,
+        abortPromise,
+      ]);
       if (signal.aborted) return;
       if (err) {
         const message = friendlyError(err);
@@ -279,19 +509,69 @@ export function TransactionPanel({
         className,
       )}
     >
-      <div className="px-5 py-4 border-b border-line">
-        <h3 className="text-[14px] font-semibold text-ink">Send Payment</h3>
-        <p className="text-[12px] text-ink-3 mt-0.5">
-          Submit a payment on the Stellar network
-        </p>
+      <div className="px-5 py-4 border-b border-line flex items-center justify-between">
+        <div>
+          <h3 className="text-[14px] font-semibold text-ink">Send Payment</h3>
+          <p className="text-[12px] text-ink-3 mt-0.5">
+            Submit a payment on the Stellar network
+          </p>
+        </div>
+        <div
+          className="flex items-center gap-1 bg-surface-2 p-1 rounded-lg border border-line text-[12px]"
+          role="tablist"
+          aria-label="Payment Mode"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "single"}
+            onClick={() => setMode("single")}
+            className={cn(
+              "px-3 py-1 rounded-md font-medium transition-colors",
+              mode === "single"
+                ? "bg-surface text-ink shadow-xs"
+                : "text-ink-3 hover:text-ink",
+            )}
+            data-testid="tab-single"
+          >
+            Single
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "multi"}
+            onClick={() => setMode("multi")}
+            className={cn(
+              "px-3 py-1 rounded-md font-medium transition-colors",
+              mode === "multi"
+                ? "bg-surface text-ink shadow-xs"
+                : "text-ink-3 hover:text-ink",
+            )}
+            data-testid="tab-multi-send"
+          >
+            Multi-Send
+          </button>
+        </div>
       </div>
 
       <div className="px-6 py-6">
-        {!isConnected ? (
-          <div className="flex flex-col items-center gap-3 py-8">
-            <p className="text-[13px] text-ink-3">
-              Connect your wallet to send transactions
-            </p>
+        {state === "error" ? (
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-full bg-error-dim flex items-center justify-center shrink-0 mt-0.5">
+              <HugeiconsIcon
+                icon={AlertCircleIcon}
+                size={18}
+                color="currentColor"
+                strokeWidth={1.5}
+                className="text-red"
+              />
+            </div>
+            <div>
+              <p className="text-[14px] font-semibold text-ink">
+                Transaction failed
+              </p>
+              <p className="text-[13px] text-red mt-1">{error}</p>
+            </div>
           </div>
         ) : state === "success" && result ? (
           <div className="flex flex-col gap-4">
@@ -354,22 +634,262 @@ export function TransactionPanel({
             </div>
             <TransactionStatusTracker hash={result.hash} className="mt-2" />
           </div>
-        ) : state === "error" ? (
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-full bg-error-dim flex items-center justify-center shrink-0 mt-0.5">
-              <HugeiconsIcon
-                icon={AlertCircleIcon}
-                size={18}
-                color="currentColor"
-                strokeWidth={1.5}
-                className="text-red"
-              />
+        ) : !isConnected ? (
+          <div className="flex flex-col items-center gap-3 py-8">
+            <p className="text-[13px] text-ink-3">
+              Connect your wallet to send transactions
+            </p>
+          </div>
+        ) : mode === "multi" ? (
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[13px] font-medium text-ink">
+                  Multi-Recipient Payments
+                </p>
+                <p className="text-[11px] text-ink-3">
+                  Send different amounts to multiple recipients in one action
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={addMultiRow}
+                disabled={isBatchSubmitting}
+                data-testid="add-recipient-row"
+              >
+                + Add Recipient
+              </Button>
             </div>
-            <div>
-              <p className="text-[14px] font-semibold text-ink">
-                Transaction failed
-              </p>
-              <p className="text-[13px] text-red mt-1">{error}</p>
+
+            {/* Batch progress bar */}
+            {batchProgress && (
+              <div
+                className="rounded-lg border border-line bg-surface-2 p-3 flex flex-col gap-2"
+                data-testid="batch-progress-container"
+              >
+                <div className="flex items-center justify-between text-[12px]">
+                  <span className="font-medium text-ink">
+                    {isBatchSubmitting
+                      ? `Processing batch: ${batchProgress.current} of ${batchProgress.total} completed`
+                      : batchCompleted
+                        ? `Batch finished: ${batchProgress.successful} succeeded, ${batchProgress.failed} failed`
+                        : "Batch progress"}
+                  </span>
+                  <span className="text-ink-3">
+                    {batchProgress.total > 0
+                      ? `${Math.round((batchProgress.current / batchProgress.total) * 100)}%`
+                      : "0%"}
+                  </span>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-valuenow={
+                    batchProgress.total > 0
+                      ? Math.round((batchProgress.current / batchProgress.total) * 100)
+                      : 0
+                  }
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className="h-2 w-full rounded-full bg-surface overflow-hidden border border-line"
+                >
+                  <div
+                    className="h-full bg-brand transition-all duration-300"
+                    style={{
+                      width: `${
+                        batchProgress.total > 0
+                          ? Math.round((batchProgress.current / batchProgress.total) * 100)
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Partial failure alert */}
+            {batchCompleted && batchProgress && batchProgress.failed > 0 && (
+              <div
+                role="alert"
+                className="rounded-lg border border-error-dim-strong bg-error-dim p-3 flex items-start gap-2.5"
+                data-testid="batch-partial-failure-alert"
+              >
+                <HugeiconsIcon
+                  icon={AlertCircleIcon}
+                  size={16}
+                  className="text-red shrink-0 mt-0.5"
+                />
+                <div className="flex flex-col gap-1 text-[12px]">
+                  <span className="font-medium text-red">
+                    Partial Batch Failure
+                  </span>
+                  <span className="text-red">
+                    {batchProgress.successful} payment(s) succeeded, but {batchProgress.failed} failed.
+                    Review the failed rows below and retry.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Batch all success alert */}
+            {batchCompleted && batchProgress && batchProgress.failed === 0 && (
+              <div
+                role="status"
+                className="rounded-lg border border-success-dim-strong bg-success-dim p-3 flex items-start gap-2.5"
+                data-testid="batch-all-success-alert"
+              >
+                <HugeiconsIcon
+                  icon={CheckmarkCircle01Icon}
+                  size={16}
+                  className="text-green shrink-0 mt-0.5"
+                />
+                <div className="flex flex-col gap-1 text-[12px]">
+                  <span className="font-medium text-ink">
+                    All Payments Sent
+                  </span>
+                  <span className="text-ink-2">
+                    All {batchProgress.successful} transactions submitted successfully.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Multi-row entry table */}
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full text-left text-[12px]" data-testid="multi-send-table">
+                <thead className="bg-surface-2 border-b border-line text-ink-3">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">#</th>
+                    <th className="px-3 py-2 font-medium">Recipient Address</th>
+                    <th className="px-3 py-2 font-medium">Amount</th>
+                    <th className="px-3 py-2 font-medium">Asset</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 font-medium text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {multiRows.map((row, index) => {
+                    const isRowDestValid =
+                      !row.destination || validateStellarAddress(row.destination.trim());
+                    const parsedAmt = parseFloat(row.amount);
+                    const isRowAmtValid =
+                      !row.amount || (!isNaN(parsedAmt) && parsedAmt > 0);
+
+                    return (
+                      <tr key={row.id} className="hover:bg-surface-2/40">
+                        <td className="px-3 py-2 text-ink-3">{index + 1}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={row.destination}
+                            onChange={(e) =>
+                              updateMultiRow(row.id, { destination: e.target.value })
+                            }
+                            disabled={isBatchSubmitting}
+                            placeholder="G..."
+                            aria-label={`Recipient ${index + 1} Destination`}
+                            data-testid={`multi-send-dest-${index}`}
+                            className={cn(
+                              "w-48 sm:w-60 h-8 rounded border px-2 text-[12px] bg-surface outline-none",
+                              !isRowDestValid
+                                ? "border-red text-red focus:border-red"
+                                : "border-line focus:border-brand",
+                            )}
+                          />
+                          {!isRowDestValid && row.destination && (
+                            <p className="text-[10px] text-red mt-0.5">
+                              Invalid Stellar address
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            step="0.0000001"
+                            min="0.0000001"
+                            value={row.amount}
+                            onChange={(e) =>
+                              updateMultiRow(row.id, { amount: e.target.value })
+                            }
+                            disabled={isBatchSubmitting}
+                            placeholder="0.00"
+                            aria-label={`Recipient ${index + 1} Amount`}
+                            data-testid={`multi-send-amount-${index}`}
+                            className={cn(
+                              "w-24 h-8 rounded border px-2 text-[12px] bg-surface outline-none",
+                              !isRowAmtValid
+                                ? "border-red text-red focus:border-red"
+                                : "border-line focus:border-brand",
+                            )}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select
+                            value={row.asset}
+                            onChange={(e) =>
+                              updateMultiRow(row.id, { asset: e.target.value })
+                            }
+                            disabled={isBatchSubmitting || assetOptions.length === 0}
+                            aria-label={`Recipient ${index + 1} Asset`}
+                            data-testid={`multi-send-asset-${index}`}
+                            className="h-8 rounded border border-line px-2 text-[12px] bg-surface outline-none focus:border-brand"
+                          >
+                            {assetOptions.length === 0 ? (
+                              <option value="XLM">XLM</option>
+                            ) : (
+                              assetOptions.map((b) => (
+                                <option key={b.asset} value={b.asset}>
+                                  {b.asset}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          {row.status === "submitting" ? (
+                            <Badge variant="warning" dot>
+                              Sending…
+                            </Badge>
+                          ) : row.status === "success" ? (
+                            <Badge variant="success" dot>
+                              Sent
+                            </Badge>
+                          ) : row.status === "error" ? (
+                            <div className="flex flex-col gap-0.5">
+                              <Badge variant="error" dot>
+                                Failed
+                              </Badge>
+                              {row.error && (
+                                <span
+                                  className="text-[10px] text-red max-w-[140px] truncate"
+                                  title={row.error}
+                                >
+                                  {row.error}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-ink-3">Idle</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => removeMultiRow(row.id)}
+                            disabled={multiRows.length <= 1 || isBatchSubmitting}
+                            aria-label={`Remove recipient ${index + 1}`}
+                            data-testid={`multi-send-remove-${index}`}
+                            className="text-ink-4 hover:text-red disabled:opacity-30 disabled:cursor-not-allowed p-1"
+                          >
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         ) : (
@@ -536,7 +1056,46 @@ export function TransactionPanel({
       </div>
 
       <div className="px-5 py-4 border-t border-line flex items-center gap-3">
-        {state === "success" || state === "error" ? (
+        {mode === "multi" ? (
+          <div className="flex flex-wrap items-center gap-3 w-full">
+            <Button
+              type="button"
+              size="md"
+              loading={isBatchSubmitting}
+              disabled={!isConnected || !isMultiValid || isBatchSubmitting}
+              onClick={() => void handleBatchSubmit(false)}
+              data-testid="submit-batch"
+            >
+              {isBatchSubmitting
+                ? "Sending Batch…"
+                : `Send Batch (${multiRows.length} Payments)`}
+            </Button>
+            {hasFailedRows && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                disabled={isBatchSubmitting}
+                onClick={() => void handleBatchSubmit(true)}
+                data-testid="retry-failed-batch"
+              >
+                Retry Failed
+              </Button>
+            )}
+            {(batchCompleted || hasFailedRows) && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="md"
+                disabled={isBatchSubmitting}
+                onClick={resetMultiSend}
+                data-testid="reset-batch"
+              >
+                Reset
+              </Button>
+            )}
+          </div>
+        ) : state === "success" || state === "error" ? (
           <Button
             variant="secondary"
             size="sm"
