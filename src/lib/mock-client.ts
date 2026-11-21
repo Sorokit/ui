@@ -16,6 +16,8 @@ import type {
   SorokitClient,
   TimelineGroup,
   TimelineParams,
+  Transaction,
+  TransactionParams,
   TxResult,
   TxStatus,
 } from "./client";
@@ -258,6 +260,7 @@ export function createMockClient(
     networkName && networkName in NETWORKS ? networkName : "testnet";
   const connectedAddress = MOCK_ADDRESS;
   const batchProgressState = new Map<string, number>();
+  const submittedTxs: Transaction[] = [];
 
   if (networkName && !(networkName in NETWORKS)) {
     const validNetworks = Object.keys(NETWORKS).join(", ");
@@ -283,7 +286,14 @@ export function createMockClient(
         error: null,
         status: "success" as const,
       }),
-      getBalances: async () => ({ data: MOCK_BALANCES, error: null }),
+      getBalances: async () => ({
+        data:
+          typeof window !== "undefined" &&
+          (window as unknown as { __MOCK_BALANCES__?: Balance[] }).__MOCK_BALANCES__
+            ? (window as unknown as { __MOCK_BALANCES__: Balance[] }).__MOCK_BALANCES__!
+            : MOCK_BALANCES,
+        error: null,
+      }),
       getClaimableBalances: async () => ({ data: [], error: null }),
       claimBalance: async (
         balanceId: string,
@@ -302,15 +312,29 @@ export function createMockClient(
       },
     },
     transaction: {
-      submit: async () => ({
-        data: {
-          hash: deterministicMock.generateTransactionHash(),
-          ledger: 12345,
-          successful: true,
-        },
-        error: null,
-        status: "success" as const,
-      }),
+      submit: async (tx?: TransactionParams) => {
+        const hash = deterministicMock.generateTransactionHash();
+        if (tx) {
+          submittedTxs.unshift({
+            hash,
+            ledger: 12345,
+            createdAt: new Date().toISOString(),
+            successful: true,
+            memo: tx.memo || (tx.asset ? `${tx.amount} ${tx.asset}` : undefined),
+            operationCount: 1,
+            feePaid: "100",
+          });
+        }
+        return {
+          data: {
+            hash,
+            ledger: 12345,
+            successful: true,
+          },
+          error: null,
+          status: "success" as const,
+        };
+      },
       getStatus: async () => ({ data: "success" as TxStatus, error: null }),
       getHistory: async (
         _address: string,
@@ -318,12 +342,13 @@ export function createMockClient(
         limit?: number,
       ) => {
         const safePage = Math.max(1, page || 1);
+        const all = [...submittedTxs, ...MOCK_HISTORY];
         const pageSize =
-          limit !== undefined && limit > 0 ? limit : MOCK_HISTORY.length;
-        const total = MOCK_HISTORY.length;
+          limit !== undefined && limit > 0 ? limit : all.length;
+        const total = all.length;
         const start = (safePage - 1) * pageSize;
         const end = start + pageSize;
-        const history = MOCK_HISTORY.slice(start, end);
+        const history = all.slice(start, end);
         return { data: history, error: null, total };
       },
       estimateFee: async () => ({
