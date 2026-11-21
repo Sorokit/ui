@@ -129,8 +129,37 @@ export type {
   TransactionHistoryTableProps,
 } from "./TransactionHistoryTable";
 export { TransactionHistoryTable } from "./TransactionHistoryTable";
-export { TransactionPanel } from "./TransactionPanel";
+export type {
+  ScheduledTransaction,
+  TransactionTemplate,
+} from "./TransactionPanel";
+export {
+  loadScheduledTransactions,
+  loadTemplates,
+  saveScheduledTransactions,
+  saveTemplates,
+  SCHEDULED_TX_STORAGE_KEY,
+  TEMPLATES_STORAGE_KEY,
+  TransactionPanel,
+} from "./TransactionPanel";
 export { TransactionStatusTracker } from "./TransactionStatusTracker";
+
+// Price Alerts
+export type {
+  AlertCondition,
+  PriceAlert,
+  PriceAlertHistoryItem,
+  PriceAlertManagerProps,
+} from "./PriceAlertManager";
+export {
+  loadPriceAlertHistory,
+  loadPriceAlerts,
+  PRICE_ALERT_HISTORY_STORAGE_KEY,
+  PRICE_ALERTS_STORAGE_KEY,
+  PriceAlertManager,
+  savePriceAlertHistory,
+  savePriceAlerts,
+} from "./PriceAlertManager";
 
 // Soroban
 export { ContractEventFeed } from "./ContractEventFeed";
@@ -276,9 +305,19 @@ export { GovernanceDashboard } from "./GovernanceDashboard";
 // Account Balance Chart
 export { AccountBalanceChart } from "./AccountBalanceChart";
 
+// TopBar & Notification Center
+export type { TopBarProps } from "./TopBar";
+export { TopBar } from "./TopBar";
+
 // Providers and hooks
 export { SorokitProvider } from "../context/SorokitProvider";
 export { useSorokit } from "../context/useSorokit";
+export type { PendingActionItem } from "../hooks/usePendingActions";
+export {
+  loadStoredPendingActions,
+  saveStoredPendingActions,
+  usePendingActions,
+} from "../hooks/usePendingActions";
 
 // Types
 export type { Toast, ToastType } from "../context/ToastContext";
