@@ -167,14 +167,14 @@ describe("WalletConnectModal", () => {
 
   // ── Extension Detection, Focus Trap, Mobile Deep Links (#692) ───────────
   describe("Extension Detection, Focus Trap & Mobile Deep Links", () => {
-    it("detects installed extensions and renders Installed badges", () => {
+    it("detects installed extensions and renders Installed badges", async () => {
       // Mock window.freighter as installed
       (window as unknown as { freighter: object }).freighter = {};
 
       vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const installedBadges = screen.getAllByTestId("installed-badge");
+      const installedBadges = await screen.findAllByTestId("installed-badge");
       expect(installedBadges.length).toBeGreaterThan(0);
       expect(installedBadges[0]).toHaveTextContent("Installed");
 
@@ -204,7 +204,7 @@ describe("WalletConnectModal", () => {
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
 
-    it("displays deep link options when on a mobile device user agent", () => {
+    it("displays deep link options when on a mobile device user agent", async () => {
       const originalUserAgent = navigator.userAgent;
       Object.defineProperty(navigator, "userAgent", {
         value: "Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X)",
@@ -214,7 +214,7 @@ describe("WalletConnectModal", () => {
       vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
       render(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      const deepLinkBadges = screen.getAllByTestId("mobile-deep-link-option");
+      const deepLinkBadges = await screen.findAllByTestId("mobile-deep-link-option");
       expect(deepLinkBadges.length).toBeGreaterThan(0);
 
       Object.defineProperty(navigator, "userAgent", {
