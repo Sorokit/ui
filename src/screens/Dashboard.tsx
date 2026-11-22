@@ -12,6 +12,7 @@ import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { RateLimitIndicator } from "@/components/RateLimitIndicator";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PAGE_TITLES } from "@/lib/nav-labels";
@@ -208,6 +209,7 @@ export function Dashboard({
           sidebarOpen={sidebarOpen}
         />
         <NetworkBanner active={active} />
+        <RateLimitIndicator />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div
             className="mx-auto px-6 py-8 sm:px-10 sm:py-10 min-h-[300px]"
