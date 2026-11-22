@@ -1347,6 +1347,161 @@ describe("TransactionPanel", () => {
     });
   });
 
+  // ── Multi-Send feature (#1147) ──────────────────────────────────────────
+  describe("Multi-Send feature (#1147)", () => {
+    it("switches to Multi-Send mode when the tab is clicked", () => {
+      render(<TransactionPanel />);
+      expect(screen.queryByTestId("multi-send-table")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("tab-multi-send"));
+      expect(screen.getByTestId("multi-send-table")).toBeInTheDocument();
+      expect(screen.getByText("Multi-Recipient Payments")).toBeInTheDocument();
+    });
+
+    it("allows adding and removing recipient rows", () => {
+      render(<TransactionPanel defaultMode="multi" />);
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(2);
+
+      fireEvent.click(screen.getByTestId("add-recipient-row"));
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(3);
+
+      fireEvent.click(screen.getByTestId("multi-send-remove-2"));
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(2);
+    });
+
+    it("executes batch submit and tracks progress across multiple recipients", async () => {
+      const mockSubmit = vi.fn().mockResolvedValue({
+        data: { hash: "batch-tx-hash", ledger: 101, successful: true },
+        error: null,
+      });
+      mockGetClient(mockSubmit);
+
+      render(<TransactionPanel defaultMode="multi" />);
+
+      const destInputs = screen.getAllByPlaceholderText("G...");
+      const amountInputs = screen.getAllByPlaceholderText("0.00");
+
+      fireEvent.change(destInputs[0], { target: { value: VALID_DEST } });
+      fireEvent.change(amountInputs[0], { target: { value: "10" } });
+
+      const secondDest = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+      fireEvent.change(destInputs[1], { target: { value: secondDest } });
+      fireEvent.change(amountInputs[1], { target: { value: "20" } });
+
+      const submitBtn = screen.getByTestId("submit-batch");
+      expect(submitBtn).not.toBeDisabled();
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalledTimes(2);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("batch-all-success-alert")).toBeInTheDocument();
+        expect(screen.getAllByText("Sent").length).toBe(2);
+      });
+    });
+
+    it("handles partial failure gracefully and allows retrying failed rows", async () => {
+      let callCount = 0;
+      const mockSubmit = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 2) {
+          return Promise.resolve({
+            data: null,
+            error: "Destination account does not exist",
+          });
+        }
+        return Promise.resolve({
+          data: { hash: `batch-tx-${callCount}`, ledger: 102, successful: true },
+          error: null,
+        });
+      });
+      mockGetClient(mockSubmit);
+
+      render(<TransactionPanel defaultMode="multi" />);
+
+      const destInputs = screen.getAllByPlaceholderText("G...");
+      const amountInputs = screen.getAllByPlaceholderText("0.00");
+
+      fireEvent.change(destInputs[0], { target: { value: VALID_DEST } });
+      fireEvent.change(amountInputs[0], { target: { value: "5" } });
+
+      const secondDest = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+      fireEvent.change(destInputs[1], { target: { value: secondDest } });
+      fireEvent.change(amountInputs[1], { target: { value: "15" } });
+
+      fireEvent.click(screen.getByTestId("submit-batch"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("batch-partial-failure-alert")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("Sent")).toBeInTheDocument();
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+
+      // Retry failed batch button appears
+      const retryBtn = screen.getByTestId("retry-failed-batch");
+      expect(retryBtn).toBeInTheDocument();
+
+      // Now make second submission succeed on retry
+      mockSubmit.mockResolvedValueOnce({
+        data: { hash: "batch-tx-retry", ledger: 103, successful: true },
+        error: null,
+      });
+
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalledTimes(3);
+      });
+    });
+  });
+
+  // ── Network switch mid-transaction (#1166) ──────────────────────────────
+  describe("network switch mid-transaction (#1166)", () => {
+    it("cancels and resets in-flight transaction when network switches", async () => {
+      let resolveSubmit: (val: unknown) => void;
+      const pendingSubmit = new Promise((resolve) => {
+        resolveSubmit = resolve;
+      });
+      const mockSubmit = vi.fn().mockReturnValue(pendingSubmit);
+      mockGetClient(mockSubmit);
+
+      const sorokitMock = {
+        address: "GABC",
+        isConnected: true,
+        network: { name: "testnet", passphrase: "test", rpcUrl: "x", horizonUrl: "x" },
+        balances: [{ asset: "XLM", balance: "100" }],
+        client: getClient(),
+      };
+      vi.mocked(useSorokit).mockReturnValue(sorokitMock as unknown as ReturnType<typeof useSorokit>);
+
+      const { rerender } = render(<TransactionPanel previewMode={false} />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+
+      expect(screen.getByText("Submitting…")).toBeInTheDocument();
+
+      // Mid-transaction, network switches to mainnet
+      vi.mocked(useSorokit).mockReturnValue({
+        ...sorokitMock,
+        network: { name: "mainnet", passphrase: "pub", rpcUrl: "y", horizonUrl: "y" },
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      rerender(<TransactionPanel previewMode={false} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Transaction cancelled due to network switch/i)).toBeInTheDocument();
+      });
+
+      // Transaction state reset: submit button is back and no longer in Submitting... state
+      expect(screen.queryByText("Submitting…")).not.toBeInTheDocument();
+      resolveSubmit!({ data: { hash: "late-hash" }, error: null });
   describe("Transaction Templates (#1146)", () => {
     beforeEach(() => {
       localStorage.clear();
