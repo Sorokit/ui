@@ -186,7 +186,11 @@ export function SorobanPanel({
   // them against the wrong signature.
   function handleMethodChange(raw: string) {
     const next = raw.slice(0, 64);
-    if (next !== method && abiMethods.includes(method) && abiMethods.includes(next)) {
+    if (
+      next !== method &&
+      abiMethods.some((m) => m.name === method) &&
+      abiMethods.some((m) => m.name === next)
+    ) {
       setArgs("");
     }
     setMethod(next);
