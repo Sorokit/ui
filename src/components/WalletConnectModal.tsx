@@ -109,11 +109,27 @@ export function isWalletExtensionInstalled(walletId: string): boolean {
   return Boolean(win[id] || win[walletId]);
 }
 
-/** Check whether user is browsing on a mobile device. */
+/**
+ * Check whether user is browsing on a mobile device.
+ *
+ * iPadOS 13+ Safari reports a desktop (Macintosh) user agent, so a UA check
+ * alone misses it. `navigator.maxTouchPoints > 1` is the primary heuristic;
+ * desktop-class UAs that are commonly touch-enabled (Windows/ChromeOS/X11
+ * laptops) are excluded so they aren't misclassified. The UA string remains
+ * the fallback for everything else.
+ */
 export function isMobileEnvironment(): boolean {
   if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  if (
+    typeof navigator.maxTouchPoints === "number" &&
+    navigator.maxTouchPoints > 1 &&
+    !/Windows NT|CrOS|X11/i.test(ua)
+  ) {
+    return true;
+  }
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent,
+    ua,
   );
 }
 
@@ -141,7 +157,34 @@ export function WalletConnectModal({
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
   const walletButtonsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const isMobile = isMobileEnvironment();
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    isMobileEnvironment(),
+  );
+  // Extension detection runs when the modal opens (not during render), so a
+  // wallet that injects itself after the React tree mounted is still picked up.
+  const [installedWallets, setInstalledWallets] = useState<
+    Record<string, boolean>
+  >({});
+
+  useEffect(() => {
+    if (!open) return;
+    const detect = () => {
+      const next: Record<string, boolean> = {};
+      for (const wallet of walletOptions) {
+        next[wallet.id] = isWalletExtensionInstalled(wallet.id);
+      }
+      setInstalledWallets(next);
+      setIsMobile(isMobileEnvironment());
+    };
+    // Deferred like the effect below to avoid setState within the effect body.
+    const timerId = window.setTimeout(detect, 0);
+    // Slow browsers can finish injecting extensions shortly after open.
+    const recheckId = window.setTimeout(detect, 1000);
+    return () => {
+      window.clearTimeout(timerId);
+      window.clearTimeout(recheckId);
+    };
+  }, [open, walletOptions]);
 
   // Advance out of "connecting" once useSorokit settles. Deferred via
   // setTimeout(0), same pattern SorokitProvider uses for its own effects —
@@ -275,7 +318,7 @@ export function WalletConnectModal({
               onKeyDown={handleKeyDown}
             >
               {walletOptions.map((wallet, index) => {
-                const installed = isWalletExtensionInstalled(wallet.id);
+                const installed = installedWallets[wallet.id] === true;
                 const isFocused = focusedIndex === index;
                 return (
                   <button
