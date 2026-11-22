@@ -21,9 +21,13 @@ import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
 import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
+import { matchesTransactionSearch } from "@/lib/transaction-search";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
+// Search scans the full history, fetched in larger pages up to a hard cap.
+const SEARCH_PAGE_SIZE = 100;
+const MAX_SEARCH_PAGES = 10;
 const MEMO_TRUNCATE_LENGTH = 20;
 const STROOPS_PER_XLM = 10_000_000;
 const TREND_DAYS = 7;
@@ -336,6 +340,12 @@ export function TransactionHistory({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [multiOpOnly, setMultiOpOnly] = useState(false);
   const [memoQuery, setMemoQuery] = useState("");
+  // #1159 - search date range (in addition to the optional startDate/endDate
+  // props) and the full history used as the search pool.
+  const [searchFrom, setSearchFrom] = useState("");
+  const [searchTo, setSearchTo] = useState("");
+  const [allTxs, setAllTxs] = useState<Transaction[] | null>(null);
+  const [searchingAll, setSearchingAll] = useState(false);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -358,6 +368,7 @@ export function TransactionHistory({
     setTotal(0);
     setTxs([]);
     setIsCached(false);
+    setAllTxs(null);
   }
 
   useEffect(() => {
@@ -427,6 +438,55 @@ export function TransactionHistory({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, client, page, isOnline]);
 
+  const searchActive =
+    memoQuery.trim() !== "" || searchFrom !== "" || searchTo !== "";
+
+  // #1159 - a search must cover *all* history, not just the 10 rows on screen.
+  // Matching starts instantly against the current page; once the full history
+  // has loaded in the background the results widen to include it.
+  useEffect(() => {
+    if (!searchActive) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAllTxs((prev) => (prev ? null : prev));
+      return;
+    }
+    if (!address || !client || allTxs) return;
+
+    let cancelled = false;
+    void (async () => {
+      setSearchingAll(true);
+      const collected: Transaction[] = [];
+      for (let p = 1; p <= MAX_SEARCH_PAGES; p++) {
+        const res = await client.transaction.getHistory(
+          address,
+          p,
+          SEARCH_PAGE_SIZE,
+        );
+        if (cancelled) return;
+        if (res.error || !res.data) break;
+        collected.push(...res.data);
+        if (
+          res.data.length < SEARCH_PAGE_SIZE ||
+          (res.total > 0 && collected.length >= res.total)
+        ) {
+          break;
+        }
+      }
+      if (cancelled) return;
+      if (collected.length) {
+        const seen = new Set<string>();
+        setAllTxs(collected.filter((t) => !seen.has(t.hash) && seen.add(t.hash)));
+      }
+      setSearchingAll(false);
+    })().catch(() => {
+      if (!cancelled) setSearchingAll(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchActive, address, client, allTxs]);
+
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 0;
 
   function changePage(nextPage: number) {
@@ -434,18 +494,38 @@ export function TransactionHistory({
   }
 
   const filteredTxs = useMemo(() => {
-    const q = memoQuery.trim().toLowerCase();
-    return txs.filter((tx) => {
+    const pool = searchActive && allTxs ? allTxs : txs;
+    return pool.filter((tx) => {
       if (statusFilter === "success" && !tx.successful) return false;
       if (statusFilter === "failed" && tx.successful) return false;
       if (multiOpOnly && tx.operationCount <= 1) return false;
       if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
       if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
         return false;
-      if (q && !(tx.memo ?? "").toLowerCase().includes(q)) return false;
+      if (
+        !matchesTransactionSearch(tx, {
+          query: memoQuery,
+          dateFrom: searchFrom,
+          dateTo: searchTo,
+        })
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [endDate, memoQuery, multiOpOnly, startDate, statusFilter, txs]);
+  }, [
+    allTxs,
+    endDate,
+    memoQuery,
+    multiOpOnly,
+    searchActive,
+    searchFrom,
+    searchTo,
+    startDate,
+    statusFilter,
+    txs,
+  ]);
+  const searchPaged = searchActive && allTxs !== null;
 
   const feeTotal = totalFeeStroops(filteredTxs);
 
@@ -505,12 +585,12 @@ export function TransactionHistory({
           Multi-op
         </button>
       </div>
-      <div className="px-5 py-2.5 border-b border-line">
+      <div className="px-5 py-2.5 border-b border-line flex flex-col gap-2">
         <Input
           value={memoQuery}
           onChange={(e) => setMemoQuery(e.target.value)}
-          placeholder="Search by memo…"
-          aria-label="Search transactions by memo"
+          placeholder="Search memo, recipient, amount, hash, status…"
+          aria-label="Search transactions by memo, recipient, amount, hash or status"
           prefix={
             <HugeiconsIcon
               icon={Search01Icon}
@@ -524,6 +604,49 @@ export function TransactionHistory({
           clearLabel="Clear memo search"
           className="h-8 text-[12px]"
         />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            value={searchFrom}
+            max={searchTo || undefined}
+            onChange={(e) => setSearchFrom(e.target.value)}
+            aria-label="Search from date"
+            className="h-8 text-[12px]"
+          />
+          <span className="text-[11px] text-ink-3">to</span>
+          <Input
+            type="date"
+            value={searchTo}
+            min={searchFrom || undefined}
+            onChange={(e) => setSearchTo(e.target.value)}
+            aria-label="Search to date"
+            className="h-8 text-[12px]"
+          />
+          {searchActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setMemoQuery("");
+                setSearchFrom("");
+                setSearchTo("");
+              }}
+              className="ml-auto text-[11px] font-medium text-brand hover:underline"
+            >
+              Clear search
+            </button>
+          )}
+        </div>
+        {searchActive && (
+          <p
+            role="status"
+            aria-live="polite"
+            data-testid="search-result-count"
+            className="text-[11px] text-ink-3"
+          >
+            {filteredTxs.length} result{filteredTxs.length === 1 ? "" : "s"}
+            {searchingAll ? " · searching all history…" : ""}
+          </p>
+        )}
       </div>
 
       {!isConnected ? (
@@ -615,6 +738,11 @@ export function TransactionHistory({
             {filteredTxs.map((tx) => (
               <TxRow key={tx.hash} tx={tx} networkName={network?.name} />
             ))}
+            {searchActive && filteredTxs.length === 0 && !searchingAll && (
+              <p className="text-[13px] text-ink-3 text-center py-8">
+                No transactions match your search
+              </p>
+            )}
           </div>
           {filteredTxs.length > 0 && (
             <div className="flex items-center justify-between px-5 py-3 border-t border-line">
@@ -630,7 +758,7 @@ export function TransactionHistory({
               </span>
             </div>
           )}
-          {totalPages > 1 && (
+          {totalPages > 1 && !searchPaged && (
             <div className="flex items-center justify-between px-5 py-3 border-t border-line">
               <span className="text-[11px] text-ink-3">
                 Page {page} of {totalPages}
