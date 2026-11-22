@@ -324,6 +324,14 @@ export function friendlyError(message: string): string {
   }
 
   if (
+    normalizedMessage.includes("op_no_trust") ||
+    normalizedMessage.includes("no trust") ||
+    normalizedMessage.includes("trustline")
+  ) {
+    return "The destination account does not trust this asset. Ask them to add a trustline, then try again.";
+  }
+
+  if (
     normalizedMessage.includes("simulation failed") ||
     normalizedMessage.includes("simulate transaction") ||
     normalizedMessage.includes("rpc") ||

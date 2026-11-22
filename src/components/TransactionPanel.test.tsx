@@ -185,6 +185,54 @@ describe("TransactionPanel", () => {
     expect(screen.getByText("Something went wrong while invoking the contract. Please try again.")).toBeInTheDocument();
   });
 
+  it("shows a friendly message for tx_bad_seq instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon submit failed: tx_bad_seq (bad sequence)",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText("Your account sequence is out of date. Refresh and try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/tx_bad_seq/)).not.toBeInTheDocument();
+  });
+
+  it("shows a friendly trustline message for op_no_trust instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon error: op_no_trust — account has no trustline",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText(
+        "The destination account does not trust this asset. Ask them to add a trustline, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/op_no_trust/)).not.toBeInTheDocument();
+  });
+
   it("shows validation error for invalid destination address", async () => {
     render(<TransactionPanel />);
 
