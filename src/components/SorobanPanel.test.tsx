@@ -195,6 +195,7 @@ describe("SorobanPanel", () => {
 
     expect(textarea.rows).toBe(6);
   });
+});
 
   // Issue #543 — the Arguments textarea must be programmatically associated
   // with its label, and its validation error with the field itself.
@@ -930,6 +931,9 @@ describe("SorobanPanel", () => {
       fireEvent.change(methodInput, { target: { value: "balance" } });
 
       expect(argsInput).toHaveValue('["GFROM"]');
+    });
+  });
+
   // ── Contract ID format validation (#904) ────────────────────────────────
   describe("contract ID format validation", () => {
     it("shows inline feedback for a malformed contract ID once the field is blurred", () => {
@@ -1068,4 +1072,3 @@ describe("SorobanPanel", () => {
       );
     });
   });
-});

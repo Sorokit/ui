@@ -55,6 +55,42 @@ describe("ConnectScreen", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Wallet connection failed");
   });
 
+  it("softens info-severity connection messages", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: false,
+      error: "Connection was cancelled. Please try again.",
+      errorSeverity: "info",
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<ConnectScreen />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Connection was cancelled");
+    expect(alert).toHaveClass("text-warning");
+    expect(alert).not.toHaveClass("text-red");
+    expect(alert.closest("[data-severity]")).toHaveAttribute("data-severity", "info");
+  });
+
+  it("keeps hard connection errors in the red error treatment", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      connectWallet: vi.fn(),
+      isConnecting: false,
+      error: "Wallet connection failed",
+      errorSeverity: "error",
+      clearError: vi.fn(),
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<ConnectScreen />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Wallet connection failed");
+    expect(alert).toHaveClass("text-red");
+    expect(alert).not.toHaveClass("text-warning");
+    expect(alert.closest("[data-severity]")).toHaveAttribute("data-severity", "error");
+  });
+
   it("resets the document title to the disconnected default (#551)", () => {
     vi.mocked(useSorokit).mockReturnValue({
       connectWallet: vi.fn(),

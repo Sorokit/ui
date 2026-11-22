@@ -13,6 +13,10 @@ describe("Public exports surface", () => {
     expect(exports.SwapRoute).toBeDefined();
     expect(exports.AllocationInput).toBeDefined();
     expect(exports.StakingDashboard).toBeDefined();
+    expect(exports.RecentTransactionsWidget).toBeDefined();
+    expect(exports.PriceAlertManager).toBeDefined();
+    expect(exports.TopBar).toBeDefined();
+    expect(exports.usePendingActions).toBeDefined();
   });
 
   it('exposes all public component exports', () => {

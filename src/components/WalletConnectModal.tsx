@@ -40,7 +40,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Separator } from "@/components/ui/Separator";
 import { useSorokit } from "@/context/useSorokit";
-import { truncateAddress } from "@/lib/utils";
+import { cn, truncateAddress } from "@/lib/utils";
 
 export interface WalletOption {
   id: string;
@@ -128,6 +128,7 @@ export function isMobileEnvironment(): boolean {
   ) {
     return true;
   }
+  if (navigator.maxTouchPoints > 1) return true;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
     ua,
   );
@@ -148,13 +149,22 @@ export function WalletConnectModal({
   onClose,
   walletOptions = DEFAULT_WALLET_OPTIONS,
 }: WalletConnectModalProps) {
-  const { connectWallet, isConnecting, address, error, clearError } =
-    useSorokit();
+  const {
+    connectWallet,
+    isConnecting,
+    address,
+    error,
+    errorSeverity = "error",
+    clearError,
+  } = useSorokit();
   const [step, setStep] = useState<Step>("select");
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(
     null,
   );
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const [installedWallets, setInstalledWallets] = useState<
+    Record<string, boolean>
+  >({});
   const walletButtonsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
   const [isMobile, setIsMobile] = useState<boolean>(() =>
@@ -169,6 +179,20 @@ export function WalletConnectModal({
   useEffect(() => {
     if (!open) return;
     const detect = () => {
+  const isMobile = isMobileEnvironment();
+  const isInfo = errorSeverity === "info";
+
+  useEffect(() => {
+    if (!open) return;
+    clearError();
+  }, [open, clearError]);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    let active = true;
+
+    const refresh = () => {
+      if (!active) return;
       const next: Record<string, boolean> = {};
       for (const wallet of walletOptions) {
         next[wallet.id] = isWalletExtensionInstalled(wallet.id);
@@ -183,6 +207,30 @@ export function WalletConnectModal({
     return () => {
       window.clearTimeout(timerId);
       window.clearTimeout(recheckId);
+      setInstalledWallets((prev) => {
+        const keys = Object.keys(next);
+        if (
+          keys.length === Object.keys(prev).length &&
+          keys.every((key) => prev[key] === next[key])
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    refresh();
+    window.addEventListener("stellar#initialized", refresh);
+    window.addEventListener("stellar:initialized", refresh);
+    const pollId = window.setInterval(refresh, 200);
+    const stopId = window.setTimeout(() => window.clearInterval(pollId), 2000);
+
+    return () => {
+      active = false;
+      window.removeEventListener("stellar#initialized", refresh);
+      window.removeEventListener("stellar:initialized", refresh);
+      window.clearInterval(pollId);
+      window.clearTimeout(stopId);
     };
   }, [open, walletOptions]);
 
@@ -221,7 +269,7 @@ export function WalletConnectModal({
     // extension and turns it into context `error` state, but if it ever
     // doesn't, falling through to "error" here (instead of leaving the
     // spinner running forever) keeps this modal self-recovering regardless.
-    connectWallet().catch(() => setStep("error"));
+    void Promise.resolve(connectWallet()).catch(() => setStep("error"));
   }, [isMobile, connectWallet]);
 
   function handleRetry() {
@@ -282,7 +330,7 @@ export function WalletConnectModal({
               {step === "select" && "Connect a wallet"}
               {step === "connecting" && "Connecting…"}
               {step === "success" && "Connected"}
-              {step === "error" && "Connection failed"}
+              {step === "error" && (isInfo ? "No wallet selected" : "Connection failed")}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -306,7 +354,8 @@ export function WalletConnectModal({
               `Approve the connection request in ${selectedWallet?.name ?? "your wallet"}.`}
             {step === "success" &&
               "Your wallet is connected and ready to use."}
-            {step === "error" && "We couldn't complete the connection."}
+            {step === "error" &&
+              (isInfo ? error : "We couldn't complete the connection.")}
           </p>
           <Separator spacing="sm" />
 
@@ -367,6 +416,22 @@ export function WalletConnectModal({
             </div>
           )}
 
+          {step === "select" && error && (
+            <p
+              data-testid="wallet-connect-inline-error"
+              data-severity={errorSeverity}
+              role="alert"
+              className={cn(
+                "mt-3 rounded-lg border px-3 py-2 text-[12px] leading-relaxed",
+                isInfo
+                  ? "bg-warning-dim border-warning-dim text-warning"
+                  : "bg-error-dim-muted border-error-dim text-red",
+              )}
+            >
+              {error}
+            </p>
+          )}
+
           {step === "connecting" && (
             <div
               role="status"
@@ -410,21 +475,32 @@ export function WalletConnectModal({
           {step === "error" && (
             <div className="flex flex-col gap-4">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-error-dim flex items-center justify-center shrink-0">
+                <div
+                  className={cn(
+                    "w-9 h-9 rounded-full flex items-center justify-center shrink-0",
+                    isInfo ? "bg-warning-dim" : "bg-error-dim",
+                  )}
+                >
                   <HugeiconsIcon
                     icon={AlertCircleIcon}
                     size={18}
                     color="currentColor"
                     strokeWidth={1.5}
-                    className="text-red"
+                    className={isInfo ? "text-warning" : "text-red"}
                   />
                 </div>
                 <div>
-                  <p role="alert" className="text-[13px] text-red">
+                  <p
+                    role="alert"
+                    data-severity={errorSeverity}
+                    className={cn("text-[13px]", isInfo ? "text-warning" : "text-red")}
+                  >
                     {error}
                   </p>
                   <p className="text-[12px] text-ink-3 mt-2 leading-relaxed">
-                    {notInstalled ? (
+                    {isInfo ? (
+                      "You can select a wallet and try again whenever you're ready."
+                    ) : notInstalled ? (
                       <>
                         Install the {selectedWallet?.name ?? "wallet"} browser extension{" "}
                         {selectedWallet?.installUrl && (

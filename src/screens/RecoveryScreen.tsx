@@ -39,10 +39,20 @@ export function RecoveryScreen() {
   // Recovery Key requirements
   const totalWeight = signers.reduce((acc, s) => acc + s.weight, 0);
 
+  // Threshold validation (Issue #1142)
+  const isThresholdExceeded = threshold > signers.length;
+  const isThresholdInvalid = isThresholdExceeded || threshold < 1;
+  const thresholdError = isThresholdExceeded
+    ? `Threshold cannot exceed total signer count (${signers.length}).`
+    : threshold < 1
+      ? "Threshold must be at least 1."
+      : null;
+
   // Security Audit calculations
   const hasMultipleSigners = signers.length >= 2;
-  const canMeetThreshold = totalWeight >= threshold;
-  const isHealthy = hasMultipleSigners && canMeetThreshold && timeoutDays >= 3;
+  const canMeetThreshold = totalWeight >= threshold && !isThresholdExceeded;
+  const isHealthy =
+    hasMultipleSigners && canMeetThreshold && !isThresholdInvalid && timeoutDays >= 3;
 
   const handleAddSigner = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,11 +128,17 @@ export function RecoveryScreen() {
             <div className="p-3.5 rounded-lg bg-surface-2 border border-line">
               <p className="text-[12px] font-semibold text-ink">Threshold Executability</p>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-[18px] font-bold text-ink">{threshold} of {totalWeight}</span>
-                <span className="text-[11px] text-ink-3">weight required</span>
+                <span className="text-[18px] font-bold text-ink">
+                  {threshold} of {signers.length} signers
+                </span>
+                <span className="text-[11px] text-ink-3">({threshold}/{totalWeight} weight)</span>
               </div>
               <p className="text-[11px] text-ink-3 mt-1.5">
-                {canMeetThreshold ? "✓ Threshold is reachable." : "✗ Warning: Required threshold exceeds total weight!"}
+                {isThresholdExceeded
+                  ? "✗ Error: Threshold exceeds total signer count!"
+                  : canMeetThreshold
+                    ? "✓ Threshold is reachable."
+                    : "✗ Warning: Required threshold exceeds total weight!"}
               </p>
             </div>
           </div>
@@ -232,18 +248,44 @@ export function RecoveryScreen() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <label className="text-[12px] font-medium text-ink-2 flex justify-between">
-              <span>Threshold Weight Required</span>
-              <span className="font-semibold text-ink">{threshold} / {totalWeight}</span>
-            </label>
-            <input
-              type="range"
-              min="1"
-              max={totalWeight || 1}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-              className="w-full accent-brand"
-            />
+            <div className="flex justify-between items-center">
+              <label htmlFor="threshold-input" className="text-[12px] font-medium text-ink-2">
+                Threshold Required
+              </label>
+              <span className="font-semibold text-ink text-[12px]">
+                {threshold} / {signers.length} signers (Weight: {threshold} / {totalWeight})
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                id="threshold-input"
+                data-testid="threshold-input"
+                aria-label="Threshold Required"
+                type="number"
+                min="1"
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                className="w-24 rounded border border-line bg-surface-2 px-2.5 py-1 text-[13px] text-ink focus:border-line-2 focus:outline-none"
+              />
+              <input
+                type="range"
+                aria-label="Threshold slider"
+                min="1"
+                max={Math.max(10, totalWeight || 1)}
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                className="flex-1 accent-brand"
+              />
+            </div>
+            {thresholdError && (
+              <p
+                role="alert"
+                data-testid="threshold-error"
+                className="text-[12px] font-medium text-red"
+              >
+                {thresholdError}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -274,7 +316,12 @@ export function RecoveryScreen() {
           <div className="text-[12px] text-ink-3">
             Fee Estimate: <strong className="text-ink">0.00015 XLM</strong> (est)
           </div>
-          <Button variant="primary" size="sm">
+          <Button
+            variant="primary"
+            size="sm"
+            data-testid="save-recovery-button"
+            disabled={isThresholdInvalid}
+          >
             Save Recovery Config
           </Button>
         </CardFooter>
@@ -294,7 +341,8 @@ export function RecoveryScreen() {
                 variant="secondary"
                 size="sm"
                 onClick={startSimulation}
-                disabled={isSimulating}
+                disabled={isSimulating || isThresholdInvalid}
+                data-testid="simulate-recovery-button"
               >
                 {isSimulating ? "Running Simulation..." : "Initiate Dry-run"}
               </Button>
