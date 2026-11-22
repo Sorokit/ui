@@ -7,7 +7,9 @@ import type {
   NetworkName,
   SorokitClient,
 } from "@/lib/client";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { initClient } from "@/lib/client";
+import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
 
 import { SorokitContext, type SorokitProviderProps } from "./SorokitContext";
 
@@ -96,6 +98,16 @@ export function SorokitProvider({
   const [detectedWallets, setDetectedWallets] = useState<string[]>(() =>
     detectInjectedWallets(),
   );
+
+  // #1163 - offline mode. `isCached` is true while the account/balances on
+  // screen came from the local snapshot rather than a live response.
+  const isOnline = useOnlineStatus();
+  const [isCached, setIsCached] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const networkKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    networkKeyRef.current = network?.name ?? null;
+  }, [network]);
 
   const error = accountError ?? networkError ?? walletError ?? null;
 
@@ -265,6 +277,46 @@ export function SorokitProvider({
     };
   }, [client, reportError]);
 
+  // #1163 - applies an account/balance response pair. Fresh data is shown and
+  // written to the offline cache; for any half that failed, the last cached
+  // copy is used instead. Returns true when cached data filled a gap.
+  const applyAccountResults = useCallback(
+    (
+      addr: string,
+      accountRes: { data: AccountData | null; error: string | null },
+      balancesRes: { data: Balance[] | null; error: string | null },
+    ): boolean => {
+      const key = networkKeyRef.current;
+      const cached = readSnapshot(key, addr);
+      let usedCache = false;
+
+      if (accountRes.data) {
+        setAccount(accountRes.data);
+      } else if (accountRes.error && cached?.account) {
+        setAccount(cached.account);
+        usedCache = true;
+      }
+      if (balancesRes.data) {
+        setBalances(balancesRes.data);
+      } else if (balancesRes.error && cached?.balances) {
+        setBalances(cached.balances);
+        usedCache = true;
+      }
+
+      if (accountRes.data || balancesRes.data) {
+        writeSnapshot(key, addr, {
+          ...(accountRes.data ? { account: accountRes.data } : {}),
+          ...(balancesRes.data ? { balances: balancesRes.data } : {}),
+        });
+      }
+
+      setIsCached(usedCache);
+      setLastSyncedAt(usedCache ? (cached?.cachedAt ?? null) : Date.now());
+      return usedCache;
+    },
+    [],
+  );
+
   // Load account when address changes
   useEffect(() => {
     if (!address) {
@@ -291,22 +343,22 @@ export function SorokitProvider({
       ])
         .then(([accountRes, balancesRes]) => {
           if (!active || controller.signal.aborted) return;
-          if (accountRes.data) setAccount(accountRes.data);
-          if (balancesRes.data) setBalances(balancesRes.data);
+          const usedCache = applyAccountResults(address, accountRes, balancesRes);
           const combined = [accountRes.error, balancesRes.error]
             .filter(Boolean)
             .join("; ");
           if (combined) setAccountError(combined);
+          const severity = usedCache ? "info" : "error";
           if (accountRes.error && balancesRes.error) {
             reportError(
               `${accountRes.error}; ${balancesRes.error}`,
               "account",
-              "error",
+              severity,
             );
           } else if (accountRes.error) {
-            reportError(accountRes.error, "account", "error");
+            reportError(accountRes.error, "account", severity);
           } else if (balancesRes.error) {
-            reportError(balancesRes.error, "account", "error");
+            reportError(balancesRes.error, "account", severity);
           }
         })
         .catch((e) => {
@@ -316,8 +368,15 @@ export function SorokitProvider({
           if (!active || controller.signal.aborted) return;
           const message =
             e instanceof Error ? e.message : "Failed to load account data";
+          // #1163 - a rejected request (typically a dropped connection) falls
+          // back to the last-known snapshot when there is one.
+          const usedCache = applyAccountResults(
+            address,
+            { data: null, error: message },
+            { data: null, error: message },
+          );
           setAccountError(message);
-          reportError(message, "account", "error");
+          reportError(message, "account", usedCache ? "info" : "error");
         })
         .finally(() => {
           if (active && !controller.signal.aborted) setIsLoadingAccount(false);
@@ -332,7 +391,7 @@ export function SorokitProvider({
       }
       window.clearTimeout(timerId);
     };
-  }, [address, client, reportError]);
+  }, [address, client, reportError, applyAccountResults]);
 
   function detectWalletName(): string | null {
     if (typeof window === "undefined") return null;
@@ -429,6 +488,8 @@ export function SorokitProvider({
       setIsHardware(false);
       setAccount(null);
       setBalances([]);
+      setIsCached(false);
+      setLastSyncedAt(null);
       setAccountError(null);
       setNetworkError(null);
       setWalletError(null);
@@ -514,6 +575,8 @@ export function SorokitProvider({
         setAddress(null);
         setAccount(null);
         setBalances([]);
+        setIsCached(false);
+        setLastSyncedAt(null);
 
         onNetworkChangeRef.current?.(data);
       }
@@ -580,28 +643,31 @@ export function SorokitProvider({
         clientRef.current.account.getBalances(address),
       ]);
       if (controller.signal.aborted) return;
-      if (accountRes.data) setAccount(accountRes.data);
-      if (balancesRes.data) setBalances(balancesRes.data);
+      const usedCache = applyAccountResults(address, accountRes, balancesRes);
+      const severity = usedCache ? "info" : "error";
       if (accountRes.error && balancesRes.error) {
         reportError(
           `${accountRes.error}; ${balancesRes.error}`,
           "account",
-          "error",
+          severity,
         );
       } else if (accountRes.error) {
-        reportError(accountRes.error, "account", "error");
+        reportError(accountRes.error, "account", severity);
       } else if (balancesRes.error) {
-        reportError(balancesRes.error, "account", "error");
+        reportError(balancesRes.error, "account", severity);
       }
     } catch (e) {
       // Swallow a rejection for a query that has been superseded (e.g. the
       // network switched mid-refresh); surface only genuine failures.
       if (controller.signal.aborted) return;
-      reportError(
-        e instanceof Error ? e.message : "Failed to refresh account data",
-        "account",
-        "error",
+      const message =
+        e instanceof Error ? e.message : "Failed to refresh account data";
+      const usedCache = applyAccountResults(
+        address,
+        { data: null, error: message },
+        { data: null, error: message },
       );
+      reportError(message, "account", usedCache ? "info" : "error");
     } finally {
       if (accountRequestRef.current === controller) {
         accountRequestRef.current = null;
@@ -609,7 +675,16 @@ export function SorokitProvider({
       setIsLoadingAccount(false);
       isRefreshingRef.current = false;
     }
-  }, [address, reportError]);
+  }, [address, reportError, applyAccountResults]);
+
+  // #1163 - auto-sync: when connectivity returns, refresh so cached data is
+  // replaced by live data without the user having to do anything.
+  const wasOnlineRef = useRef(isOnline);
+  useEffect(() => {
+    const wasOnline = wasOnlineRef.current;
+    wasOnlineRef.current = isOnline;
+    if (isOnline && !wasOnline) void refreshAccount();
+  }, [isOnline, refreshAccount]);
 
   const value = useMemo(
     () => ({
@@ -628,6 +703,9 @@ export function SorokitProvider({
       balances,
       isLoadingAccount,
       refreshAccount,
+      isOffline: !isOnline,
+      isCached,
+      lastSyncedAt,
       network,
       initialNetwork,
       switchNetwork,
@@ -659,6 +737,9 @@ export function SorokitProvider({
       account,
       balances,
       refreshAccount,
+      isOnline,
+      isCached,
+      lastSyncedAt,
       network,
       initialNetwork,
       switchNetwork,

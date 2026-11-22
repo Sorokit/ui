@@ -57,6 +57,8 @@ export { AccountCard, AccountCardCompact } from "./AccountCard";
 export type { AccountSidebarProps } from "./AccountSidebar";
 export { AccountSidebar } from "./AccountSidebar";
 export { BalanceList } from "./BalanceList";
+export type { OfflineBadgeProps } from "./OfflineBadge";
+export { OfflineBadge } from "./OfflineBadge";
 export { WalletConnectButton } from "./WalletConnectButton";
 export type { WalletConnectModalProps, WalletOption } from "./WalletConnectModal";
 export {

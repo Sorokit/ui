@@ -12,12 +12,15 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
+import { OfflineBadge } from "@/components/OfflineBadge";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
+import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
@@ -338,6 +341,10 @@ export function TransactionHistory({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #1163 - offline mode: true while `txs` came from the local cache.
+  const isOnline = useOnlineStatus();
+  const [isCached, setIsCached] = useState(false);
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
 
   // Shared fetch counter to guard against stale responses when rapid address
   // or page changes occur (e.g., address change triggering a page-reset cycle).
@@ -350,6 +357,7 @@ export function TransactionHistory({
     setPage(1);
     setTotal(0);
     setTxs([]);
+    setIsCached(false);
   }
 
   useEffect(() => {
@@ -364,12 +372,45 @@ export function TransactionHistory({
         .then(({ data, error: err, total: t }) => {
           if (fetchId !== fetchIdRef.current) return;
           if (err) {
+            // #1163 - fall back to the last-known page instead of an error
+            // wall, unless the failure is a real "unfunded account" state.
+            const cached = isUnfundedAccountError(err)
+              ? null
+              : readSnapshot(network?.name, address)?.transactions?.[page];
+            if (cached) {
+              setTxs(cached.items);
+              setTotal(cached.total);
+              setIsCached(true);
+              setCachedAt(readSnapshot(network?.name, address)?.cachedAt ?? null);
+              setError(null);
+              return;
+            }
             setError(err);
             return;
           }
-          setTxs(data ?? []);
-          setTotal(Number.isFinite(t) && t > 0 ? t : 0);
+          const items = data ?? [];
+          const nextTotal = Number.isFinite(t) && t > 0 ? t : 0;
+          setTxs(items);
+          setTotal(nextTotal);
           setError(null);
+          setIsCached(false);
+          writeSnapshot(network?.name, address, {
+            transactions: { [page]: { items, total: nextTotal } },
+          });
+        })
+        .catch((e) => {
+          if (fetchId !== fetchIdRef.current) return;
+          const snapshot = readSnapshot(network?.name, address);
+          const cached = snapshot?.transactions?.[page];
+          if (cached) {
+            setTxs(cached.items);
+            setTotal(cached.total);
+            setIsCached(true);
+            setCachedAt(snapshot?.cachedAt ?? null);
+            setError(null);
+          } else {
+            setError(e instanceof Error ? e.message : "Failed to load history");
+          }
         })
         .finally(() => {
           if (fetchId === fetchIdRef.current) setLoading(false);
@@ -381,7 +422,10 @@ export function TransactionHistory({
       activeFetchIdRef.current++;
       window.clearTimeout(timerId);
     };
-  }, [address, client, page]);
+    // `isOnline` is a dependency so history refetches automatically when the
+    // connection comes back (#1163).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, client, page, isOnline]);
 
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 0;
 
@@ -424,6 +468,11 @@ export function TransactionHistory({
         </div>
         <div className="flex items-center gap-3">
           {showTrend && <TrendSparkline counts={dailyCounts(filteredTxs)} />}
+          <OfflineBadge
+            isOffline={!isOnline}
+            isCached={isCached}
+            lastSyncedAt={cachedAt}
+          />
           {loading && (
             <span className="w-4 h-4 border border-ink-3 border-t-transparent rounded-full animate-spin" />
           )}
