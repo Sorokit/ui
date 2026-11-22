@@ -185,6 +185,54 @@ describe("TransactionPanel", () => {
     expect(screen.getByText("Something went wrong while invoking the contract. Please try again.")).toBeInTheDocument();
   });
 
+  it("shows a friendly message for tx_bad_seq instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon submit failed: tx_bad_seq (bad sequence)",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText("Your account sequence is out of date. Refresh and try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/tx_bad_seq/)).not.toBeInTheDocument();
+  });
+
+  it("shows a friendly trustline message for op_no_trust instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon error: op_no_trust — account has no trustline",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText(
+        "The destination account does not trust this asset. Ask them to add a trustline, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/op_no_trust/)).not.toBeInTheDocument();
+  });
+
   it("shows validation error for invalid destination address", async () => {
     render(<TransactionPanel />);
 
@@ -1296,6 +1344,201 @@ describe("TransactionPanel", () => {
       await screen.findByText(/Transaction submitted/i);
 
       expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Transaction Templates (#1146)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("saves a template to localStorage when 'Save as Template' is clicked", async () => {
+      render(<TransactionPanel />);
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "15" } });
+
+      const saveBtn = screen.getByTestId("save-template-button");
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+
+      const nameInput = screen.getByLabelText("Template Name");
+      fireEvent.change(nameInput, { target: { value: "Donation" } });
+      fireEvent.click(screen.getByTestId("confirm-save-template-button"));
+
+      const raw = localStorage.getItem("sorokit:transaction-templates");
+      expect(raw).toBeTruthy();
+      const templates = JSON.parse(raw!);
+      expect(templates).toHaveLength(1);
+      expect(templates[0].name).toBe("Donation");
+      expect(templates[0].destination).toBe(VALID_DEST);
+      expect(templates[0].amount).toBe("15");
+    });
+
+    it("displays templates in a dropdown and populates form upon selection", async () => {
+      localStorage.setItem(
+        "sorokit:transaction-templates",
+        JSON.stringify([
+          {
+            id: "tpl-1",
+            name: "Office Rent",
+            destination: VALID_DEST,
+            amount: "42",
+            asset: "XLM",
+            memoType: "text",
+            memo: "Rent Nov",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const select = screen.getByTestId("templates-dropdown");
+      expect(select).toBeInTheDocument();
+
+      fireEvent.change(select, { target: { value: "tpl-1" } });
+
+      expect(screen.getByLabelText("Destination Address")).toHaveValue(VALID_DEST);
+      expect(screen.getByLabelText("Amount (XLM)")).toHaveValue(42);
+      expect(screen.getByLabelText("Memo (optional)")).toHaveValue("Rent Nov");
+    });
+
+    it("allows deleting a template from localStorage", async () => {
+      localStorage.setItem(
+        "sorokit:transaction-templates",
+        JSON.stringify([
+          {
+            id: "tpl-del",
+            name: "To Delete",
+            destination: VALID_DEST,
+            amount: "10",
+            asset: "XLM",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const select = screen.getByTestId("templates-dropdown");
+      fireEvent.change(select, { target: { value: "tpl-del" } });
+
+      const deleteBtn = screen.getByTestId("delete-template-btn");
+      expect(deleteBtn).toBeInTheDocument();
+      fireEvent.click(deleteBtn);
+
+      const raw = localStorage.getItem("sorokit:transaction-templates");
+      expect(JSON.parse(raw!)).toEqual([]);
+    });
+  });
+
+  describe("Scheduled Transactions (#1145)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it("has a date/time picker and saves a scheduled transaction to localStorage", async () => {
+      render(<TransactionPanel />);
+      const picker = screen.getByTestId("schedule-datetime-picker");
+      expect(picker).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "25" } });
+      fireEvent.change(picker, { target: { value: "2026-12-01T10:00" } });
+
+      const submitBtn = screen.getByTestId("submit-transaction");
+      expect(submitBtn).toHaveTextContent("Schedule XLM");
+      fireEvent.click(submitBtn);
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      expect(raw).toBeTruthy();
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled).toHaveLength(1);
+      expect(scheduled[0].amount).toBe("25");
+      expect(scheduled[0].destination).toBe(VALID_DEST);
+      expect(scheduled[0].status).toBe("pending");
+      expect(scheduled[0].scheduledTime).toBe("2026-12-01T10:00");
+    });
+
+    it("renders the scheduled transactions list", async () => {
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-1",
+            destination: VALID_DEST,
+            amount: "50",
+            asset: "XLM",
+            scheduledTime: "2026-12-01T12:00",
+            status: "pending",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const list = screen.getByTestId("scheduled-transactions-list");
+      expect(list).toBeInTheDocument();
+      expect(screen.getByText("50 XLM")).toBeInTheDocument();
+      expect(screen.getByText("pending")).toBeInTheDocument();
+    });
+
+    it("allows cancelling a scheduled transaction", async () => {
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-cancel",
+            destination: VALID_DEST,
+            amount: "30",
+            asset: "XLM",
+            scheduledTime: "2026-12-05T09:00",
+            status: "pending",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const cancelBtn = screen.getByTestId("cancel-scheduled-tx-sched-cancel");
+      fireEvent.click(cancelBtn);
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled[0].status).toBe("cancelled");
+    });
+
+    it("automatically executes due scheduled transactions", async () => {
+      const mockSubmit = vi
+        .fn()
+        .mockResolvedValue({ data: { hash: "sched-hash-1", ledger: 200 }, error: null });
+      mockGetClient(mockSubmit);
+
+      // A transaction scheduled in the past
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-due",
+            destination: VALID_DEST,
+            amount: "10",
+            asset: "XLM",
+            scheduledTime: new Date(Date.now() - 1000).toISOString(),
+            status: "pending",
+            createdAt: Date.now() - 5000,
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalled();
+      });
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled[0].status).toBe("executed");
+      expect(scheduled[0].txHash).toBe("sched-hash-1");
     });
   });
 });

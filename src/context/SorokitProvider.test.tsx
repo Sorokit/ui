@@ -65,6 +65,18 @@ const CallbackRefTestComponent = ({
   return null;
 };
 
+const ReportErrorCaptureProbe = ({
+  onCapture,
+}: {
+  onCapture: (
+    reportError: NonNullable<ReturnType<typeof useSorokit>["reportError"]>,
+  ) => void;
+}) => {
+  const { reportError } = useSorokit();
+  if (reportError) onCapture(reportError);
+  return null;
+};
+
 const MemoTestComponent = () => {
   const value = useSorokit();
   const prevValueRef = useRef<ReturnType<typeof useSorokit> | null>(null);
@@ -233,6 +245,136 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).toHaveTextContent("Failed to fetch balances");
       expect(screen.getByTestId("account")).toHaveTextContent("100");
     });
+  });
+
+  it("preserves successful account data when only the balances refresh fails", async () => {
+    renderWithProvider(<TestComponent />, { client: mockClient });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+    await waitFor(() => {
+      expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("balances")).toHaveTextContent("1");
+
+    mockClient.account.getAccount = vi.fn().mockResolvedValue({
+      data: { sequence: "101" },
+      error: null,
+    });
+    mockClient.account.getBalances = vi.fn().mockResolvedValue({
+      data: null,
+      error: "Balance refresh failed",
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error")).toHaveTextContent("Balance refresh failed");
+      expect(screen.getByTestId("account")).toHaveTextContent("101");
+      expect(screen.getByTestId("balances")).toHaveTextContent("1");
+      expect(screen.getByTestId("errorHistoryCount")).toHaveTextContent("1");
+    });
+  });
+
+  it("warns when an unknown error source falls back to the account error slot", async () => {
+    let reportError:
+      | NonNullable<ReturnType<typeof useSorokit>["reportError"]>
+      | undefined;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      renderWithProvider(
+        <>
+          <TestComponent />
+          <ReportErrorCaptureProbe
+            onCapture={(fn) => {
+              reportError = fn;
+            }}
+          />
+        </>,
+        { client: mockClient },
+      );
+
+      await act(async () => {
+        reportError?.("RPC endpoint unavailable", "rpc");
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'SorokitProvider: unknown error source "rpc"; defaulting to account error.',
+        "RPC endpoint unavailable",
+      );
+      expect(screen.getByTestId("error")).toHaveTextContent("RPC endpoint unavailable");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not start a refresh from a callback captured after unmount", async () => {
+    let refreshAccount: (() => Promise<void>) | undefined;
+    const { unmount } = renderWithProvider(
+      <>
+        <TestComponent />
+        <CallbackRefTestComponent
+          onCapture={({ refreshAccount: captured }) => {
+            refreshAccount = captured as () => Promise<void>;
+          }}
+        />
+      </>,
+      { client: mockClient },
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+
+    const getAccountSpy = vi.fn();
+    mockClient.account.getAccount = getAccountSpy;
+    unmount();
+
+    await act(async () => {
+      await refreshAccount?.();
+    });
+
+    expect(getAccountSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not report an error when an in-flight refresh rejects after unmount", async () => {
+    let rejectAccount: ((reason?: unknown) => void) | undefined;
+    const onError = vi.fn();
+    const { unmount } = renderWithProvider(<TestComponent />, {
+      client: mockClient,
+      onError,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("false");
+    });
+
+    mockClient.account.getAccount = vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectAccount = reject;
+        }),
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("Refresh"));
+    });
+    expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("true");
+
+    unmount();
+    await act(async () => {
+      rejectAccount?.(new Error("late failure"));
+    });
+
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("clears error from previous session on reconnect", async () => {

@@ -10,23 +10,33 @@ import { Tooltip } from "@/components/ui/Tooltip";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { useOptionalToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
+import { type PendingActionItem,usePendingActions } from "@/hooks/usePendingActions";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
 
 const LABELS = SCREEN_LABELS;
+
+export interface TopBarProps {
+  active: NavSection;
+  onMenuToggle: () => void;
+  sidebarOpen?: boolean;
+  onNavigate?: (section: NavSection) => void;
+  pendingActions?: PendingActionItem[];
+}
 
 export function TopBar({
   active,
   onMenuToggle,
   sidebarOpen,
-}: {
-  active: NavSection;
-  onMenuToggle: () => void;
-  sidebarOpen?: boolean;
-}) {
+  onNavigate,
+  pendingActions: propPendingActions,
+}: TopBarProps) {
   const { error, clearError } = useSorokit();
   const toastContext = useOptionalToast();
   const toasts = toastContext?.toasts ?? [];
   const unreadCount = toastContext?.unreadCount ?? 0;
+  const { pendingActions: hookPendingActions } = usePendingActions();
+  const activePendingActions = propPendingActions ?? hookPendingActions;
+  const totalBadgeCount = activePendingActions.length + unreadCount;
   const { title, sub } = LABELS[active];
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isFirstRender = useRef(true);
@@ -141,24 +151,26 @@ export function TopBar({
               <button
                 type="button"
                 onClick={openNotifications}
-                aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : "Notifications"}
+                aria-label={totalBadgeCount ? `Notifications, ${totalBadgeCount} unread` : "Notifications"}
                 title="Notifications"
+                data-testid="notifications-bell"
                 className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
               >
                 <Bell size={16} />
-                {unreadCount > 0 && (
+                {totalBadgeCount > 0 && (
                   <span
                     aria-hidden="true"
+                    data-testid="notifications-badge"
                     className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 text-[9px] font-semibold leading-none text-white"
                   >
-                    {unreadCount > 99 ? "99+" : unreadCount}
+                    {totalBadgeCount > 99 ? "99+" : totalBadgeCount}
                   </span>
                 )}
               </button>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-              <Dialog.Content className="fixed right-4 top-[68px] z-50 w-[min(360px,calc(100vw-2rem))] rounded-md border border-line bg-surface p-4 text-ink shadow-xl">
+              <Dialog.Content className="fixed right-4 top-[68px] z-50 w-[min(380px,calc(100vw-2rem))] rounded-md border border-line bg-surface p-4 text-ink shadow-xl">
                 <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
                   <Dialog.Title className="text-sm font-semibold">Notifications</Dialog.Title>
                   <Dialog.Close asChild>
@@ -171,20 +183,76 @@ export function TopBar({
                     </button>
                   </Dialog.Close>
                 </div>
-                {toasts.length ? (
-                  <ul className="max-h-[60vh] divide-y divide-line overflow-y-auto">
-                    {toasts.map((toast) => (
-                      <li key={toast.id} className="py-3 first:pt-3 last:pb-0">
-                        <p className="text-[13px] font-medium">{toast.title}</p>
-                        {toast.message && (
-                          <p className="mt-1 break-words text-xs text-ink-3">{toast.message}</p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="py-6 text-center text-sm text-ink-3">No notifications</p>
-                )}
+
+                <div className="max-h-[65vh] overflow-y-auto divide-y divide-line">
+                  {/* Pending Actions section (#1144) */}
+                  <div className="py-3 first:pt-2" data-testid="pending-actions-section">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+                        Pending Actions ({activePendingActions.length})
+                      </span>
+                    </div>
+                    {activePendingActions.length > 0 ? (
+                      <ul className="flex flex-col gap-1.5" data-testid="pending-actions-list">
+                        {activePendingActions.map((action) => (
+                          <li key={action.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onNavigate?.(action.targetScreen);
+                                setNotificationsOpen(false);
+                              }}
+                              className="w-full text-left p-2.5 rounded-lg border border-line bg-surface-2 hover:bg-surface-3 transition-colors flex items-start justify-between gap-2 cursor-pointer group"
+                              data-testid={`pending-action-item-${action.id}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[13px] font-medium text-ink group-hover:text-brand">
+                                    {action.title}
+                                  </span>
+                                  {action.count !== undefined && (
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-brand-dim text-brand">
+                                      {action.count}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-ink-3 mt-0.5 truncate">
+                                  {action.description}
+                                </p>
+                              </div>
+                              <span className="text-[11px] font-medium text-brand shrink-0 mt-0.5">
+                                View →
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[12px] text-ink-3 py-1">No pending actions</p>
+                    )}
+                  </div>
+
+                  {/* Toast/Recent Notifications section */}
+                  <div className="py-3">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3 block mb-2">
+                      Recent Activity
+                    </span>
+                    {toasts.length ? (
+                      <ul className="divide-y divide-line">
+                        {toasts.map((toast) => (
+                          <li key={toast.id} className="py-2.5 first:pt-1 last:pb-0">
+                            <p className="text-[13px] font-medium">{toast.title}</p>
+                            {toast.message && (
+                              <p className="mt-1 break-words text-xs text-ink-3">{toast.message}</p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="py-3 text-center text-xs text-ink-3">No recent activity</p>
+                    )}
+                  </div>
+                </div>
               </Dialog.Content>
             </Dialog.Portal>
           </Dialog.Root>
