@@ -1,10 +1,12 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
+import { useBiometric } from "@/hooks/useBiometric";
+import { useI18n } from "@/i18n";
 import { DISCONNECTED_TITLE } from "@/lib/nav-labels";
 import { cn } from "@/lib/utils";
 
@@ -90,9 +92,36 @@ export function ConnectScreen() {
     errorSeverity = "error",
     clearError,
   } = useSorokit();
+  const { t } = useI18n();
+  const { enabled: biometricEnabled, authenticate: authenticateBiometric } =
+    useBiometric();
+  const [biometricBusy, setBiometricBusy] = useState(false);
+  const [biometricFailed, setBiometricFailed] = useState(false);
   const connectButtonRef = useRef<HTMLButtonElement>(null);
   const autoConnectAttempted = useRef(false);
   const isInfo = errorSeverity === "info";
+
+  /**
+   * Biometric unlock is a local gate in front of the normal wallet connect:
+   * a successful assertion still calls connectWallet(), and any failure leaves
+   * the standard Connect Wallet button available as the fallback (#1152).
+   */
+  async function handleBiometricUnlock() {
+    setBiometricFailed(false);
+    setBiometricBusy(true);
+    try {
+      const verified = await authenticateBiometric();
+      if (!verified) {
+        setBiometricFailed(true);
+        return;
+      }
+      await connectWallet();
+    } catch {
+      setBiometricFailed(true);
+    } finally {
+      setBiometricBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!isConnecting) {
@@ -181,12 +210,11 @@ export function ConnectScreen() {
         <div className="w-full rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_24px_64px_rgba(0,0,0,0.2)]">
           <div className="px-8 pt-8 pb-6 border-b border-line">
             <h2 className="text-[18px] font-semibold text-ink tracking-tight">
-              Connect Wallet
+              {t("connect.title")}
             </h2>
 
             <p className="text-[13px] text-ink-3 mt-2 leading-relaxed">
-              Connect your Stellar wallet to access the dashboard and manage
-              your assets.
+              {t("connect.subtitle")}
             </p>
           </div>
 
@@ -236,6 +264,32 @@ export function ConnectScreen() {
               </div>
             )}
 
+            {/* Biometric quick unlock (#1152) — only shown once enabled in
+                settings. Failure never blocks the wallet button below. */}
+            {biometricEnabled && (
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  loading={biometricBusy}
+                  disabled={isConnecting}
+                  onClick={() => void handleBiometricUnlock()}
+                  className="w-full justify-center"
+                  data-testid="biometric-unlock-button"
+                >
+                  {t("connect.unlockWithBiometrics")}
+                </Button>
+                {biometricFailed && (
+                  <p role="alert" className="text-[12px] text-red text-center">
+                    {t("connect.biometricFailed")}
+                  </p>
+                )}
+                <p className="text-[11px] text-ink-4 text-center">
+                  {t("connect.biometricFallback")}
+                </p>
+              </div>
+            )}
+
             <Button
               ref={connectButtonRef}
               size="lg"
@@ -243,7 +297,7 @@ export function ConnectScreen() {
               onClick={connectWallet}
               className="w-full justify-center"
             >
-              {isConnecting ? "Connecting…" : "Connect Wallet"}
+              {isConnecting ? t("connecting") : t("connect.button")}
             </Button>
 
             {isConnecting && (
@@ -255,7 +309,7 @@ export function ConnectScreen() {
             {/* Wallet options */}
             <div className="flex flex-col gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 text-center">
-                Supported wallets
+                {t("connect.supportedWallets")}
               </p>
 
               <div className="grid grid-cols-4 gap-2">
@@ -288,7 +342,7 @@ export function ConnectScreen() {
             {showMobileDeepLinks && (
               <div className="flex flex-col gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 text-center">
-                  Open in a mobile wallet app
+                  {t("connect.mobileWallets")}
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {MOBILE_WALLET_DEEP_LINKS.map((wallet) => (
@@ -309,7 +363,7 @@ export function ConnectScreen() {
 
             <details className="group rounded-lg border border-line px-4 py-3 open:bg-surface-2">
               <summary className="text-[12px] font-medium text-ink-2 cursor-pointer select-none list-none flex items-center justify-between">
-                New to Stellar?
+                {t("connect.newToStellar")}
                 <span className="text-ink-4 transition-transform group-open:rotate-180">
                   ▾
                 </span>

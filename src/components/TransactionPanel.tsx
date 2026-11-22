@@ -19,6 +19,7 @@ import {
   truncateToUtf8ByteLength,
   utf8ByteLength,
   validateStellarAddress,
+  xlmToStroops,
 } from "@/lib/utils";
 
 import {
@@ -152,6 +153,7 @@ export function TransactionPanel({
     network,
     isLoadingAccount,
     isConnected,
+    isHardware,
     balances = [],
   } = useSorokit();
   const toast = useOptionalToast();
@@ -282,6 +284,12 @@ export function TransactionPanel({
   // fee, while a payment in another asset only needs the fee reserved out of
   // the separate XLM balance.
   const isSendingXlm = selectedAsset === "XLM";
+  // Hardware-wallet high-value confirmation compares integer stroops so large
+  // payments never lose precision (#1153). Only native XLM amounts map
+  // directly to the stroop threshold; other assets are left to the caller.
+  const totalAmountStroops = isSendingXlm
+    ? (xlmToStroops(amount) ?? undefined)
+    : undefined;
   const spendableXlm = xlmBalanceNumber - estimatedFeeXlm;
   const hasSufficientBalance =
     !isNaN(parsedAmount) &&
@@ -573,6 +581,7 @@ export function TransactionPanel({
         },
         sourceAccount: sourceAddress,
         sequenceNumber: account?.sequence,
+        totalAmountStroops,
       });
     } finally {
       setIsBuildingPreview(false);
@@ -1618,6 +1627,7 @@ export function TransactionPanel({
         open={preview !== null}
         transaction={preview}
         isSigning={state === "loading"}
+        isHardwareWallet={isHardware}
         onCancel={() => setPreview(null)}
         onConfirm={() => void submitTransaction()}
       />

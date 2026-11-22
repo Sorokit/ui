@@ -11,6 +11,7 @@ import {
   truncateToUtf8ByteLength,
   utf8ByteLength,
   validateStellarAddress,
+  xlmToStroops,
 } from "./utils";
 
 describe("truncateAddress", () => {
@@ -409,5 +410,24 @@ describe("toXLM", () => {
     expect(toXLM("100abc")).toBe("0.0000100");
     expect(toXLM("abc")).toBe("0.0000000");
     expect(toXLM("")).toBe("0.0000000");
+  });
+});
+
+describe("xlmToStroops", () => {
+  it("converts whole and fractional XLM amounts to stroops", () => {
+    expect(xlmToStroops("1")).toBe("10000000");
+    expect(xlmToStroops("0.0000001")).toBe("1");
+    expect(xlmToStroops("100.5")).toBe("1005000000");
+  });
+
+  it("keeps amounts beyond Number.MAX_SAFE_INTEGER exact", () => {
+    expect(xlmToStroops("9007199254740993")).toBe("90071992547409930000000");
+  });
+
+  it("rejects malformed, negative, and over-precise amounts", () => {
+    expect(xlmToStroops("-1")).toBeNull();
+    expect(xlmToStroops("1.12345678")).toBeNull();
+    expect(xlmToStroops("abc")).toBeNull();
+    expect(xlmToStroops("")).toBeNull();
   });
 });

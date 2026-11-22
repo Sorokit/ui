@@ -273,6 +273,27 @@ export function toXLM(stroops: string): string {
 }
 
 /**
+ * Convert a decimal XLM amount string to an integer stroop string, losslessly.
+ *
+ * Returns `null` for negative values, malformed input, or amounts with more
+ * fractional digits than the asset supports. BigInt keeps large payments past
+ * `Number.MAX_SAFE_INTEGER` exact, which matters when comparing a payment
+ * against a hardware-wallet confirmation threshold.
+ */
+export function xlmToStroops(
+  amount: string,
+  decimals: number = STELLAR_DECIMALS,
+): string | null {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(amount.trim());
+  if (!match) return null;
+  const fraction = match[2] ?? "";
+  if (fraction.length > decimals) return null;
+  const scale = 10n ** BigInt(decimals);
+  const fractionalStroops = BigInt(fraction.padEnd(decimals, "0") || "0");
+  return (BigInt(match[1]) * scale + fractionalStroops).toString();
+}
+
+/**
  * Number of bytes `text` occupies when UTF-8 encoded. Stellar's `MEMO_TEXT`
  * limit (28 bytes) is a byte limit, not a character count — a single
  * multi-byte character (e.g. emoji, most non-Latin scripts) can consume up

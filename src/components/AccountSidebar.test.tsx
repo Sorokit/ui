@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SorokitProvider } from "@/context/SorokitProvider";
 import { useSorokit } from "@/context/useSorokit";
+import { I18nProvider } from "@/i18n";
 import type { Balance, SorokitClient, Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
 import { createMockClient, MOCK_ADDRESS } from "@/lib/mock-client";
@@ -53,6 +54,11 @@ async function flushTxFetch() {
   await waitFor(() => {
     expect(vi.mocked(getClient)).toHaveBeenCalled();
   });
+}
+
+/** Balance options only; the settings language <select> also renders <option>s. */
+function getBalanceOptions() {
+  return within(screen.getByRole("listbox", { name: "Account balances" })).getAllByRole("option");
 }
 
 function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
@@ -345,7 +351,7 @@ describe("AccountSidebar", () => {
       render(<AccountSidebar open={true} onClose={vi.fn()} />);
       await flushTxFetch();
       expect(screen.getByText("Assets (3)")).toBeInTheDocument();
-      expect(screen.getAllByRole("option")).toHaveLength(3);
+      expect(getBalanceOptions()).toHaveLength(3);
     });
   });
 
@@ -371,7 +377,7 @@ describe("AccountSidebar", () => {
       await flushTxFetch();
       const listbox = screen.getByRole("listbox", { name: "Account balances" });
       expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-0");
-      const options = screen.getAllByRole("option");
+      const options = getBalanceOptions();
       expect(options[0]).toHaveAttribute("aria-selected", "true");
       expect(options[1]).toHaveAttribute("aria-selected", "false");
     });
@@ -382,7 +388,7 @@ describe("AccountSidebar", () => {
       const listbox = screen.getByRole("listbox", { name: "Account balances" });
       fireEvent.keyDown(listbox, { key: "ArrowDown" });
       expect(listbox).toHaveAttribute("aria-activedescendant", "balance-item-1");
-      expect(screen.getAllByRole("option")[1]).toHaveAttribute("aria-selected", "true");
+      expect(getBalanceOptions()[1]).toHaveAttribute("aria-selected", "true");
     });
 
     it("moves the active descendant backward on ArrowUp, wrapping to the last item", async () => {
@@ -423,7 +429,7 @@ describe("AccountSidebar", () => {
     it("selects an item by clicking it directly", async () => {
       renderWithBalances();
       await flushTxFetch();
-      const options = screen.getAllByRole("option");
+      const options = getBalanceOptions();
       fireEvent.click(options[2]);
       expect(options[2]).toHaveAttribute("aria-selected", "true");
       expect(
@@ -453,6 +459,53 @@ describe("AccountSidebar", () => {
 
       expect(screen.queryByText("Account")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Expand account sidebar" })).toBeInTheDocument();
+    });
+  });
+
+  // ── Settings: language + biometric toggles (#1152, #1157) ───────────────
+  describe("language and biometric settings", () => {
+    it("changes and persists the active language from the settings selector", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ address: ADDRESS, isConnected: true }),
+      );
+      render(
+        <I18nProvider>
+          <AccountSidebar open={true} onClose={vi.fn()} />
+        </I18nProvider>,
+      );
+      await flushTxFetch();
+
+      const selector = screen.getByLabelText("Language");
+      expect(selector).toHaveValue("en");
+      fireEvent.change(selector, { target: { value: "es" } });
+
+      expect(localStorage.getItem("sorokit_locale")).toBe("es");
+      expect(screen.getByText("Configuración")).toBeInTheDocument();
+      expect(screen.getByText("Actualizar saldos")).toBeInTheDocument();
+    });
+
+    it("disables the biometric toggle with guidance when WebAuthn is unavailable", async () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({ address: ADDRESS, isConnected: true }),
+      );
+      const win = window as unknown as { PublicKeyCredential?: unknown };
+      const original = win.PublicKeyCredential;
+      delete win.PublicKeyCredential;
+      try {
+        render(
+          <I18nProvider>
+            <AccountSidebar open={true} onClose={vi.fn()} />
+          </I18nProvider>,
+        );
+        await flushTxFetch();
+
+        expect(screen.getByLabelText("Biometric unlock")).toBeDisabled();
+        expect(
+          screen.getByText("Biometric unlock is not available in this browser."),
+        ).toBeInTheDocument();
+      } finally {
+        win.PublicKeyCredential = original;
+      }
     });
   });
 });

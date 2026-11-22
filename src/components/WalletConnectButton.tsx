@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import { useOutsideClick } from "@/hooks/useOutsideClick";
+import { useI18n } from "@/i18n";
 import { truncateAddress, truncateAddressResponsive } from "@/lib/utils";
 
+import { HardwareWalletBadge } from "./HardwareWalletBadge";
 import { WalletConnectModal } from "./WalletConnectModal";
 
 export interface WalletConnectButtonProps {
@@ -29,6 +31,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     isDisconnecting,
     network,
   } = useSorokit();
+  const { t } = useI18n();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -90,7 +93,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
             onOpenModal();
           }}
           className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
-          aria-label={`Wallet connected: ${address}. Click to manage.`}
+          aria-label={`Wallet connected: ${address}. ${t("wallet.manage")}`}
         >
           <span className="w-2 h-2 rounded-full bg-green shrink-0" />
           <span
@@ -103,14 +106,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
             {truncateAddress(address)}
           </span>
           {isHardwareWallet && (
-            <span
-              data-testid="hardware-badge"
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30 shrink-0"
-            >
-              {walletName && walletName.toLowerCase().includes("ledger")
-                ? "Ledger"
-                : "Hardware"}
-            </span>
+            <HardwareWalletBadge walletName={walletName} />
           )}
         </button>
       );
@@ -126,7 +122,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
               setDropdownOpen((prev) => !prev);
             }}
             className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
-            aria-label={`Wallet connected: ${address}. Click to manage.`}
+            aria-label={`Wallet connected: ${address}. ${t("wallet.manage")}`}
             aria-haspopup="menu"
             aria-expanded={dropdownOpen}
           >
@@ -141,14 +137,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
               {truncateAddress(address)}
             </span>
             {isHardwareWallet && (
-              <span
-                data-testid="hardware-badge"
-                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30 shrink-0"
-              >
-                {walletName && walletName.toLowerCase().includes("ledger")
-                  ? "Ledger"
-                  : "Hardware"}
-              </span>
+              <HardwareWalletBadge walletName={walletName} />
             )}
           </button>
         </DropdownMenu.Trigger>
@@ -168,14 +157,11 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
                   {truncateAddress(address)}
                 </p>
                 {isHardwareWallet && (
-                  <span
-                    data-testid="hardware-badge-dropdown"
-                    className="text-[9px] font-medium px-1 py-0.2 rounded bg-purple-500/15 text-purple-400"
-                  >
-                    {walletName && walletName.toLowerCase().includes("ledger")
-                      ? "Ledger"
-                      : "Hardware"}
-                  </span>
+                  <HardwareWalletBadge
+                    walletName={walletName}
+                    compact
+                    testId="hardware-badge-dropdown"
+                  />
                 )}
               </div>
               {network && (
@@ -199,7 +185,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
                 color="currentColor"
                 strokeWidth={2}
               />
-              {isDisconnecting ? "Disconnecting…" : "Disconnect"}
+              {isDisconnecting ? t("wallet.disconnecting") : t("wallet.disconnect")}
             </DropdownMenu.Item>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -217,12 +203,12 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
           setConnectModalOpen(true);
         }}
         className="px-2.5 sm:px-4"
-        aria-label={isConnecting ? "Connecting…" : "Connect Wallet"}
+        aria-label={isConnecting ? t("wallet.connecting") : t("wallet.connect")}
         aria-haspopup="dialog"
         aria-expanded={connectModalOpen}
       >
         <span className="hidden sm:inline">
-          {isConnecting ? "Connecting…" : "Connect Wallet"}
+          {isConnecting ? t("wallet.connecting") : t("wallet.connect")}
         </span>
         <span className="sm:hidden">{isConnecting ? "…" : "Connect"}</span>
       </Button>
