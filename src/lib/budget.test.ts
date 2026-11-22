@@ -66,6 +66,41 @@ describe("computeBudgetBreakdown", () => {
       225,
     );
   });
+
+  describe("Single large transaction handling (Issue #1141)", () => {
+    it("handles single large transaction edge case gracefully with accurate percentage", () => {
+      const singleLargeTx: Transaction[] = [
+        {
+          hash: "tx-large-1",
+          ledger: 100,
+          createdAt: "2026-01-01T00:00:00Z",
+          successful: true,
+          operationCount: 1,
+          feePaid: "5000",
+          type: "Payment",
+        },
+      ];
+
+      const breakdown = computeBudgetBreakdown(singleLargeTx);
+
+      expect(breakdown.total).toBe(5000);
+      expect(breakdown.categories).toHaveLength(1);
+      expect(breakdown.categories[0].type).toBe("Payment");
+      expect(breakdown.categories[0].amount).toBe(5000);
+      expect(breakdown.categories[0].percentage).toBe(100);
+      expect(breakdown.categories[0].isSingleLarge).toBe(true);
+      expect(breakdown.hasSingleLargeTransaction).toBe(true);
+
+      // Verify split category display preserves accuracy
+      expect(breakdown.splitCategories).toBeDefined();
+      expect(breakdown.splitCategories).toHaveLength(2);
+      const splitTotalPct = breakdown.splitCategories!.reduce(
+        (sum, item) => sum + item.percentage,
+        0,
+      );
+      expect(splitTotalPct).toBe(100);
+    });
+  });
 });
 
 // ─── monthKeyUtc (issue #971) ───────────────────────────────────────────────

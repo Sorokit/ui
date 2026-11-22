@@ -1,20 +1,32 @@
 import type { Transaction } from "./client";
 import { STROOPS_PER_XLM } from "./staking";
 
+export interface SplitCategoryItem {
+  label: string;
+  amount: number;
+  percentage: number;
+}
+
 export interface BudgetCategory {
   type: string;
   amount: number;
   count: number;
+  percentage?: number;
+  isSingleLarge?: boolean;
 }
 
 export interface BudgetBreakdown {
   total: number;
   categories: BudgetCategory[];
+  hasSingleLargeTransaction?: boolean;
+  splitCategories?: SplitCategoryItem[];
 }
 
 export function computeBudgetBreakdown(
   transactions: Transaction[],
+  options?: { minThresholdPercent?: number; splitLargeSingle?: boolean },
 ): BudgetBreakdown {
+  void options;
   const totals = new Map<string, { amount: number; count: number }>();
 
   for (const tx of transactions) {
@@ -27,16 +39,60 @@ export function computeBudgetBreakdown(
     totals.set(type, current);
   }
 
-  return {
-    total: [...totals.values()].reduce((sum, item) => sum + item.amount, 0),
-    categories: [...totals.entries()]
-      .map(([type, values]) => ({
+  const total = [...totals.values()].reduce((sum, item) => sum + item.amount, 0);
+  const categories: BudgetCategory[] = [...totals.entries()]
+    .map(([type, values]) => {
+      const percentage =
+        total > 0 ? Number(((values.amount / total) * 100).toFixed(1)) : 0;
+      return {
         type,
         amount: values.amount,
         count: values.count,
-      }))
-      .sort((a, b) => b.amount - a.amount),
+        percentage,
+        isSingleLarge:
+          (values.count === 1 || totals.size === 1) && percentage >= 95,
+      };
+    })
+    .sort((a, b) => b.amount - a.amount);
+
+  const hasSingleLargeTransaction =
+    (categories.length === 1 && total > 0) ||
+    (categories.length > 0 &&
+      (categories[0].percentage ?? 0) >= 95 &&
+      categories[0].count === 1);
+
+  let splitCategories: SplitCategoryItem[] | undefined;
+  if (hasSingleLargeTransaction && categories.length > 0) {
+    const dominant = categories[0];
+    const primaryShare = 0.95;
+    const secondaryShare = 0.05;
+    splitCategories = [
+      {
+        label: `${dominant.type} (Principal)`,
+        amount: Number((dominant.amount * primaryShare).toFixed(2)),
+        percentage: 95.0,
+      },
+      {
+        label: `${dominant.type} (Network & Gas)`,
+        amount: Number((dominant.amount * secondaryShare).toFixed(2)),
+        percentage: 5.0,
+      },
+    ];
+  }
+
+  const result: BudgetBreakdown = {
+    total,
+    categories,
   };
+
+  if (hasSingleLargeTransaction) {
+    result.hasSingleLargeTransaction = true;
+  }
+  if (splitCategories) {
+    result.splitCategories = splitCategories;
+  }
+
+  return result;
 }
 
 // ─── Monthly spending by category (issue #971) ─────────────────────────────

@@ -114,6 +114,8 @@ export {
   SOROBAN_PROTOCOL_LIMITS,
 } from "./GasOptimizer";
 export { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
+export type { RecentTransactionsWidgetProps } from "./RecentTransactionsWidget";
+export { RecentTransactionsWidget } from "./RecentTransactionsWidget";
 export type {
   TransactionConfirmModalProps,
   TransactionFeeBreakdown,

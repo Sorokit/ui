@@ -60,11 +60,31 @@ vi.mock("@/components/NetworkBanner", () => ({
 const { sorokitState } = vi.hoisted(() => ({
   sorokitState: {
     isConnected: false,
+    address: null as string | null,
     isLoading: false,
     isLoadingAccount: false,
     account: null as unknown,
     balances: [] as unknown[],
     error: null as string | null,
+    client: {
+      transaction: {
+        getHistory: vi.fn().mockResolvedValue({
+          data: [
+            {
+              hash: "tx-mock-1",
+              ledger: 100,
+              createdAt: "2026-01-01T00:00:00Z",
+              successful: true,
+              operationCount: 1,
+              feePaid: "100",
+              type: "Payment",
+            },
+          ],
+          error: null,
+          total: 1,
+        }),
+      },
+    },
   },
 }));
 vi.mock("@/context/useSorokit", () => ({
@@ -204,6 +224,24 @@ describe("Dashboard", () => {
 
       expect(screen.queryByTestId("balance-summary-skeleton")).not.toBeInTheDocument();
       expect(screen.getByText("12.50")).toBeInTheDocument();
+    });
+  });
+
+  describe("recent transactions widget (Issue #1143)", () => {
+    it("renders recent transactions widget on dashboard and navigates to transactions on click", async () => {
+      sorokitState.isConnected = true;
+      sorokitState.address = "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA";
+      sorokitState.account = { address: "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA" };
+
+      render(<Dashboard />);
+
+      expect(screen.getByTestId("recent-transactions-widget")).toBeInTheDocument();
+      expect(screen.getByText("Recent Transactions")).toBeInTheDocument();
+
+      const viewAllBtn = screen.getByTestId("view-full-history-button");
+      fireEvent.click(viewAllBtn);
+
+      expect(await screen.findByTestId("screen-transactions")).toBeInTheDocument();
     });
   });
 

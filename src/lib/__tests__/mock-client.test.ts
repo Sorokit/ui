@@ -147,5 +147,173 @@ describe('Mock Client - Issue #30 Fixes', () => {
       expect(page1Ids).not.toEqual(page2Ids);
     });
   });
+
+  describe('Edge Case Handling (Issue #1140)', () => {
+    describe('Zero balance cases', () => {
+      it('returns empty balance array for GZERO address without crashing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.account.getBalances('GZERO');
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+      });
+
+      it('returns zero XLM balance when configured with zero balance address', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.account.getBalances('GZEROBALANCE');
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([
+          { asset: 'XLM', balance: '0.0000000', assetType: 'native' },
+        ]);
+      });
+
+      it('allows configuring a mock client instance with custom zero balances', async () => {
+        const client = createMockClient({
+          balances: [{ asset: 'XLM', balance: '0', assetType: 'native' }],
+        }) as SorokitClient;
+        const res = await client.account.getBalances();
+        expect(res.error).toBeNull();
+        expect(res.data).toHaveLength(1);
+        expect(res.data?.[0].balance).toBe('0');
+      });
+
+      it('allows configuring an empty balance array without crashing', async () => {
+        const client = createMockClient({ balances: [] }) as SorokitClient;
+        const res = await client.account.getBalances();
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+      });
+    });
+
+    describe('Empty arrays and empty collections', () => {
+      it('returns empty array when transaction history is empty', async () => {
+        const client = createMockClient({ history: [] }) as SorokitClient;
+        const res = await client.transaction.getHistory('GADDR', 1, 10);
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+        expect(res.total).toBe(0);
+      });
+
+      it('returns empty array for GEMPTY address', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.transaction.getHistory('GEMPTY');
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+        expect(res.total).toBe(0);
+      });
+
+      it('returns empty array when limit is 0', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.transaction.getHistory('GADDR', 1, 0);
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+        expect(res.total).toBe(0);
+      });
+
+      it('returns empty array for claimable balances', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.account.getClaimableBalances('GADDR');
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+      });
+
+      it('returns empty array for NFTs', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.nft.getNfts('GADDR');
+        expect(res.error).toBeNull();
+        expect(res.data).toEqual([]);
+      });
+
+      it('returns null data when getOperations finds no matching operations', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.operation.getOperations('non-existent-hash');
+        expect(res.error).toBeNull();
+        expect(res.data).toBeNull();
+      });
+
+      it('returns null data when getTimeline has no matches for filters', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.operation.getTimeline({
+          filters: { searchQuery: 'impossible-query-with-zero-results' },
+        });
+        expect(res.error).toBeNull();
+        expect(res.data).toBeNull();
+        expect(res.total).toBe(0);
+      });
+    });
+
+    describe('Null and undefined parameter handling', () => {
+      it('handles null and undefined address in account and balances without crashing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const balRes = await client.account.getBalances(undefined as unknown as string);
+        expect(balRes.error).toBeNull();
+        expect(Array.isArray(balRes.data)).toBe(true);
+
+        const claimRes = await client.account.getClaimableBalances(undefined as unknown as string);
+        expect(claimRes.error).toBeNull();
+        expect(claimRes.data).toEqual([]);
+      });
+
+      it('handles null/empty balanceId in claimBalance with error instead of throwing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.account.claimBalance('');
+        expect(res.data).toBeNull();
+        expect(res.error).toContain('Invalid claimable balance ID');
+
+        const resNull = await client.account.claimBalance(undefined as unknown as string);
+        expect(resNull.data).toBeNull();
+        expect(resNull.error).toContain('Invalid claimable balance ID');
+      });
+
+      it('handles null txHash in getOperations without throwing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.operation.getOperations(undefined as unknown as string);
+        expect(res.error).toBeNull();
+        expect(res.data).toBeNull();
+      });
+
+      it('handles null/undefined params in getTimeline without crashing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.operation.getTimeline(undefined as unknown as any);
+        expect(res.error).toBeNull();
+      });
+
+      it('handles null/undefined param in switchNetwork with an error instead of throwing', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.network.switchNetwork(undefined as unknown as any);
+        expect(res.data).toBeNull();
+        expect(res.error).toBeDefined();
+      });
+
+      it('handles GNOTFOUND account with structured error response', async () => {
+        const client = createMockClient() as SorokitClient;
+        const res = await client.account.getAccount('GNOTFOUND');
+        expect(res.data).toBeNull();
+        expect(res.status).toBe('error');
+        expect(res.error).toBe('Account not found');
+      });
+
+      it('handles transactions with null or undefined memos and metadata gracefully', async () => {
+        const client = createMockClient({
+          history: [
+            {
+              hash: 'tx-null-memo',
+              ledger: 100,
+              createdAt: '2026-01-01T00:00:00Z',
+              successful: true,
+              operationCount: 1,
+              feePaid: '100',
+              memo: undefined,
+              operationType: undefined,
+            },
+          ],
+        }) as SorokitClient;
+
+        const res = await client.transaction.getHistory('GADDR', 1, 10);
+        expect(res.error).toBeNull();
+        expect(res.data).toHaveLength(1);
+        expect(res.data?.[0].memo).toBeUndefined();
+      });
+    });
+  });
 });
 

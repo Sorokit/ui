@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +10,9 @@ import {
   CardTitle,
 } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
+import { PieChart, type PieSlice } from "@/components/ui/PieChart";
 import { computeBudgetBreakdown, convertXlmToUsd, formatUtcDate } from "@/lib/budget";
+import type { Transaction } from "@/lib/client";
 
 type AssetBreakdown = {
   asset: string;
@@ -36,6 +38,45 @@ const XLM_USD_RATE = 0.12;
 const DEFAULT_LIMIT = 1500;
 const DEFAULT_PERIOD_START = "2026-01-01T00:00:00Z";
 
+const DEFAULT_TRANSACTIONS: Transaction[] = [
+  {
+    hash: "mock-payment-1",
+    ledger: 1,
+    createdAt: "2026-01-01T00:00:00Z",
+    successful: true,
+    operationCount: 1,
+    feePaid: "950",
+    type: "Payment",
+  },
+  {
+    hash: "mock-payment-2",
+    ledger: 2,
+    createdAt: "2026-01-02T00:00:00Z",
+    successful: true,
+    operationCount: 1,
+    feePaid: "950",
+    type: "Payment",
+  },
+  {
+    hash: "mock-swap-1",
+    ledger: 3,
+    createdAt: "2026-01-03T00:00:00Z",
+    successful: true,
+    operationCount: 1,
+    feePaid: "230",
+    type: "Swap",
+  },
+  {
+    hash: "mock-farming-1",
+    ledger: 4,
+    createdAt: "2026-01-04T00:00:00Z",
+    successful: true,
+    operationCount: 1,
+    feePaid: "100",
+    type: "Farming Deposit",
+  },
+];
+
 /** Returns an inline error message for an invalid budget limit, or null when valid. */
 function validateBudgetLimit(raw: string): string | null {
   if (raw.trim() === "") return "Budget limit is required.";
@@ -46,7 +87,11 @@ function validateBudgetLimit(raw: string): string | null {
   return null;
 }
 
-export function BudgetScreen() {
+export interface BudgetScreenProps {
+  transactions?: Transaction[];
+}
+
+export function BudgetScreen({ transactions }: BudgetScreenProps = {}) {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(
     "monthly",
   );
@@ -68,50 +113,37 @@ export function BudgetScreen() {
     { asset: "USDC", amount: 480, percentage: 37.5 },
   ]);
 
-  const txBreakdown = computeBudgetBreakdown([
-    {
-      hash: "mock-payment-1",
-      ledger: 1,
-      createdAt: "2026-01-01T00:00:00Z",
-      successful: true,
-      operationCount: 1,
-      feePaid: "950",
-      type: "Payment",
-    },
-    {
-      hash: "mock-payment-2",
-      ledger: 2,
-      createdAt: "2026-01-02T00:00:00Z",
-      successful: true,
-      operationCount: 1,
-      feePaid: "950",
-      type: "Payment",
-    },
-    {
-      hash: "mock-swap-1",
-      ledger: 3,
-      createdAt: "2026-01-03T00:00:00Z",
-      successful: true,
-      operationCount: 1,
-      feePaid: "230",
-      type: "Swap",
-    },
-    {
-      hash: "mock-farming-1",
-      ledger: 4,
-      createdAt: "2026-01-04T00:00:00Z",
-      successful: true,
-      operationCount: 1,
-      feePaid: "100",
-      type: "Farming Deposit",
-    },
-  ]);
+  const txBreakdown = useMemo(
+    () => computeBudgetBreakdown(transactions ?? DEFAULT_TRANSACTIONS),
+    [transactions],
+  );
 
   const txTypes = txBreakdown.categories.map((category) => ({
     type: category.type,
     amount: category.amount,
     count: category.count,
+    percentage: category.percentage,
   }));
+
+  const pieSlices: PieSlice[] = useMemo(() => {
+    if (txBreakdown.categories.length === 0) return [];
+
+    if (txBreakdown.hasSingleLargeTransaction && txBreakdown.splitCategories) {
+      return txBreakdown.splitCategories.map((item, idx) => ({
+        key: `split-${idx}`,
+        label: item.label,
+        value: item.amount,
+        color: CHART_COLORS[idx % CHART_COLORS.length],
+      }));
+    }
+
+    return txBreakdown.categories.map((cat, idx) => ({
+      key: cat.type,
+      label: cat.type,
+      value: cat.amount,
+      color: CHART_COLORS[idx % CHART_COLORS.length],
+    }));
+  }, [txBreakdown]);
 
   // Calculations
   const hasBudget = budgetLimit > 0;
@@ -350,6 +382,69 @@ export function BudgetScreen() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Visual PieChart */}
+            {pieSlices.length > 0 && (
+              <div
+                className="flex flex-col items-center justify-center p-2"
+                data-testid="budget-pie-chart-wrapper"
+              >
+                <PieChart
+                  slices={pieSlices}
+                  size={180}
+                  innerRadius={0.5}
+                  centerLabel={
+                    txBreakdown.hasSingleLargeTransaction ? (
+                      <span
+                        className="text-[11px] font-bold text-ink"
+                        data-testid="pie-single-large-label"
+                      >
+                        100.0%
+                      </span>
+                    ) : undefined
+                  }
+                />
+              </div>
+            )}
+
+            {/* Single Large Transaction handling (#1141) */}
+            {txBreakdown.hasSingleLargeTransaction && (
+              <div
+                role="status"
+                data-testid="single-large-tx-notice"
+                className="rounded-lg border border-line bg-surface-2 p-3 space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-semibold text-ink">
+                    Single Large Transaction
+                  </span>
+                  <Badge variant="teal" data-testid="single-large-badge">
+                    100.0% of Spending
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-ink-3">
+                  This period's budget is dominated by a single large transaction. Showing split category breakdown for visual readability.
+                </p>
+                {txBreakdown.splitCategories && (
+                  <div
+                    className="pt-2 space-y-1 border-t border-line"
+                    data-testid="split-category-display"
+                  >
+                    {txBreakdown.splitCategories.map((item) => (
+                      <div
+                        key={item.label}
+                        className="flex justify-between text-[11px] text-ink-2"
+                      >
+                        <span>{item.label}</span>
+                        <span className="font-semibold text-ink">
+                          ${item.amount} ({item.percentage}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* By Asset */}
             <div className="space-y-2">
               <p className="text-[11px] font-bold text-ink-3 uppercase">
