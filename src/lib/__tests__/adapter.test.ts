@@ -212,6 +212,39 @@ describe('Happy-path flows (issue #814)', () => {
     expect(after.error).toContain('Not connected');
   });
 
+  it('disconnect() resets userAddress and soroban, and getEvents returns "Not connected"', async () => {
+    vi.stubGlobal('window', {
+      freighter: {
+        requestAccess: vi.fn(async () => ({})),
+        getPublicKey: vi.fn(async () => TEST_ADDRESS),
+      },
+    });
+
+    const getEventsMock = vi.fn(async () => []);
+    const connectedAdapter = createClientAdapter({
+      invokeContract: vi.fn(async () => ({ ok: true })),
+      getEvents: getEventsMock,
+    });
+    const internals = connectedAdapter as unknown as {
+      userAddress: string | null;
+      soroban: unknown;
+    };
+
+    await connectedAdapter.connect();
+    expect(internals.userAddress).toBe(TEST_ADDRESS);
+    expect(internals.soroban).not.toBeNull();
+
+    connectedAdapter.disconnect();
+    expect(internals.userAddress).toBeNull();
+    expect(internals.soroban).toBeNull();
+
+    const result = await connectedAdapter.getEvents(CONTRACT_ID, 10);
+    expect(result.status).toBe('error');
+    expect(result.data).toBeNull();
+    expect(result.error).toContain('Not connected');
+    expect(getEventsMock).not.toHaveBeenCalled();
+  });
+
   it('constructor-injected client is available after connect', async () => {
     vi.stubGlobal('window', {
       freighter: {
