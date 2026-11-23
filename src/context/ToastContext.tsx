@@ -81,6 +81,7 @@ interface ToastContextValue {
   pauseToast: (id: string) => void;
   /** Resume a paused toast's countdown from where it left off. */
   resumeToast: (id: string) => void;
+  keepToast: (id: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -184,6 +185,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [removeToast],
   );
 
+  const keepToast = useCallback((id: string) => {
+    const timer = timersRef.current.get(id);
+    if (!timer) return;
+    if (timer.timeout !== null) {
+      clearTimeout(timer.timeout);
+      timer.remaining = Math.max(0, timer.remaining - (Date.now() - timer.startedAt));
+      timer.startedAt = Date.now();
+      timer.timeout = setTimeout(() => removeToast(id), timer.remaining + 5000);
+    }
+    timer.remaining += 5000;
+  }, [removeToast]);
+
   const addToast = useCallback(
     (input: Omit<Toast, "id">): string => {
       toastCounter += 1;
@@ -280,6 +293,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         clearAll: dismissAll,
         pauseToast,
         resumeToast,
+        keepToast,
       }}
     >
       {children}
