@@ -160,6 +160,7 @@ export function TransactionPanel({
   const [memoType, setMemoType] = useState<MemoType>("text");
   const [memo, setMemo] = useState(defaultMemo);
   const [state, setState] = useState<State>("idle");
+  const [receiptAmount, setReceiptAmount] = useState<string>();
   const [result, setResult] = useState<TxResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TransactionPreviewData | null>(null);
@@ -512,6 +513,7 @@ export function TransactionPanel({
         onError?.(message);
         return;
       }
+      setReceiptAmount(`${amount} ${selectedAsset}`);
       setResult(data);
       setState("success");
       onSuccess?.(data!);
@@ -898,7 +900,7 @@ export function TransactionPanel({
                 )}
               </div>
             </div>
-            <TransactionStatusTracker hash={result.hash} className="mt-2" />
+            <TransactionStatusTracker hash={result.hash} amount={receiptAmount} className="mt-2" />
           </div>
         ) : !isConnected ? (
           <div className="flex flex-col items-center gap-3 py-8">
