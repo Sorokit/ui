@@ -189,7 +189,7 @@ describe("AllowanceManager", () => {
     fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
       expect(screen.getByText(/Token Code/)).toBeInTheDocument();
-      expect(screen.getByText(/Spender/)).toBeInTheDocument();
+      expect(screen.getByText(MOCK_ALLOWANCE.spender)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getAllByText(/USDC/)[0]);
@@ -425,16 +425,17 @@ describe("AllowanceManager — issue #917", () => {
   }
 
   function fillForm(values: { asset?: string; spender?: string; amount?: string }) {
+    const form = within(screen.getByRole("form", { name: "New allowance" }));
     if (values.asset !== undefined) {
-      fireEvent.change(screen.getByLabelText("Token"), { target: { value: values.asset } });
+      fireEvent.change(form.getByLabelText("Token"), { target: { value: values.asset } });
     }
     if (values.spender !== undefined) {
-      fireEvent.change(screen.getByLabelText("Spender address"), {
+      fireEvent.change(form.getByLabelText("Spender address"), {
         target: { value: values.spender },
       });
     }
     if (values.amount !== undefined) {
-      fireEvent.change(screen.getByLabelText("Amount"), { target: { value: values.amount } });
+      fireEvent.change(form.getByLabelText("Amount"), { target: { value: values.amount } });
     }
   }
 
