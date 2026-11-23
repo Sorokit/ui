@@ -207,4 +207,45 @@ describe("Network switching mid-transaction integration tests (#1166)", () => {
 
     expect(screen.queryByText("Sending Batch…")).not.toBeInTheDocument();
   });
-});
+
+  /**
+   * Test suite for state consistency during rapid network switches.
+   * Addresses issue #1089: Verify network state remains consistent during rapid switches.
+   */
+  describe("Rapid network switching edge cases", () => {
+    it("handles sequential rapid network switches without state corruption", async () => {
+      render(
+        <SorokitProvider client={mockClient}>
+          <TestHarness previewMode={false} />
+        </SorokitProvider>,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Destination Address")).toBeInTheDocument();
+      });
+
+      // Perform multiple rapid switches
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Switch to Mainnet" }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Switch to Mainnet" }));
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Switch to Mainnet" }));
+      });
+
+      // Verify the UI remains stable and functional
+      await waitFor(() => {
+        expect(mockClient.network.switchNetwork).toHaveBeenCalled();
+      });
+
+      expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
+    });
+  });
