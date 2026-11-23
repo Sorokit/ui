@@ -118,6 +118,37 @@ describe("RewardHistory — rendering", () => {
     expect(screen.getAllByText("Alpha Staking").length).toBeGreaterThan(0);
   });
 
+  it("shows absolute dates and relative UTC days in the bar tooltips", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2024-11-21T23:59:59Z"));
+      render(
+        <RewardHistory
+          events={[]}
+          validators={MOCK_VALIDATORS}
+          dailyRewards={[
+            { date: "2024-11-01", totalXlm: 1.25 },
+            { date: "2024-11-20", totalXlm: 2 },
+            { date: "2024-11-21", totalXlm: 3 },
+          ]}
+        />,
+      );
+
+      const chart = screen.getByRole("img", { name: /reward history bar chart/i });
+      const tooltips = Array.from(
+        chart.querySelectorAll("g > title"),
+        (title) => title.textContent,
+      );
+      expect(tooltips).toEqual([
+        "2024-11-01 (20 days ago): 1.2500 XLM",
+        "2024-11-20 (yesterday): 2.0000 XLM",
+        "2024-11-21 (today): 3.0000 XLM",
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the date range labels under the chart", () => {
     render(
       <RewardHistory

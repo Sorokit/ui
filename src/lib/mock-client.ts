@@ -323,26 +323,16 @@ export function createMockClient(
             error: null,
           };
         }
-        return { data: customBalances ?? MOCK_BALANCES, error: null };
+        const browserBalances =
+          typeof window === "undefined"
+            ? undefined
+            : (window as Window & { __MOCK_BALANCES__?: Balance[] }).__MOCK_BALANCES__;
+        return { data: customBalances ?? browserBalances ?? MOCK_BALANCES, error: null };
       },
       getClaimableBalances: async (address?: string) => {
         if (!address) return { data: [], error: null };
         return { data: customClaimables ?? [], error: null };
       },
-      getAccount: async () => ({
-        data: MOCK_ACCOUNT,
-        error: null,
-        status: "success" as const,
-      }),
-      getBalances: async () => ({
-        data:
-          typeof window !== "undefined" &&
-          (window as unknown as { __MOCK_BALANCES__?: Balance[] }).__MOCK_BALANCES__
-            ? (window as unknown as { __MOCK_BALANCES__: Balance[] }).__MOCK_BALANCES__!
-            : MOCK_BALANCES,
-        error: null,
-      }),
-      getClaimableBalances: async () => ({ data: [], error: null }),
       claimBalance: async (
         balanceId?: string,
       ): Promise<{ data: TxResult | null; error: string | null }> => {
@@ -392,23 +382,16 @@ export function createMockClient(
         if (address === "GEMPTY") {
           return { data: [], error: null, total: 0 };
         }
-        const sourceHistory = customHistory ?? MOCK_HISTORY;
-        const safePage = Math.max(1, page || 1);
-        const all = [...submittedTxs, ...MOCK_HISTORY];
-        const pageSize =
-          limit !== undefined && limit > 0 ? limit : sourceHistory.length;
+        const sourceHistory = [...submittedTxs, ...(customHistory ?? MOCK_HISTORY)];
         const total = sourceHistory.length;
         if (total === 0 || limit === 0) {
           return { data: [], error: null, total: 0 };
         }
+
+        const safePage = Math.max(1, page || 1);
+        const pageSize = limit !== undefined && limit > 0 ? limit : total;
         const start = (safePage - 1) * pageSize;
-        const end = start + pageSize;
-        const history = sourceHistory.slice(start, end);
-          limit !== undefined && limit > 0 ? limit : all.length;
-        const total = all.length;
-        const start = (safePage - 1) * pageSize;
-        const end = start + pageSize;
-        const history = all.slice(start, end);
+        const history = sourceHistory.slice(start, start + pageSize);
         return { data: history, error: null, total };
       },
       estimateFee: async () => ({
