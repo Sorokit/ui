@@ -80,6 +80,57 @@ describe('MyComponent', () => {
 });
 ```
 
+### Testing Error States and Recovery (#1086)
+
+Always test error states and recovery paths in your tests. This ensures the UI gracefully handles failures:
+
+```typescript
+describe('MyComponent Error Handling', () => {
+  it('displays error message when API call fails', async () => {
+    const failingClient = {
+      account: {
+        getAccount: vi.fn().mockResolvedValue({
+          data: null,
+          error: 'Failed to fetch account'
+        })
+      }
+    };
+
+    renderWithProvider(<MyComponent />, { client: failingClient });
+    
+    await waitFor(() => {
+      expect(screen.getByText(/failed to fetch/i)).toBeInTheDocument();
+    });
+  });
+
+  it('allows retry after a failed operation', async () => {
+    const flakeyClient = {
+      account: {
+        getAccount: vi
+          .fn()
+          .mockResolvedValueOnce({ data: null, error: 'Network error' })
+          .mockResolvedValueOnce({ data: { sequence: '123' }, error: null })
+      }
+    };
+
+    renderWithProvider(<MyComponent />, { client: flakeyClient });
+    
+    // First attempt fails
+    await waitFor(() => {
+      expect(screen.getByText(/network error/i)).toBeInTheDocument();
+    });
+
+    // User clicks retry
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    // Second attempt succeeds
+    await waitFor(() => {
+      expect(screen.getByText('123')).toBeInTheDocument();
+    });
+  });
+});
+```
+
 ### Mocking getClient()
 
 Mock the Sorokit client for isolated component tests:
@@ -168,6 +219,28 @@ dependencies in `devDependencies` where possible and lazy-loading heavy assets.
 - CI checks must pass (lint, typecheck, build, bundle size, exports, tests)
 - New components must include JSDoc comments
 - Breaking changes need documentation updates
+
+## Async Race Conditions and State Management
+
+When working with asynchronous operations (network calls, timers), be aware of potential race conditions:
+
+- **Issue #1087**: Use `AbortController` to cancel in-flight requests when components unmount or state changes
+- Always clean up timers and listeners in component cleanup functions
+- Test rapid state changes to catch race conditions early
+
+### Common Race Condition Scenarios
+
+1. **Network request arrives after unmount**: Component fetches data on mount, but unmounts before the response arrives. The component tries to update state, causing a memory leak warning.
+   
+   **Solution**: Cancel the request or check if component is still mounted before updating state.
+
+2. **Multiple rapid state updates**: User triggers multiple updates in quick succession (e.g., rapid network switches), causing inconsistent state.
+   
+   **Solution**: Use debouncing or ensure state transitions are atomic.
+
+3. **Stale closures in event handlers**: Event handlers capture state from an earlier render, leading to stale data being used.
+   
+   **Solution**: Use `useCallback` with proper dependency arrays, or access current state from refs when necessary.
 
 ## Questions?
 
