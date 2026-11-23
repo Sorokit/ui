@@ -6,7 +6,7 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { useSorokit } from "@/context/useSorokit";
@@ -125,6 +125,39 @@ function truncateAddress(address: string, start = 8, end = 6): string {
   return `${address.slice(0, start)}...${address.slice(-end)}`;
 }
 
+const SORT_COLUMNS = [
+  { key: "asset", label: "Asset" },
+  { key: "spender", label: "Spender" },
+  { key: "amount", label: "Amount" },
+  { key: "expiry", label: "Expiry" },
+] as const;
+
+type SortColumn = (typeof SORT_COLUMNS)[number]["key"];
+
+function compareAmounts(a: string, b: string): number {
+  const decimal = /^([+-]?)(\d*)(?:\.(\d*))?$/;
+  const left = decimal.exec(a.trim());
+  const right = decimal.exec(b.trim());
+  if (!left || !right) return Number(a) - Number(b);
+
+  const places = Math.max(left[3]?.length ?? 0, right[3]?.length ?? 0);
+  const toUnits = ([, sign, whole, fraction = ""]: RegExpExecArray) =>
+    BigInt(`${sign}${whole || "0"}${fraction.padEnd(places, "0")}`);
+  const difference = toUnits(left) - toUnits(right);
+  return difference < 0n ? -1 : difference > 0n ? 1 : 0;
+}
+
+function expirySortValue(entry: AllowanceEntry, currentLedger: number | undefined, now: number) {
+  if (entry.expirationLedger != null && currentLedger != null) {
+    return { group: 0, value: now + (entry.expirationLedger - currentLedger) * LEDGER_CLOSE_SECONDS * 1000 };
+  }
+  const date = Date.parse(entry.expirationDate ?? "");
+  if (Number.isFinite(date)) return { group: 0, value: date };
+  if (entry.expirationLedger != null) return { group: 1, value: entry.expirationLedger };
+  return { group: 2, value: 0 };
+}
+
+/** Lists and manages token allowances, with sorting by asset, spender, amount, or expiry. */
 export function AllowanceManager({ className, currentLedger }: AllowanceManagerProps) {
   const { address, isConnected, client } = useSorokit();
   const [allowances, setAllowances] = useState<AllowanceEntry[]>([]);
@@ -133,6 +166,29 @@ export function AllowanceManager({ className, currentLedger }: AllowanceManagerP
   const [expanded, setExpanded] = useState<string | null>(null);
   const [processing, setProcessing] = useState<Record<string, 'increase' | 'decrease' | 'revoke' | null>>({});
   const [showNewForm, setShowNewForm] = useState(false);
+
+  const [sort, setSort] = useState<{ column: SortColumn; ascending: boolean; referenceTime: number } | null>(null);
+
+  const sortedAllowances = useMemo(() => {
+    if (!sort) return allowances;
+    const direction = sort.ascending ? 1 : -1;
+    return [...allowances].sort((a, b) => {
+      switch (sort.column) {
+        case "asset":
+          return direction * formatAssetName(a).localeCompare(formatAssetName(b));
+        case "spender":
+          return direction * (a.spenderName || a.spender).localeCompare(b.spenderName || b.spender);
+        case "amount":
+          return direction * compareAmounts(a.amount, b.amount);
+        case "expiry": {
+          const aExpiry = expirySortValue(a, currentLedger, sort.referenceTime);
+          const bExpiry = expirySortValue(b, currentLedger, sort.referenceTime);
+          // Ledger-only expiries without a reference ledger follow dated entries.
+          return aExpiry.group - bExpiry.group || direction * (aExpiry.value - bExpiry.value);
+        }
+      }
+    });
+  }, [allowances, currentLedger, sort]);
 
   const sourceAccount = address || FALLBACK_ADDRESS;
 
@@ -496,7 +552,35 @@ export function AllowanceManager({ className, currentLedger }: AllowanceManagerP
             </p>
           ) : (
             <div className="space-y-3">
-              {allowances.map(renderAllowanceCard)}
+              <div role="group" aria-label="Sort allowances" className="grid grid-cols-4 gap-2">
+                {SORT_COLUMNS.map(({ key, label }) => {
+                  const active = sort?.column === key;
+                  const direction = sort?.ascending ? "ascending" : "descending";
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      aria-pressed={active}
+                      aria-label={active ? `${label}, ${direction}` : label}
+                      className={cn(
+                        "rounded-lg border border-line px-1 py-2 text-xs font-medium",
+                        active ? "bg-brand-dim text-brand" : "bg-surface-2 text-ink-2",
+                      )}
+                      onClick={() => {
+                        const referenceTime = Date.now();
+                        setSort((previous) => ({
+                          column: key,
+                          ascending: previous?.column === key ? !previous.ascending : true,
+                          referenceTime,
+                        }));
+                      }}
+                    >
+                      {label}{active && <span aria-hidden="true"> {sort?.ascending ? "↑" : "↓"}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              {sortedAllowances.map(renderAllowanceCard)}
             </div>
           )}
         </div>

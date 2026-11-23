@@ -599,6 +599,44 @@ describe("NFTGallery — with NFTs", () => {
     );
   });
 
+  it("mounts only 20 cards per page and resets pagination when searching", async () => {
+    const nfts = Array.from({ length: 501 }, (_, index) =>
+      makeNft({
+        id: `nft-${index}`,
+        metadata: { name: `Collectible ${String(index).padStart(3, "0")}`, attributes: [] },
+      }),
+    );
+    vi.mocked(getClient).mockReturnValue(
+      makeClient({ data: nfts, error: null }) as unknown as ReturnType<typeof getClient>,
+    );
+
+    render(<NFTGallery />);
+    const next = await screen.findByRole("button", { name: "Next" });
+    const previous = screen.getByRole("button", { name: "Previous" });
+    expect(previous).toBeDisabled();
+    expect(screen.getAllByTestId("nft-card")).toHaveLength(20);
+    expect(screen.queryByText("Collectible 020")).not.toBeInTheDocument();
+
+    fireEvent.click(next);
+    expect(screen.getByText("Page 2 of 26")).toBeInTheDocument();
+    expect(screen.getByText("Collectible 020")).toBeInTheDocument();
+    expect(screen.queryByText("Collectible 000")).not.toBeInTheDocument();
+    fireEvent.click(previous);
+    expect(screen.getByText("Collectible 000")).toBeInTheDocument();
+
+    for (let page = 1; page < 26; page++) fireEvent.click(next);
+    expect(next).toBeDisabled();
+    expect(screen.getAllByTestId("nft-card")).toHaveLength(1);
+    expect(screen.getByText("Collectible 500")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search NFTs" }), {
+      target: { value: "Collectible 0" },
+    });
+    expect(screen.getByText("Page 1 of 5")).toBeInTheDocument();
+    expect(previous).toBeDisabled();
+    expect(screen.getByText("Collectible 000")).toBeInTheDocument();
+  });
+
   it("renders all NFT cards", async () => {
     render(<NFTGallery />);
     await waitFor(() => {

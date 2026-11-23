@@ -1,9 +1,48 @@
-import { act,fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BudgetScreen } from "./BudgetScreen";
 
 describe("BudgetScreen", () => {
+  it("edits category names and colors and restores saved settings on remount", () => {
+    const key = "sorokit-budget-categories";
+    localStorage.removeItem(key);
+    try {
+      const { unmount } = render(<BudgetScreen />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Payment category name" }), {
+        target: { value: "Transfers" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.getByText("Payment (2 txs)")).toBeInTheDocument();
+      expect(localStorage.getItem(key)).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Payment category name" }), {
+        target: { value: " Transfers " },
+      });
+      fireEvent.change(screen.getByLabelText("Payment category color"), {
+        target: { value: "#123456" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(screen.getByText("Transfers (2 txs)")).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "Payment category name" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("budget-pie-chart-wrapper").querySelector('path[fill="#123456"]')).toBeInTheDocument();
+      expect(JSON.parse(localStorage.getItem(key) ?? "{}")).toMatchObject({
+        Payment: { name: "Transfers", color: "#123456" },
+      });
+
+      unmount();
+      render(<BudgetScreen />);
+      expect(screen.getByText("Transfers (2 txs)")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByLabelText("Payment category color")).toHaveValue("#123456");
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("renders Budget Screen and progress bar info", () => {
     render(<BudgetScreen />);
     expect(screen.getByText("Budget & Transaction Limits")).toBeInTheDocument();
