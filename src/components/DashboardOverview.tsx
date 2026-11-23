@@ -13,6 +13,7 @@ import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 
 import { OfflineBadge } from "@/components/OfflineBadge";
+import { RecentTransactionsWidget } from "@/components/RecentTransactionsWidget";
 import type { NavSection } from "@/components/Sidebar";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
@@ -117,6 +118,12 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
             </div>
           ))}
         </div>
+      )}
+
+      {isConnected && (
+        <RecentTransactionsWidget
+          onViewFullHistory={() => onNavigate("transactions")}
+        />
       )}
     </div>
   );

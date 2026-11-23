@@ -152,4 +152,40 @@ describe("BudgetScreen", () => {
       expect(screen.getByTestId("xlm-usd-result")).toHaveTextContent("≈ $0.00 USD");
     });
   });
+
+  describe("Single large transaction handling (Issue #1141)", () => {
+    it("renders PieChart in spending breakdown", () => {
+      render(<BudgetScreen />);
+      expect(screen.getByTestId("budget-pie-chart-wrapper")).toBeInTheDocument();
+    });
+
+    it("handles a single large transaction with accurate percentage and split category display", () => {
+      const singleTx = [
+        {
+          hash: "tx-single-large",
+          ledger: 100,
+          createdAt: "2026-01-01T00:00:00Z",
+          successful: true,
+          operationCount: 1,
+          feePaid: "5000",
+          type: "Payment",
+        },
+      ];
+
+      render(<BudgetScreen transactions={singleTx} />);
+
+      // Single large transaction notice is shown
+      expect(screen.getByTestId("single-large-tx-notice")).toBeInTheDocument();
+      expect(screen.getByTestId("single-large-badge")).toHaveTextContent("100.0% of Spending");
+      expect(screen.getByTestId("pie-single-large-label")).toHaveTextContent("100.0%");
+
+      // Split category display is rendered
+      const splitDisplay = screen.getByTestId("split-category-display");
+      expect(splitDisplay).toBeInTheDocument();
+      expect(splitDisplay).toHaveTextContent(/Payment \(Principal\)/);
+      expect(splitDisplay).toHaveTextContent(/Payment \(Network & Gas\)/);
+      expect(splitDisplay).toHaveTextContent("95%");
+      expect(splitDisplay).toHaveTextContent("5%");
+    });
+  });
 });

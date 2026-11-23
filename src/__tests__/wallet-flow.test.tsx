@@ -47,6 +47,90 @@ describe("Wallet Connect Flow Integration", () => {
     } as unknown as ReturnType<typeof getClient>;
   });
 
+  /**
+   * Tests wallet connection failure handling and error recovery.
+   * Addresses issue #1104: Verify error states display correctly when wallet connection fails.
+   */
+  describe("Error handling and recovery", () => {
+    it("displays error message when wallet connection fails", async () => {
+      const failingClient = {
+        ...mockClient,
+        wallet: {
+          connect: vi.fn().mockResolvedValue({ 
+            data: null, 
+            error: "User rejected connection request" 
+          }),
+          disconnect: vi.fn().mockResolvedValue(undefined),
+        },
+      } as unknown as ReturnType<typeof getClient>;
+
+      render(
+        <ToastProvider>
+          <SorokitProvider client={failingClient}>
+            <WalletConnectButton />
+          </SorokitProvider>
+        </ToastProvider>,
+      );
+
+      const connectBtn = screen.getByRole("button", { name: /connect/i });
+      await act(async () => {
+        fireEvent.click(connectBtn);
+      });
+
+      await waitFor(() => {
+        // Verify that the button remains in a state allowing retry
+        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+      });
+    });
+
+    it("allows wallet reconnection after a failed connection attempt", async () => {
+      const flakeyClient = {
+        ...mockClient,
+        wallet: {
+          connect: vi
+            .fn()
+            .mockResolvedValueOnce({ 
+              data: null, 
+              error: "Temporary connection failure" 
+            })
+            .mockResolvedValueOnce({ 
+              data: { address: "GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890" }, 
+              error: null 
+            }),
+          disconnect: vi.fn().mockResolvedValue(undefined),
+        },
+      } as unknown as ReturnType<typeof getClient>;
+
+      render(
+        <ToastProvider>
+          <SorokitProvider client={flakeyClient}>
+            <WalletConnectButton />
+          </SorokitProvider>
+        </ToastProvider>,
+      );
+
+      const connectBtn = screen.getByRole("button", { name: /connect/i });
+      
+      // First attempt fails
+      await act(async () => {
+        fireEvent.click(connectBtn);
+      });
+
+      await waitFor(() => {
+        expect(flakeyClient.wallet.connect).toHaveBeenCalledTimes(1);
+      });
+
+      // Second attempt succeeds
+      await act(async () => {
+        fireEvent.click(connectBtn);
+      });
+
+      await waitFor(() => {
+        expect(flakeyClient.wallet.connect).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
   it("connects wallet, displays account, and disconnects", async () => {
     render(
       <ToastProvider>

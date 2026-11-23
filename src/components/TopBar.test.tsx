@@ -348,4 +348,91 @@ describe("TopBar — issue #679", () => {
       expect(screen.getByTestId("network-status-label")).toHaveTextContent("Active");
     });
   });
+
+  describe("Pending Actions notification center (#1144)", () => {
+    it("displays badge count on bell icon when pending actions exist", () => {
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          pendingActions={[
+            {
+              id: "claim-1",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "2 claimable balances ready",
+              count: 2,
+              targetScreen: "account",
+            },
+            {
+              id: "sched-1",
+              type: "scheduled_tx",
+              title: "Scheduled Payments",
+              description: "1 payment queued",
+              count: 1,
+              targetScreen: "transactions",
+            },
+          ]}
+        />,
+      );
+
+      const badge = screen.getByTestId("notifications-badge");
+      expect(badge).toHaveTextContent("2");
+    });
+
+    it("dropdown shows pending items when opened", async () => {
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          pendingActions={[
+            {
+              id: "claim-test",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "3 balances to claim",
+              count: 3,
+              targetScreen: "account",
+            },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("notifications-bell"));
+
+      expect(await screen.findByTestId("pending-actions-list")).toBeInTheDocument();
+      expect(screen.getByText("Claimable Balances")).toBeInTheDocument();
+      expect(screen.getByText("3 balances to claim")).toBeInTheDocument();
+    });
+
+    it("clicking pending action item navigates to relevant screen and closes dialog", async () => {
+      const onNavigate = vi.fn();
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          onNavigate={onNavigate}
+          pendingActions={[
+            {
+              id: "claim-nav",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "Navigate to claim",
+              targetScreen: "account",
+            },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("notifications-bell"));
+
+      const itemButton = await screen.findByTestId("pending-action-item-claim-nav");
+      fireEvent.click(itemButton);
+
+      expect(onNavigate).toHaveBeenCalledWith("account");
+      await waitFor(() => {
+        expect(screen.queryByTestId("pending-actions-list")).not.toBeInTheDocument();
+      });
+    });
+  });
 });

@@ -33,6 +33,11 @@ const NetworkScreen = lazy(() =>
 const NFTScreen = lazy(() =>
   import("@/screens/NFTScreen").then((m) => ({ default: m.NFTScreen })),
 );
+const PortfolioAnalyticsScreen = lazy(() =>
+  import("@/screens/PortfolioAnalyticsScreen").then((m) => ({
+    default: m.PortfolioAnalyticsScreen,
+  })),
+);
 const RecoveryScreen = lazy(() =>
   import("@/screens/RecoveryScreen").then((m) => ({ default: m.RecoveryScreen })),
 );
@@ -58,6 +63,7 @@ const SCREENS: Record<NavSection, ComponentType> = {
   network: NetworkScreen,
   recovery: RecoveryScreen,
   charts: ChartingScreen,
+  portfolio: PortfolioAnalyticsScreen,
   farming: YieldFarmingScreen,
   budget: BudgetScreen,
   nfts: NFTScreen,
@@ -72,6 +78,7 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   network: "Network",
   recovery: "Recovery",
   charts: "Charts",
+  portfolio: "Portfolio Analytics",
   farming: "Yield Farming",
   budget: "Budget",
   nfts: "NFTs",
@@ -207,6 +214,7 @@ export function Dashboard({
           active={active}
           onMenuToggle={() => setSidebarOpen((o) => !o)}
           sidebarOpen={sidebarOpen}
+          onNavigate={handleNavigate}
         />
         <NetworkBanner active={active} />
         <RateLimitIndicator />

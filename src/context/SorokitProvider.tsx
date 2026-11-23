@@ -187,8 +187,12 @@ export function SorokitProvider({
   // swallowed instead of surfacing as an unhandled promise rejection.
   const accountRequestRef = useRef<AbortController | null>(null);
 
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       accountRequestRef.current?.abort();
       accountRequestRef.current = null;
     };
@@ -212,6 +216,10 @@ export function SorokitProvider({
       } else if (source === "wallet") {
         setWalletError(err);
       } else {
+        console.warn(
+          `SorokitProvider: unknown error source "${source}"; defaulting to account error.`,
+          err,
+        );
         setAccountError(err);
       }
       setErrorSeverity(severity);
@@ -423,11 +431,15 @@ export function SorokitProvider({
     );
   }
 
-  const connectWallet = useCallback(async () => {
-    setIsConnecting(true);
-    setWalletError(null);
+  const clearError = useCallback(() => {
     setAccountError(null);
     setNetworkError(null);
+    setWalletError(null);
+  }, []);
+
+  const connectWallet = useCallback(async () => {
+    clearError();
+    setIsConnecting(true);
     try {
       const name = detectWalletName();
       setWalletName(name);
@@ -465,7 +477,7 @@ export function SorokitProvider({
     } finally {
       setIsConnecting(false);
     }
-  }, [reportError]);
+  }, [clearError, reportError]);
 
   const disconnectWallet = useCallback(async () => {
     setIsDisconnecting(true);
@@ -620,14 +632,8 @@ export function SorokitProvider({
     setCustomNetworks([]);
   }, []);
 
-  const clearError = useCallback(() => {
-    setAccountError(null);
-    setNetworkError(null);
-    setWalletError(null);
-  }, []);
-
   const refreshAccount = useCallback(async () => {
-    if (!address || isRefreshingRef.current) return;
+    if (!address || isRefreshingRef.current || !isMountedRef.current) return;
     isRefreshingRef.current = true;
     setIsLoadingAccount(true);
 
@@ -645,6 +651,10 @@ export function SorokitProvider({
       if (controller.signal.aborted) return;
       const usedCache = applyAccountResults(address, accountRes, balancesRes);
       const severity = usedCache ? "info" : "error";
+      if (controller.signal.aborted || !isMountedRef.current) return;
+      if (accountRes.data) setAccount(accountRes.data);
+      if (balancesRes.data) setBalances(balancesRes.data);
+
       if (accountRes.error && balancesRes.error) {
         reportError(
           `${accountRes.error}; ${balancesRes.error}`,
@@ -666,13 +676,20 @@ export function SorokitProvider({
         address,
         { data: null, error: message },
         { data: null, error: message },
+      if (controller.signal.aborted || !isMountedRef.current) return;
+      reportError(
+        e instanceof Error ? e.message : "Failed to refresh account data",
+        "account",
+        "error",
       );
       reportError(message, "account", usedCache ? "info" : "error");
     } finally {
       if (accountRequestRef.current === controller) {
         accountRequestRef.current = null;
       }
-      setIsLoadingAccount(false);
+      if (isMountedRef.current && !controller.signal.aborted) {
+        setIsLoadingAccount(false);
+      }
       isRefreshingRef.current = false;
     }
   }, [address, reportError, applyAccountResults]);
@@ -722,6 +739,7 @@ export function SorokitProvider({
       errorSeverity,
       errorHistory,
       clearError,
+      reportError,
     }),
     [
       currentClient,
@@ -756,6 +774,7 @@ export function SorokitProvider({
       errorSeverity,
       errorHistory,
       clearError,
+      reportError,
     ],
   );
 

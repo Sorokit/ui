@@ -26,9 +26,30 @@ export interface Toast {
   };
 }
 
+/** A notification kept in history after its toast has gone. */
+export interface NotificationEntry {
+  id: string;
+  type: ToastType;
+  title: string;
+  message?: string;
+  /** Epoch milliseconds. */
+  timestamp: number;
+  read: boolean;
+}
+
 interface ToastContextValue {
   toasts: Toast[];
   unreadCount: number;
+  /** Session notification history, newest first. */
+  history: NotificationEntry[];
+  /** Unread history entries, including toasts that have already expired. */
+  unreadHistoryCount: number;
+  /** Add to history without showing a toast (e.g. banner errors). */
+  recordNotification: (
+    entry: Pick<NotificationEntry, "type" | "title" | "message">,
+  ) => void;
+  dismissNotification: (id: string) => void;
+  clearNotifications: () => void;
   addToast: (toast: Omit<Toast, "id">) => string;
   removeToast: (id: string) => void;
   markAllRead: () => void;
@@ -74,6 +95,7 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 
 let toastCounter = 0;
 const DEFAULT_DURATION = 5000;
+const MAX_HISTORY = 100;
 
 /**
  * Per-toast countdown state. `remaining` is only meaningful while a toast is
@@ -92,7 +114,37 @@ interface ToastTimer {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [unreadIds, setUnreadIds] = useState<string[]>([]);
+  const [history, setHistory] = useState<NotificationEntry[]>([]);
   const timersRef = useRef<Map<string, ToastTimer>>(new Map());
+
+  const appendHistory = useCallback(
+    (id: string, entry: Pick<NotificationEntry, "type" | "title" | "message">) => {
+      const item: NotificationEntry = {
+        id,
+        type: entry.type,
+        title: entry.title,
+        message: entry.message,
+        timestamp: Date.now(),
+        read: false,
+      };
+      setHistory((prev) => [item, ...prev].slice(0, MAX_HISTORY));
+    },
+    [],
+  );
+
+  const recordNotification = useCallback(
+    (entry: Pick<NotificationEntry, "type" | "title" | "message">) => {
+      toastCounter += 1;
+      appendHistory(`notification_${toastCounter}_${Date.now()}`, entry);
+    },
+    [appendHistory],
+  );
+
+  const dismissNotification = useCallback((id: string) => {
+    setHistory((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const clearNotifications = useCallback(() => setHistory([]), []);
 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -140,6 +192,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
       setToasts((prev) => [...prev, toast]);
       setUnreadIds((prev) => [...prev, id]);
+      appendHistory(id, toast);
 
       if (toast.duration !== 0) {
         const ms = toast.duration ?? DEFAULT_DURATION;
@@ -154,7 +207,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
       return id;
     },
-    [removeToast],
+    [removeToast, appendHistory],
   );
 
   const dismissAll = useCallback(() => {
@@ -166,7 +219,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setUnreadIds([]);
   }, []);
 
-  const markAllRead = useCallback(() => setUnreadIds([]), []);
+  const markAllRead = useCallback(() => {
+    setUnreadIds([]);
+    setHistory((prev) => prev.map((item) => ({ ...item, read: true })));
+  }, []);
 
   const success = useCallback(
     (title: string, options?: Omit<Partial<Toast>, "id" | "title" | "type">) =>
@@ -208,6 +264,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       value={{
         toasts,
         unreadCount: unreadIds.length,
+        history,
+        unreadHistoryCount: history.filter((item) => !item.read).length,
+        recordNotification,
+        dismissNotification,
+        clearNotifications,
         addToast,
         removeToast,
         markAllRead,

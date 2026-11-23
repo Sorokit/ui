@@ -5,9 +5,16 @@ import ReactDOM from 'react-dom/client'
 
 import App from './App'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { PerformanceMonitor, Profiled } from './components/PerformanceMonitor'
 import type { SorokitClient } from './lib/client'
 import { createMockClient } from './lib/mock-client'
 import { trackClientCalls } from './lib/rate-limit'
+import { initPerformanceMonitoring } from './lib/performance'
+
+// Collect load/Web Vitals metrics and log them to the console in dev mode.
+if (import.meta.env.DEV) {
+  initPerformanceMonitoring()
+}
 
 const createClient = (): SorokitClient => {
   try {
@@ -29,7 +36,10 @@ function Root() {
 
   return (
     <ErrorBoundary onRetry={handleRetry}>
-      <App client={client} />
+      <Profiled id="App">
+        <App client={client} />
+      </Profiled>
+      <PerformanceMonitor />
     </ErrorBoundary>
   )
 }

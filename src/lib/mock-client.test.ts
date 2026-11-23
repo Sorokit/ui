@@ -130,6 +130,36 @@ describe("mock-client", () => {
     expect(res.data).toHaveProperty("txHash");
   });
 
+  it.each([
+    { type: "string", args: ["hello"] },
+    { type: "number", args: [42] },
+    {
+      type: "address",
+      args: [{ address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA" }],
+    },
+    { type: "array", args: [[1, 2, 3]] },
+  ])("returns the expected invokeContract response for a $type argument", async ({ args }) => {
+    const { createMockClient, MOCK_ADDRESS } = await import("./mock-client");
+    const client = createMockClient();
+
+    const response = await client.soroban.invokeContract({
+      contractId: "C123",
+      method: "transfer",
+      args,
+      sourceAccount: MOCK_ADDRESS,
+    });
+
+    expect(response).toEqual({
+      data: {
+        success: true,
+        result: { status: "ok", output: "mock-invoke-output" },
+        txHash: expect.stringMatching(/^[0-9a-f]{64}$/i),
+      },
+      error: null,
+      status: "success",
+    });
+  });
+
   it("verifySoroban simulateContract resolves with result data", async () => {
     const { createMockClient } = await import("./mock-client");
     const client = createMockClient();

@@ -195,6 +195,7 @@ describe("SorobanPanel", () => {
 
     expect(textarea.rows).toBe(6);
   });
+});
 
   // Issue #543 — the Arguments textarea must be programmatically associated
   // with its label, and its validation error with the field itself.
@@ -373,6 +374,69 @@ describe("SorobanPanel", () => {
       );
       // B was used most recently, so it must appear before A.
       expect(stored.indexOf(contractB)).toBeLessThan(stored.indexOf(contractA));
+    });
+
+    it("lists history newest-first in the datalist and keeps that order across remounts", async () => {
+      const contractA = fakeContractId(1);
+      const contractB = fakeContractId(2);
+      mockInvokeContract.mockResolvedValue({ data: { ok: true }, error: null });
+
+      const first = render(
+        <SorobanPanel contractId={contractA} onContractIdChange={() => {}} />,
+      );
+      fireEvent.change(screen.getByLabelText("Method"), {
+        target: { value: "balance" },
+      });
+      for (const id of [contractA, contractB]) {
+        first.rerender(<SorobanPanel contractId={id} onContractIdChange={() => {}} />);
+        fireEvent.click(screen.getByRole("button", { name: /invoke/i }));
+        await screen.findByText("Result", { selector: "span" });
+        fireEvent.click(screen.getByRole("button", { name: /clear/i }));
+      }
+
+      const optionValues = () =>
+        Array.from(
+          document.querySelectorAll<HTMLOptionElement>(
+            "#sorokit-soroban-contract-history-list option",
+          ),
+        ).map((o) => o.value);
+
+      // B was invoked after A, so B comes first.
+      expect(optionValues()).toEqual([contractB, contractA]);
+
+      // Remount: history is re-read from localStorage with the same order.
+      first.unmount();
+      render(<SorobanPanel contractId="" onContractIdChange={() => {}} />);
+      expect(optionValues()).toEqual([contractB, contractA]);
+    });
+
+    it("keeps the 20-entry cap after a remount", async () => {
+      const existing = Array.from({ length: 20 }, (_, i) => fakeContractId(i + 1));
+      localStorage.setItem(
+        "sorokit-soroban-contract-history",
+        JSON.stringify(existing),
+      );
+      mockInvokeContract.mockResolvedValueOnce({ data: { ok: true }, error: null });
+
+      const first = render(
+        <SorobanPanel contractId={fakeContractId(21)} onContractIdChange={() => {}} />,
+      );
+      fireEvent.change(screen.getByLabelText("Method"), {
+        target: { value: "balance" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /invoke/i }));
+      await screen.findByText("Result", { selector: "span" });
+      first.unmount();
+
+      render(<SorobanPanel contractId="" onContractIdChange={() => {}} />);
+      const values = Array.from(
+        document.querySelectorAll<HTMLOptionElement>(
+          "#sorokit-soroban-contract-history-list option",
+        ),
+      ).map((o) => o.value);
+      expect(values).toHaveLength(20);
+      expect(values[0]).toBe(fakeContractId(21));
+      expect(values).not.toContain(fakeContractId(1));
     });
   });
 
@@ -867,6 +931,9 @@ describe("SorobanPanel", () => {
       fireEvent.change(methodInput, { target: { value: "balance" } });
 
       expect(argsInput).toHaveValue('["GFROM"]');
+    });
+  });
+
   // ── Contract ID format validation (#904) ────────────────────────────────
   describe("contract ID format validation", () => {
     it("shows inline feedback for a malformed contract ID once the field is blurred", () => {
@@ -1005,4 +1072,3 @@ describe("SorobanPanel", () => {
       );
     });
   });
-});

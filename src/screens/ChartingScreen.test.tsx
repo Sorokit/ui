@@ -59,6 +59,32 @@ describe("ChartingScreen", () => {
     expect(screen.getByText("$0.155")).toBeInTheDocument();
   });
 
+  it("renders alert history and allows clearing history (#1148)", () => {
+    localStorage.setItem(
+      "sorokit:price-alert-history",
+      JSON.stringify([
+        {
+          id: "hist-chart-1",
+          alertId: "alert-1",
+          asset: "XLM",
+          condition: "above",
+          threshold: 0.12,
+          triggerPrice: 0.121,
+          triggeredAt: Date.now(),
+        },
+      ]),
+    );
+
+    render(<ChartingScreen />);
+    expect(screen.getByTestId("alert-history")).toBeInTheDocument();
+    expect(screen.getByText(/Triggered at \$0.1210/i)).toBeInTheDocument();
+
+    const clearBtn = screen.getByTestId("clear-alert-history-button");
+    fireEvent.click(clearBtn);
+
+    expect(screen.getByText(/No alerts have been triggered yet/i)).toBeInTheDocument();
+  });
+
   it("persists indicator selections across reloads", () => {
     const { unmount } = render(<ChartingScreen />);
     expect(screen.queryByText("EMA Overlay")).not.toBeInTheDocument();

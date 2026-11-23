@@ -23,6 +23,7 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     walletName,
     isHardware,
     error,
+    errorSeverity = "error",
     clearError,
     disconnectWallet,
     isDisconnecting,
@@ -229,7 +230,12 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         <div
           role="alert"
           data-testid="connection-error-alert"
-          className="absolute top-[calc(100%+8px)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border border-error-dim rounded-lg shadow-lg text-red text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200"
+          data-severity={errorSeverity}
+          className={`absolute top-[calc(100%+8px)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border rounded-lg shadow-lg text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200 ${
+            errorSeverity === "info"
+              ? "border-warning-dim text-warning"
+              : "border-error-dim text-red"
+          }`}
         >
           <span>{error}</span>
           <button
@@ -237,7 +243,9 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
               e.stopPropagation();
               clearError();
             }}
-            className="text-red opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shrink-0"
+            className={`opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shrink-0 ${
+              errorSeverity === "info" ? "text-warning" : "text-red"
+            }`}
             aria-label="Clear error"
           >
             <HugeiconsIcon

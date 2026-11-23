@@ -81,6 +81,11 @@ export interface SorokitState {
   errorSeverity?: "info" | "error";
   errorHistory: string[];
   clearError: () => void;
+  reportError?: (
+    error: string,
+    source: string,
+    severity?: "info" | "error",
+  ) => void;
 }
 
 export interface SorokitProviderProps {
