@@ -12,6 +12,7 @@ import {
 import type { IconSvgElement } from "@hugeicons/react";
 import { HugeiconsIcon } from "@hugeicons/react";
 
+import { OfflineBadge } from "@/components/OfflineBadge";
 import { RecentTransactionsWidget } from "@/components/RecentTransactionsWidget";
 import type { NavSection } from "@/components/Sidebar";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -37,8 +38,17 @@ export interface DashboardOverviewProps {
 }
 
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
-  const { isConnected, isLoading, isLoadingAccount, account, balances, error } =
-    useSorokit();
+  const {
+    isConnected,
+    isLoading,
+    isLoadingAccount,
+    account,
+    balances,
+    error,
+    isOffline,
+    isCached,
+    lastSyncedAt,
+  } = useSorokit();
 
   // Account data hydrates after the wallet connects; until it lands (and no
   // error occurred) show placeholders rather than a misleading 0.00.
@@ -71,6 +81,17 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
           </button>
         ))}
       </div>
+
+      {isConnected && (isOffline || isCached) && (
+        <div className="flex items-center gap-2 text-[12px] text-ink-3">
+          <OfflineBadge
+            isOffline={!!isOffline}
+            isCached={!!isCached}
+            lastSyncedAt={lastSyncedAt}
+          />
+          <span>Showing last-known balances. They will sync when you reconnect.</span>
+        </div>
+      )}
 
       {isConnected && (
         <div

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { AccountCard } from "@/components/AccountCard";
 import { BalanceList } from "@/components/BalanceList";
 import { ClaimableBalanceCard } from "@/components/ClaimableBalanceCard";
+import { KeystoreBackup } from "@/components/KeystoreBackup";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import type { NetworkInfo } from "@/lib/client";
@@ -173,6 +174,7 @@ export function AccountScreen() {
       <AccountCard />
       <BalanceList />
       <ClaimableBalanceCard />
+      <KeystoreBackup />
     </div>
   );
 }
