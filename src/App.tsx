@@ -8,6 +8,7 @@ import { ToastProvider, useToast } from './context/ToastContext';
 import { useSorokit } from './context/useSorokit';
 import type { SorokitClient } from './lib/client';
 import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
+import { applyPreferences } from './lib/preferences';
 import { ConnectScreen } from './screens/ConnectScreen';
 import { Dashboard } from './screens/Dashboard';
 
@@ -22,6 +23,13 @@ function ToastRenderer() {
 
 function AppContent() {
   const { isConnected } = useSorokit();
+
+  // Apply the saved font size and motion preferences on load, including on the
+  // connect screen.
+  useEffect(() => {
+    applyPreferences();
+  }, []);
+
   const [section, setSection] = useState<NavSection>(() =>
     sectionForPath(window.location.pathname),
   );
