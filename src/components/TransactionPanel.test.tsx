@@ -73,6 +73,11 @@ async function reviewAndConfirm() {
 }
 
 describe("TransactionPanel", () => {
+  it("matches snapshot", () => {
+    mockGetClient(vi.fn());
+    const { container } = render(<TransactionPanel />);
+    expect(container).toMatchSnapshot();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useSorokit).mockReturnValue(

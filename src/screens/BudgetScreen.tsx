@@ -18,7 +18,7 @@ interface AssetBreakdown {
   percentage: number;
 }
 
-interface TxBreakdown {
+export interface TxBreakdown {
   type: string;
   amount: number;
   count: number;

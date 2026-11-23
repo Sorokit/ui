@@ -1,0 +1,313 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NetworkScreen > matches snapshot 1`] = `
+<div>
+  <div
+    class="flex flex-col gap-5"
+  >
+    <div
+      class="rounded-xl border border-line bg-surface overflow-hidden"
+    >
+      <div
+        class="px-6 py-4 border-b border-line"
+      >
+        <p
+          class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+        >
+          Active Network
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 divide-line"
+      >
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5 sm:border-r sm:border-line"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            Name
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-[13px] text-ink-2 break-all flex-1"
+            >
+              testnet
+            </span>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            Passphrase
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-ink-2 break-all flex-1 font-mono text-[12px]"
+            >
+              Test SDF Network ; September 2015
+            </span>
+            <button
+              aria-label="Copy Passphrase"
+              class="shrink-0 p-1 rounded-md transition-all mt-0.5 text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100"
+              title="Copy Passphrase"
+            >
+              <div
+                color="currentColor"
+                icon="path,[object Object],path,[object Object]"
+                size="12"
+                stroke-width="2"
+              />
+            </button>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5 sm:border-t sm:border-r sm:border-line"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            RPC URL
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-ink-2 break-all flex-1 font-mono text-[12px]"
+            >
+              https://soroban-testnet.stellar.org
+            </span>
+            <button
+              aria-label="Copy RPC URL"
+              class="shrink-0 p-1 rounded-md transition-all mt-0.5 text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100"
+              title="Copy RPC URL"
+            >
+              <div
+                color="currentColor"
+                icon="path,[object Object],path,[object Object]"
+                size="12"
+                stroke-width="2"
+              />
+            </button>
+          </div>
+          <div
+            class="flex items-center gap-2 mt-0.5"
+          >
+            <button
+              class="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 hover:bg-surface-3 hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+            >
+              Test connection
+            </button>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5 sm:border-t sm:border-line"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            Horizon URL
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-ink-2 break-all flex-1 font-mono text-[12px]"
+            >
+              https://horizon-testnet.stellar.org
+            </span>
+            <button
+              aria-label="Copy Horizon URL"
+              class="shrink-0 p-1 rounded-md transition-all mt-0.5 text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100"
+              title="Copy Horizon URL"
+            >
+              <div
+                color="currentColor"
+                icon="path,[object Object],path,[object Object]"
+                size="12"
+                stroke-width="2"
+              />
+            </button>
+          </div>
+          <div
+            class="flex items-center gap-2 mt-0.5"
+          >
+            <button
+              class="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-[11px] font-medium text-ink-2 hover:bg-surface-3 hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              type="button"
+            >
+              Test connection
+            </button>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5 sm:border-t sm:border-r sm:border-line"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            Latest Ledger
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-ink-2 break-all flex-1 font-mono text-[12px]"
+            >
+              —
+            </span>
+          </div>
+        </div>
+        <div
+          class="px-6 py-4 flex flex-col gap-1.5 sm:border-t sm:border-line"
+        >
+          <span
+            class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+          >
+            Status
+          </span>
+          <div
+            class="flex items-start gap-2 group"
+          >
+            <span
+              class="text-[13px] text-ink-2 break-all flex-1"
+            >
+              unknown
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      class="flex flex-col gap-3"
+    >
+      <button
+        class="w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3 border-line bg-surface hover:bg-surface-2 hover:border-line-2 cursor-pointer active:border-line-2"
+      >
+        <div
+          class="flex items-center justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0 bg-green"
+            />
+            <div>
+              <p
+                class="text-[14px] font-medium text-ink"
+              >
+                Mainnet
+              </p>
+              <p
+                class="text-[12px] text-ink-3 mt-0.5"
+              >
+                Public Global Stellar Network — real assets
+              </p>
+            </div>
+          </div>
+        </div>
+      </button>
+      <button
+        class="w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3 border-[rgba(86,69,212,0.35)] bg-brand-dim cursor-default ring-1 ring-brand"
+        disabled=""
+      >
+        <div
+          class="flex items-center justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0 bg-orange"
+            />
+            <div>
+              <p
+                class="text-[14px] font-medium text-ink"
+              >
+                Testnet
+              </p>
+              <p
+                class="text-[12px] text-ink-3 mt-0.5"
+              >
+                Test SDF Network — free test XLM via Friendbot
+              </p>
+            </div>
+          </div>
+          <span
+            class="inline-flex items-center gap-1 rounded-full font-semibold tracking-wide px-2 py-1 text-[11px] bg-warning-dim text-warning border border-warning-dim"
+          >
+            <span
+              aria-hidden="true"
+              class="w-1 h-1 rounded-full shrink-0 bg-orange"
+            />
+            Active
+          </span>
+        </div>
+      </button>
+      <button
+        class="w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3 border-line bg-surface hover:bg-surface-2 hover:border-line-2 cursor-pointer active:border-line-2"
+      >
+        <div
+          class="flex items-center justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0 bg-purple"
+            />
+            <div>
+              <p
+                class="text-[14px] font-medium text-ink"
+              >
+                Futurenet
+              </p>
+              <p
+                class="text-[12px] text-ink-3 mt-0.5"
+              >
+                Test SDF Future Network — bleeding edge features
+              </p>
+            </div>
+          </div>
+        </div>
+      </button>
+      <button
+        class="w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3 border-line bg-surface hover:bg-surface-2 hover:border-line-2 cursor-pointer active:border-line-2"
+      >
+        <div
+          class="flex items-center justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <span
+              class="w-2.5 h-2.5 rounded-full shrink-0 bg-ink-3"
+            />
+            <div>
+              <p
+                class="text-[14px] font-medium text-ink"
+              >
+                Localnet
+              </p>
+              <p
+                class="text-[12px] text-ink-3 mt-0.5"
+              >
+                Local development network — requires local node
+              </p>
+            </div>
+          </div>
+        </div>
+      </button>
+    </div>
+  </div>
+</div>
+`;

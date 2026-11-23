@@ -486,4 +486,204 @@ describe("ActivityTimeline", () => {
     const filterBtn = screen.getByRole("button", { name: /toggle filters/i });
     expect(filterBtn).toBeInTheDocument();
   });
+
+  describe("Filter and Search Logic (issue #1131)", () => {
+    it("filters operations by date range and passes dateFrom and dateTo to getTimeline", async () => {
+      const groups = makeTimelineGroups(1);
+      const getTimelineMock = vi.fn().mockResolvedValue({ data: groups, error: null, total: 1 });
+      vi.mocked(getClient).mockReturnValue({
+        operation: {
+          getTimeline: getTimelineMock,
+          getOperations: vi.fn().mockResolvedValue({ data: null, error: null }),
+        },
+      } as unknown as ReturnType<typeof getClient>);
+
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      });
+
+      // Open filters
+      fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+
+      // Set date range
+      const fromInput = screen.getByLabelText(/^from$/i);
+      const toInput = screen.getByLabelText(/^to$/i);
+      fireEvent.change(fromInput, { target: { value: "2026-07-01" } });
+      fireEvent.change(toInput, { target: { value: "2026-07-20" } });
+
+      // Click apply
+      const applyBtn = screen.getByRole("button", { name: /^apply$/i });
+      fireEvent.click(applyBtn);
+
+      await waitFor(() => {
+        expect(getTimelineMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filters: expect.objectContaining({
+              dateFrom: "2026-07-01",
+              dateTo: "2026-07-20",
+            }),
+          }),
+        );
+      });
+    });
+
+    it("filters operations by operation type and passes operationType to getTimeline", async () => {
+      const groups = makeTimelineGroups(1);
+      const getTimelineMock = vi.fn().mockResolvedValue({ data: groups, error: null, total: 1 });
+      vi.mocked(getClient).mockReturnValue({
+        operation: {
+          getTimeline: getTimelineMock,
+          getOperations: vi.fn().mockResolvedValue({ data: null, error: null }),
+        },
+      } as unknown as ReturnType<typeof getClient>);
+
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      });
+
+      // Open filters
+      fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+
+      // Select "payment" operation type
+      const opSelect = screen.getByLabelText(/operation type/i);
+      fireEvent.change(opSelect, { target: { value: "payment" } });
+
+      // Click apply
+      const applyBtn = screen.getByRole("button", { name: /^apply$/i });
+      fireEvent.click(applyBtn);
+
+      await waitFor(() => {
+        expect(getTimelineMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filters: expect.objectContaining({
+              operationType: "payment",
+            }),
+          }),
+        );
+      });
+    });
+
+    it("filters operations by search query and passes searchQuery to getTimeline", async () => {
+      const groups = makeTimelineGroups(1);
+      const getTimelineMock = vi.fn().mockResolvedValue({ data: groups, error: null, total: 1 });
+      vi.mocked(getClient).mockReturnValue({
+        operation: {
+          getTimeline: getTimelineMock,
+          getOperations: vi.fn().mockResolvedValue({ data: null, error: null }),
+        },
+      } as unknown as ReturnType<typeof getClient>);
+
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      });
+
+      // Open filters
+      fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+
+      // Enter search query
+      const searchInput = screen.getByLabelText(/search by address or transaction hash/i);
+      fireEvent.change(searchInput, { target: { value: "GAAZI4TCR3TY" } });
+
+      // Click apply
+      const applyBtn = screen.getByRole("button", { name: /^apply$/i });
+      fireEvent.click(applyBtn);
+
+      await waitFor(() => {
+        expect(getTimelineMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filters: expect.objectContaining({
+              searchQuery: "GAAZI4TCR3TY",
+            }),
+          }),
+        );
+      });
+    });
+
+    it("combines date range, operation type, and search query filters simultaneously", async () => {
+      const groups = makeTimelineGroups(1);
+      const getTimelineMock = vi.fn().mockResolvedValue({ data: groups, error: null, total: 1 });
+      vi.mocked(getClient).mockReturnValue({
+        operation: {
+          getTimeline: getTimelineMock,
+          getOperations: vi.fn().mockResolvedValue({ data: null, error: null }),
+        },
+      } as unknown as ReturnType<typeof getClient>);
+
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      });
+
+      // Open filters
+      fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+
+      const opSelect = screen.getByLabelText(/operation type/i);
+      const fromInput = screen.getByLabelText(/^from$/i);
+      const toInput = screen.getByLabelText(/^to$/i);
+      const searchInput = screen.getByLabelText(/search by address or transaction hash/i);
+
+      fireEvent.change(opSelect, { target: { value: "trade" } });
+      fireEvent.change(fromInput, { target: { value: "2026-06-01" } });
+      fireEvent.change(toInput, { target: { value: "2026-06-30" } });
+      fireEvent.change(searchInput, { target: { value: "txhash123" } });
+
+      const applyBtn = screen.getByRole("button", { name: /^apply$/i });
+      fireEvent.click(applyBtn);
+
+      await waitFor(() => {
+        expect(getTimelineMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            filters: expect.objectContaining({
+              operationType: "trade",
+              dateFrom: "2026-06-01",
+              dateTo: "2026-06-30",
+              searchQuery: "txhash123",
+            }),
+          }),
+        );
+      });
+    });
+
+    it("displays filtered empty state when active filters match zero transactions", async () => {
+      mockGetTimeline([], 0);
+      vi.mocked(useSorokit).mockReturnValue(
+        DEFAULT_CONTEXT as unknown as ReturnType<typeof useSorokit>,
+      );
+
+      render(<ActivityTimeline />);
+      await waitFor(() => {
+        expect(screen.getByText("Activity Timeline")).toBeInTheDocument();
+      });
+
+      // Open filters and apply a search query
+      fireEvent.click(screen.getByRole("button", { name: /toggle filters/i }));
+      const searchInput = screen.getByLabelText(/search by address or transaction hash/i);
+      fireEvent.change(searchInput, { target: { value: "nonexistent-hash" } });
+      fireEvent.click(screen.getByRole("button", { name: /^apply$/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/no transactions match your filters/i)).toBeInTheDocument();
+      });
+    });
+  });
+
 });

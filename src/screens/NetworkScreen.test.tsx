@@ -23,6 +23,10 @@ const TESTNET_NETWORK = {
 };
 
 describe("NetworkScreen", () => {
+  it("matches snapshot", () => {
+    const { container } = render(<NetworkScreen />);
+    expect(container).toMatchSnapshot();
+  });
   let switchNetwork: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
