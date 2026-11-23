@@ -25,6 +25,7 @@ export const SCREEN_LABELS: Record<NavSection, { title: string; sub: string }> =
     farming: { title: "Yield Farming", sub: "Manage liquidity and rewards" },
     budget: { title: "Budgeting", sub: "Track spending and budget limits" },
     governance: { title: "Governance", sub: "Vote on proposals and delegate" },
+    settings: { title: "Settings", sub: "Preferences and help" },
   };
 
 /**
@@ -45,6 +46,7 @@ export const PAGE_TITLES: Record<NavSection, string> = {
   budget: pageTitle(SCREEN_LABELS.budget.title),
   nfts: pageTitle(SCREEN_LABELS.nfts.title),
   governance: pageTitle(SCREEN_LABELS.governance.title),
+  settings: pageTitle(SCREEN_LABELS.settings.title),
 };
 
 /**

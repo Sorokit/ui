@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { OnboardingTutorial } from './components/OnboardingTutorial';
 import type { NavSection } from './components/Sidebar';
 import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
@@ -52,7 +53,12 @@ function AppContent() {
     return <ConnectScreen />;
   }
 
-  return <Dashboard activeSection={section} onSectionChange={handleSectionChange} />;
+  return (
+    <>
+      <Dashboard activeSection={section} onSectionChange={handleSectionChange} />
+      <OnboardingTutorial />
+    </>
+  );
 }
 
 function App({ client }: AppProps) {
