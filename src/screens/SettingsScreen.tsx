@@ -8,15 +8,17 @@ import {
 } from "@/components/ui/Card";
 import { requestOnboardingReplay } from "@/lib/onboarding";
 import {
+  type DisplayCurrency,
   FONT_SCALE_MAX,
   FONT_SCALE_MIN,
   FONT_SCALE_STEP,
   setPreferences,
+  SUPPORTED_CURRENCIES,
   usePreferences,
 } from "@/lib/preferences";
 
 export function SettingsScreen() {
-  const { fontScale, reduceMotion } = usePreferences();
+  const { fontScale, reduceMotion, currency } = usePreferences();
 
   return (
     <div className="flex flex-col gap-5">
@@ -69,6 +71,38 @@ export function SettingsScreen() {
           </label>
         </CardContent>
       </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Display currency</CardTitle>
+          <CardDescription>
+            The fiat currency used for balance values. Remembered on this
+            device.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <label
+            htmlFor="display-currency"
+            className="block text-[13px] font-medium text-ink"
+          >
+            Currency
+          </label>
+          <select
+            id="display-currency"
+            value={currency}
+            onChange={(e) =>
+              setPreferences({ currency: e.target.value as DisplayCurrency })
+            }
+            className="mt-2 h-9 rounded-lg border border-line-2 bg-surface-2 px-3 text-[13px] text-ink"
+          >
+            {SUPPORTED_CURRENCIES.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Onboarding</CardTitle>

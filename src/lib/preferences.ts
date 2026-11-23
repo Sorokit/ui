@@ -6,16 +6,22 @@ export const FONT_SCALE_MIN = 80;
 export const FONT_SCALE_MAX = 200;
 export const FONT_SCALE_STEP = 10;
 
+export const SUPPORTED_CURRENCIES = ["USD", "EUR", "GBP"] as const;
+export type DisplayCurrency = (typeof SUPPORTED_CURRENCIES)[number];
+
 export interface Preferences {
   /** Interface size as a percentage, from FONT_SCALE_MIN to FONT_SCALE_MAX. */
   fontScale: number;
   /** Turns off animations and transitions. */
   reduceMotion: boolean;
+  /** Fiat currency balances are displayed in. */
+  currency: DisplayCurrency;
 }
 
 export const DEFAULT_PREFERENCES: Preferences = {
   fontScale: 100,
   reduceMotion: false,
+  currency: "USD",
 };
 
 export function clampFontScale(value: number): number {
@@ -31,7 +37,10 @@ function load(): Preferences {
     if (typeof parsed !== "object" || parsed === null) {
       return DEFAULT_PREFERENCES;
     }
-    const { fontScale, reduceMotion } = parsed as Record<string, unknown>;
+    const { fontScale, reduceMotion, currency } = parsed as Record<
+      string,
+      unknown
+    >;
     return {
       fontScale:
         typeof fontScale === "number"
@@ -41,6 +50,9 @@ function load(): Preferences {
         typeof reduceMotion === "boolean"
           ? reduceMotion
           : DEFAULT_PREFERENCES.reduceMotion,
+      currency: SUPPORTED_CURRENCIES.includes(currency as DisplayCurrency)
+        ? (currency as DisplayCurrency)
+        : DEFAULT_PREFERENCES.currency,
     };
   } catch {
     return DEFAULT_PREFERENCES;

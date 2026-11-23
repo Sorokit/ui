@@ -53,10 +53,27 @@ describe("SettingsScreen", () => {
     expect(document.documentElement).toHaveAttribute("data-reduce-motion", "true");
   });
 
+  it("lists USD, EUR and GBP and saves the chosen display currency", async () => {
+    const user = userEvent.setup();
+    render(<SettingsScreen />);
+    const select = screen.getByRole("combobox", { name: "Currency" });
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["USD", "EUR", "GBP"]);
+    expect(select).toHaveValue("USD");
+
+    await user.selectOptions(select, "EUR");
+
+    expect(select).toHaveValue("EUR");
+    expect(getPreferences().currency).toBe("EUR");
+    expect(window.localStorage.getItem("sorokit_preferences")).toContain("EUR");
+  });
+
   it("shows the saved preferences when it is opened again", () => {
     window.localStorage.setItem(
       "sorokit_preferences",
-      JSON.stringify({ fontScale: 130, reduceMotion: true }),
+      JSON.stringify({ fontScale: 130, reduceMotion: true, currency: "GBP" }),
     );
     reloadPreferences();
 
@@ -64,5 +81,6 @@ describe("SettingsScreen", () => {
 
     expect(screen.getByTestId("font-scale-value")).toHaveTextContent("130%");
     expect(screen.getByRole("checkbox", { name: "Reduce motion" })).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Currency" })).toHaveValue("GBP");
   });
 });

@@ -22,7 +22,11 @@ describe("preferences", () => {
 
   it("starts from the defaults", () => {
     expect(getPreferences()).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ fontScale: 100, reduceMotion: false });
+    expect(DEFAULT_PREFERENCES).toEqual({
+      fontScale: 100,
+      reduceMotion: false,
+      currency: "USD",
+    });
   });
 
   it("clamps the font size to 80%-200%", () => {
@@ -38,21 +42,28 @@ describe("preferences", () => {
     setPreferences({ fontScale: 140 });
     setPreferences({ reduceMotion: true });
 
+    setPreferences({ currency: "GBP" });
+
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")).toEqual({
       fontScale: 140,
       reduceMotion: true,
+      currency: "GBP",
     });
   });
 
   it("restores saved preferences on reload", () => {
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ fontScale: 180, reduceMotion: true }),
+      JSON.stringify({ fontScale: 180, reduceMotion: true, currency: "EUR" }),
     );
 
     reloadPreferences();
 
-    expect(getPreferences()).toEqual({ fontScale: 180, reduceMotion: true });
+    expect(getPreferences()).toEqual({
+      fontScale: 180,
+      reduceMotion: true,
+      currency: "EUR",
+    });
   });
 
   it("falls back to the defaults for corrupt or out-of-range saved values", () => {
@@ -62,10 +73,14 @@ describe("preferences", () => {
 
     window.localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ fontScale: 900, reduceMotion: "yes" }),
+      JSON.stringify({ fontScale: 900, reduceMotion: "yes", currency: "JPY" }),
     );
     reloadPreferences();
-    expect(getPreferences()).toEqual({ fontScale: 200, reduceMotion: false });
+    expect(getPreferences()).toEqual({
+      fontScale: 200,
+      reduceMotion: false,
+      currency: "USD",
+    });
   });
 
   it("applies the font size and reduced motion to the document root", () => {

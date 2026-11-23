@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
+import { reloadPreferences, setPreferences } from "@/lib/preferences";
 
 import { balanceKey, BalanceList } from "./BalanceList";
 
@@ -902,6 +903,27 @@ describe("BalanceList", () => {
       render(<BalanceList showTotal xlmPrice={0.5} />);
       expect(screen.getByText("~100 XLM (~$50)")).toBeInTheDocument();
       expect(screen.queryByText(/€|£/)).not.toBeInTheDocument();
+    });
+
+    describe("display currency from Settings", () => {
+      afterEach(() => {
+        window.localStorage.clear();
+        reloadPreferences();
+      });
+
+      it("uses the saved display currency when no currency prop is passed", () => {
+        mockXlm();
+        setPreferences({ currency: "EUR" });
+        render(<BalanceList showTotal xlmPrice={0.5} />);
+        expect(screen.getByText("~100 XLM (~€50)")).toBeInTheDocument();
+      });
+
+      it("lets an explicit currency prop override the saved one", () => {
+        mockXlm();
+        setPreferences({ currency: "EUR" });
+        render(<BalanceList showTotal xlmPrice={0.5} currency="GBP" />);
+        expect(screen.getByText("~100 XLM (~£50)")).toBeInTheDocument();
+      });
     });
 
     it("updates the symbol and value when switching from USD to EUR", () => {
