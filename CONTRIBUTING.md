@@ -220,6 +220,84 @@ dependencies in `devDependencies` where possible and lazy-loading heavy assets.
 - New components must include JSDoc comments
 - Breaking changes need documentation updates
 
+## State Management Best Practices (#1084)
+
+### Handling Loading, Error, and Success States
+
+When components fetch data or perform async operations, always handle three states:
+
+```typescript
+export function MyComponent() {
+  const { isLoading, error, data } = useSomeData();
+
+  if (isLoading) {
+    return <Skeleton className="h-6 w-24" />;
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="text-red-600">
+        <p>Failed to load data: {error}</p>
+        <button onClick={() => refetch()}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return <p>No data available</p>;
+  }
+
+  return <div>{/* render data */}</div>;
+}
+```
+
+### Error Boundary Pattern
+
+Always wrap context-dependent components with error boundaries to prevent full app crashes:
+
+```typescript
+<ErrorBoundary fallback={<ErrorScreen />}>
+  <MyComponent />
+</ErrorBoundary>
+```
+
+### Empty States
+
+Handle empty states separately from error states:
+
+```typescript
+if (isLoading) return <Skeleton />;
+if (error) return <ErrorMessage error={error} />;
+if (!data || data.length === 0) {
+  return <EmptyState message="No items found" />;
+}
+return <ItemList items={data} />;
+```
+
+### Null Safety
+
+Use optional chaining and nullish coalescing to prevent undefined errors:
+
+```typescript
+// Good
+const balance = account?.balances?.[0]?.amount ?? '0';
+
+// Avoid
+const balance = account.balances[0].amount; // Crashes if account or balances is null
+```
+
+### Conditional Rendering
+
+Always verify data exists before rendering:
+
+```typescript
+// Good
+{account && <AccountInfo account={account} />}
+
+// Avoid
+<AccountInfo account={account} /> {/* Crashes if account is null */}
+```
+
 ## Async Race Conditions and State Management
 
 When working with asynchronous operations (network calls, timers), be aware of potential race conditions:
