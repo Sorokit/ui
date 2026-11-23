@@ -78,7 +78,7 @@ interface LineChartProps {
   onHover?: (point: DataPoint | null) => void;
 }
 
-function LineChart({
+export function LineChart({
   data,
   width = 400,
   height = 200,

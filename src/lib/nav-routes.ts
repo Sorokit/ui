@@ -15,6 +15,7 @@ export const SECTION_PATHS: Record<NavSection, string> = {
   network: "/network",
   recovery: "/recovery",
   charts: "/charts",
+  portfolio: "/portfolio",
   farming: "/farming",
   budget: "/budget",
   nfts: "/nfts",

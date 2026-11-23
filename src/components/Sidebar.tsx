@@ -1,4 +1,5 @@
 import {
+  Analytics01Icon,
   ArrowDataTransferHorizontalIcon,
   Blockchain01Icon,
   ChartLineDataIcon,
@@ -29,6 +30,7 @@ export type NavSection =
   | "network"
   | "recovery"
   | "charts"
+  | "portfolio"
   | "farming"
   | "budget"
   | "nfts"
@@ -46,6 +48,7 @@ export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "network", label: "Network", icon: Globe02Icon },
   { id: "recovery", label: "Recovery Assistant", icon: Shield02Icon },
   { id: "charts", label: "Advanced Charting", icon: ChartLineDataIcon },
+  { id: "portfolio", label: "Portfolio Analytics", icon: Analytics01Icon },
   { id: "farming", label: "Yield Farming", icon: Plant01Icon },
   { id: "budget", label: "Budget Manager", icon: Wallet03Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
