@@ -190,4 +190,84 @@ describe("Multi-Asset Payment Flow", () => {
       }),
     );
   });
-});
+
+  /**
+   * Test suite for edge cases in multi-asset payment flows.
+   * Addresses issue #1104: Verify multi-asset payments handle edge cases gracefully.
+   */
+  describe("Multi-asset payment edge cases", () => {
+    it("handles insufficient balance for selected asset", async () => {
+      const insufficientClient = {
+        ...mockClient,
+        account: {
+          ...mockClient.account,
+          getBalances: vi.fn().mockResolvedValue({
+            data: [
+              { asset: "XLM", balance: "0.0000001", assetType: "native" },
+              { asset: "USDC", balance: "500.0000000", assetType: "credit_alphanum4", assetIssuer: usdcIssuer },
+            ],
+            error: null,
+          }),
+        },
+      } as unknown as ReturnType<typeof getClient>;
+
+      initClient(insufficientClient);
+      await connectWalletAndWait();
+
+      const amountInput = screen.getByLabelText("Amount (XLM)");
+      fireEvent.change(amountInput, { target: { value: "1000" } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/insufficient balance/i)).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole("button", { name: /Send XLM/i })).toBeDisabled();
+    });
+
+    it("validates asset-specific decimal precision requirements", async () => {
+      await connectWalletAndWait();
+
+      // Switch to USDC (typically 6 decimals)
+      fireEvent.change(screen.getByLabelText("Asset"), { target: { value: "USDC" } });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Amount (USDC)")).toBeInTheDocument();
+      });
+
+      // Try to enter 7+ decimals (should fail or be truncated)
+      fireEvent.change(screen.getByLabelText("Amount (USDC)"), { target: { value: "10.1234567" } });
+
+      await waitFor(() => {
+        expect(screen.getByText(/too many decimal places/i)).toBeInTheDocument();
+      });
+    });
+
+    it("prevents submission when any multi-send row has validation errors", async () => {
+      await connectWalletAndWait();
+
+      fireEvent.click(screen.getByRole("tab", { name: /Multi-Send/i }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("multi-send-dest-0")).toBeInTheDocument();
+      });
+
+      // Row 0: Valid
+      fireEvent.change(screen.getByTestId("multi-send-dest-0"), { target: { value: validDest } });
+      fireEvent.change(screen.getByTestId("multi-send-amount-0"), { target: { value: "10" } });
+
+      // Row 1: Invalid destination
+      fireEvent.change(screen.getByTestId("multi-send-dest-1"), { target: { value: "INVALID_ADDRESS" } });
+      fireEvent.change(screen.getByTestId("multi-send-amount-1"), { target: { value: "20" } });
+
+      const batchBtn = screen.getByTestId("submit-batch");
+      expect(batchBtn).toBeDisabled();
+
+      // Fix the invalid destination
+      fireEvent.change(screen.getByTestId("multi-send-dest-1"), { target: { value: validDest } });
+
+      // Now submit button should be enabled
+      await waitFor(() => {
+        expect(batchBtn).not.toBeDisabled();
+      });
+    });
+  });
