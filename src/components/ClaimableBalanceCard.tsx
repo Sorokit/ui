@@ -84,29 +84,25 @@ export function BalanceRow({
     setClaimError(null);
     setShowConfirm(false);
     try {
-      const { data, error } = await client.account.claimBalance(cb.id);
+      const res = await client.account.claimBalance(cb.id);
+      const data = res?.data;
+      const error = res?.error ?? (res as unknown as { message?: string })?.message;
       if (error) {
-        // Issue #441: a failed claim shows an inline error and returns the
-        // button to its normal state so the user can retry.
-        setClaimError(error);
-        setClaiming(false);
+        // Issue #1079: a failed claim displays the error message and clears loading state
+        setClaimError(typeof error === "string" ? error : (error as { message?: string })?.message || "Claim failed");
         return;
       }
       if (!data) {
         setClaimError("Claim did not complete");
-        setClaiming(false);
         return;
       }
       setClaimed(true);
-      setClaiming(false);
-      // Issue #441: hand the id up so the parent removes this row immediately;
-      // the local `claimed` flag only covers the standalone/no-handler case.
+      // Hand the id up so the parent removes this row immediately
       onClaimed?.(cb.id);
     } catch (err) {
-      // Issue #441: claimBalance may reject (network/wallet throw). Catching it
-      // here keeps the rejection from escaping as an unhandled promise and
-      // still re-enables the button.
+      // Issue #1079: claimBalance may reject. Catching it surfaces the error and resets loading.
       setClaimError(err instanceof Error ? err.message : "Claim failed");
+    } finally {
       setClaiming(false);
     }
   }
@@ -206,6 +202,7 @@ export function BalanceRow({
               <Button
                 variant="primary"
                 size="sm"
+                loading={claiming}
                 onClick={() => void doClaim()}
               >
                 Confirm

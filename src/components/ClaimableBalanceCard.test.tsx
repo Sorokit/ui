@@ -235,6 +235,29 @@ describe("ClaimableBalanceCard", () => {
       expect(screen.getByText("1 pending")).toBeInTheDocument();
       expect(account.claimBalance).toHaveBeenCalledWith("cb1");
     });
+
+    it("handles error response object and clears loading spinner on failure (#1079)", async () => {
+      const mockClaimBalance = vi.fn().mockResolvedValue({
+        data: null,
+        error: { message: "Account has insufficient balance for claim fee" },
+      });
+      mockConnected({
+        getClaimableBalances: vi.fn().mockResolvedValue({
+          data: [balance({ id: "cb-err-1", amount: "15.0" })],
+          error: null,
+        }),
+        claimBalance: mockClaimBalance,
+      });
+
+      render(<ClaimableBalanceCard />);
+      const claimButton = await screen.findByRole("button", { name: "Claim" });
+      fireEvent.click(claimButton);
+
+      const errorAlert = await screen.findByTestId("claim-error-cb-err-1");
+      expect(errorAlert).toHaveTextContent("Account has insufficient balance for claim fee");
+      expect(claimButton).not.toBeDisabled();
+      expect(claimButton.querySelector(".animate-spin")).toBeNull();
+    });
   });
 
   describe("balance ID copy", () => {

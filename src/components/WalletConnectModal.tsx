@@ -170,16 +170,6 @@ export function WalletConnectModal({
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     isMobileEnvironment(),
   );
-  // Extension detection runs when the modal opens (not during render), so a
-  // wallet that injects itself after the React tree mounted is still picked up.
-  const [installedWallets, setInstalledWallets] = useState<
-    Record<string, boolean>
-  >({});
-
-  useEffect(() => {
-    if (!open) return;
-    const detect = () => {
-  const isMobile = isMobileEnvironment();
   const isInfo = errorSeverity === "info";
 
   useEffect(() => {
@@ -197,16 +187,6 @@ export function WalletConnectModal({
       for (const wallet of walletOptions) {
         next[wallet.id] = isWalletExtensionInstalled(wallet.id);
       }
-      setInstalledWallets(next);
-      setIsMobile(isMobileEnvironment());
-    };
-    // Deferred like the effect below to avoid setState within the effect body.
-    const timerId = window.setTimeout(detect, 0);
-    // Slow browsers can finish injecting extensions shortly after open.
-    const recheckId = window.setTimeout(detect, 1000);
-    return () => {
-      window.clearTimeout(timerId);
-      window.clearTimeout(recheckId);
       setInstalledWallets((prev) => {
         const keys = Object.keys(next);
         if (
@@ -217,6 +197,7 @@ export function WalletConnectModal({
         }
         return next;
       });
+      setIsMobile(isMobileEnvironment());
     };
 
     refresh();

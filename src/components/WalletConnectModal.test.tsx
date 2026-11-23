@@ -267,6 +267,51 @@ describe("WalletConnectModal", () => {
       expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
     });
 
+    it("detects late-injected extensions when modal is opened, closed, injected, and re-opened (#1098)", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+      const { rerender } = render(
+        <WalletConnectModal open={true} onClose={mockOnClose} />,
+      );
+      expect(screen.queryByTestId("installed-badge")).not.toBeInTheDocument();
+
+      // Close modal
+      rerender(<WalletConnectModal open={false} onClose={mockOnClose} />);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      // Late-inject extensions on window
+      (window as unknown as Record<string, unknown>).freighter = {};
+      (window as unknown as Record<string, unknown>).xbull = {};
+
+      // Re-open modal
+      rerender(<WalletConnectModal open={true} onClose={mockOnClose} />);
+
+      // Assert late-injected extensions are now detected
+      const badges = screen.getAllByTestId("installed-badge");
+      expect(badges.length).toBeGreaterThanOrEqual(2);
+      expect(badges[0]).toHaveTextContent("Installed");
+    });
+
+    it("detects extensions injected with delayed timing after modal opens (#1098)", () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
+        render(<WalletConnectModal open={true} onClose={mockOnClose} />);
+        expect(screen.queryByTestId("installed-badge")).not.toBeInTheDocument();
+
+        // Late injection occurs at 600ms (between polling intervals)
+        act(() => {
+          vi.advanceTimersByTime(600);
+          (window as unknown as Record<string, unknown>).albedo = {};
+          vi.advanceTimersByTime(250);
+        });
+
+        const badges = screen.getAllByTestId("installed-badge");
+        expect(badges.length).toBeGreaterThan(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("detects mobile via maxTouchPoints when iPadOS Safari reports a desktop user agent", () => {
       const originalUserAgent = navigator.userAgent;
       const originalTouchDescriptor = Object.getOwnPropertyDescriptor(
