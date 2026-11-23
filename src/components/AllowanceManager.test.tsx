@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -84,6 +84,36 @@ describe("AllowanceManager", () => {
     vi.useRealTimers();
   });
 
+  it.each([
+    ["Asset", ["AAA", "BBB", "CCC", "DDD"]],
+    ["Spender", ["CCC", "AAA", "DDD", "BBB"]],
+    ["Amount", ["BBB", "CCC", "AAA", "DDD"]],
+    ["Expiry", ["CCC", "BBB", "AAA", "DDD"]],
+  ] as const)("sorts by %s in both directions", async (column, ascending) => {
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, tokenCode: "AAA", spender: "spender-2", spenderName: undefined,
+        amount: "9007199254740992.01", expirationDate: "2026-12-30" },
+      { ...MOCK_ALLOWANCE, tokenCode: "BBB", spender: "spender-4", spenderName: undefined,
+        amount: "2", expirationDate: "2026-12-01" },
+      { ...MOCK_ALLOWANCE, tokenCode: "CCC", spender: "spender-1", spenderName: undefined,
+        amount: "9007199254740992.00", expirationLedger: 100, expirationDate: undefined },
+      { ...MOCK_ALLOWANCE, tokenCode: "DDD", spender: "spender-3", spenderName: undefined,
+        amount: "9007199254740992.02", expirationDate: undefined },
+    ]);
+    vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+    render(<AllowanceManager currentLedger={99} />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    const controls = await screen.findByRole("group", { name: "Sort allowances" });
+    const assetCodes = () => screen.getAllByText(/^(AAA|BBB|CCC|DDD)$/).map((node) => node.textContent);
+    fireEvent.click(within(controls).getByRole("button", { name: column }));
+    expect(assetCodes()).toEqual(ascending);
+
+    fireEvent.click(within(controls).getByRole("button", { name: `${column}, ascending` }));
+    expect(within(controls).getByRole("button", { name: `${column}, descending` })).toHaveAttribute("aria-pressed", "true");
+    expect(assetCodes()).toEqual(column === "Expiry" ? ["AAA", "BBB", "CCC", "DDD"] : [...ascending].reverse());
+  });
+
   it("renders 'Connect your wallet' when not connected", () => {
     vi.mocked(useSorokit).mockReturnValue({
       address: null,
@@ -159,7 +189,7 @@ describe("AllowanceManager", () => {
     fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
       expect(screen.getByText(/Token Code/)).toBeInTheDocument();
-      expect(screen.getByText(/Spender/)).toBeInTheDocument();
+      expect(screen.getByText(MOCK_ALLOWANCE.spender)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getAllByText(/USDC/)[0]);
@@ -395,16 +425,17 @@ describe("AllowanceManager — issue #917", () => {
   }
 
   function fillForm(values: { asset?: string; spender?: string; amount?: string }) {
+    const form = within(screen.getByRole("form", { name: "New allowance" }));
     if (values.asset !== undefined) {
-      fireEvent.change(screen.getByLabelText("Token"), { target: { value: values.asset } });
+      fireEvent.change(form.getByLabelText("Token"), { target: { value: values.asset } });
     }
     if (values.spender !== undefined) {
-      fireEvent.change(screen.getByLabelText("Spender address"), {
+      fireEvent.change(form.getByLabelText("Spender address"), {
         target: { value: values.spender },
       });
     }
     if (values.amount !== undefined) {
-      fireEvent.change(screen.getByLabelText("Amount"), { target: { value: values.amount } });
+      fireEvent.change(form.getByLabelText("Amount"), { target: { value: values.amount } });
     }
   }
 

@@ -29,6 +29,28 @@ const CHART_COLORS = [
   "var(--color-chart-5)",
 ];
 
+const CATEGORY_STORAGE_KEY = "sorokit-budget-categories";
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+type CategorySettings = Record<string, { name?: string; color?: string }>;
+
+function loadCategorySettings(): CategorySettings {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(CATEGORY_STORAGE_KEY) ?? "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {};
+
+    return Object.fromEntries(Object.entries(stored).flatMap(([type, value]) => {
+      if (!value || typeof value !== "object") return [];
+      const name = typeof value.name === "string" ? value.name.trim() || undefined : undefined;
+      const color = typeof value.color === "string" && HEX_COLOR.test(value.color)
+        ? value.color
+        : undefined;
+      return [[type, { name, color }] as const];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 /** Spending at or above this share of the limit is flagged as critical. */
 const CRITICAL_THRESHOLD = 90;
 
@@ -91,6 +113,7 @@ export interface BudgetScreenProps {
   transactions?: Transaction[];
 }
 
+/** Displays budget limits and spending breakdowns with editable transaction categories. */
 export function BudgetScreen({ transactions }: BudgetScreenProps = {}) {
   const [period, setPeriod] = useState<"daily" | "weekly" | "monthly">(
     "monthly",
@@ -118,32 +141,55 @@ export function BudgetScreen({ transactions }: BudgetScreenProps = {}) {
     [transactions],
   );
 
-  const txTypes = txBreakdown.categories.map((category) => ({
-    type: category.type,
-    amount: category.amount,
-    count: category.count,
-    percentage: category.percentage,
-  }));
+  const [categorySettings, setCategorySettings] = useState(loadCategorySettings);
+  const [draft, setDraft] = useState<CategorySettings | null>(null);
+  const [pickerColors, setPickerColors] = useState<string[]>([]);
+  const [categoryError, setCategoryError] = useState(false);
+
+  const updateCategory = (type: string, settings: CategorySettings[string]) => {
+    setDraft((previous) => ({
+      ...previous,
+      [type]: { ...previous?.[type], ...settings },
+    }));
+  };
+
+  const saveCategories = () => {
+    if (!draft) return;
+    const saved = Object.fromEntries(Object.entries(draft).map(([type, settings]) => [
+      type,
+      { ...settings, name: settings.name?.trim() || undefined },
+    ]));
+    try {
+      localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(saved));
+      setCategorySettings(saved);
+      setDraft(null);
+      setCategoryError(false);
+    } catch {
+      setCategoryError(true);
+    }
+  };
 
   const pieSlices: PieSlice[] = useMemo(() => {
     if (txBreakdown.categories.length === 0) return [];
 
     if (txBreakdown.hasSingleLargeTransaction && txBreakdown.splitCategories) {
+      const type = txBreakdown.categories[0].type;
+      const settings = categorySettings[type];
       return txBreakdown.splitCategories.map((item, idx) => ({
         key: `split-${idx}`,
-        label: item.label,
+        label: (settings?.name ?? type) + item.label.slice(type.length),
         value: item.amount,
-        color: CHART_COLORS[idx % CHART_COLORS.length],
+        color: (idx === 0 ? settings?.color : undefined) ?? CHART_COLORS[idx],
       }));
     }
 
     return txBreakdown.categories.map((cat, idx) => ({
       key: cat.type,
-      label: cat.type,
+      label: categorySettings[cat.type]?.name ?? cat.type,
       value: cat.amount,
-      color: CHART_COLORS[idx % CHART_COLORS.length],
+      color: categorySettings[cat.type]?.color ?? CHART_COLORS[idx % CHART_COLORS.length],
     }));
-  }, [txBreakdown]);
+  }, [txBreakdown, categorySettings]);
 
   // Calculations
   const hasBudget = budgetLimit > 0;
@@ -429,12 +475,12 @@ export function BudgetScreen({ transactions }: BudgetScreenProps = {}) {
                     className="pt-2 space-y-1 border-t border-line"
                     data-testid="split-category-display"
                   >
-                    {txBreakdown.splitCategories.map((item) => (
+                    {txBreakdown.splitCategories.map((item, index) => (
                       <div
                         key={item.label}
                         className="flex justify-between text-[11px] text-ink-2"
                       >
-                        <span>{item.label}</span>
+                        <span>{pieSlices[index].label}</span>
                         <span className="font-semibold text-ink">
                           ${item.amount} ({item.percentage}%)
                         </span>
@@ -476,23 +522,65 @@ export function BudgetScreen({ transactions }: BudgetScreenProps = {}) {
 
             {/* By Operation Type */}
             <div className="space-y-2 pt-2 border-t border-line">
-              <p className="text-[11px] font-bold text-ink-3 uppercase">
-                By Transaction Type
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] font-bold text-ink-3 uppercase">
+                  By Transaction Type
+                </p>
+                {draft ? (
+                  <div className="flex gap-2">
+                    <Button type="button" variant="secondary" onClick={() => {
+                      setDraft(null);
+                      setCategoryError(false);
+                    }}>
+                      Cancel
+                    </Button>
+                    <Button type="button" onClick={saveCategories}>Save</Button>
+                  </div>
+                ) : txBreakdown.categories.length > 0 && (
+                  <Button type="button" variant="secondary" onClick={(event) => {
+                    const style = getComputedStyle(event.currentTarget);
+                    setPickerColors(CHART_COLORS.map((token) => {
+                      const color = style.getPropertyValue(token.slice(4, -1)).trim();
+                      return HEX_COLOR.test(color) ? color : "#000000";
+                    }));
+                    setDraft(categorySettings);
+                  }}>
+                    Edit
+                  </Button>
+                )}
+              </div>
+              {categoryError && <p role="alert" className="text-xs text-red">Could not save category settings.</p>}
               <div className="space-y-2">
-                {txTypes.map((tx, index) => (
+                {txBreakdown.categories.map((tx, index) => (
                   <div
                     key={tx.type}
-                    className="flex justify-between items-center text-[12px]"
+                    className="flex justify-between items-center gap-2 text-[12px]"
                   >
-                    <span className="flex items-center gap-1.5 text-ink-2">
-                      <span
-                        className="w-2.5 h-2.5 rounded-sm"
-                        style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
-                        aria-hidden="true"
-                      />
-                      {tx.type} ({tx.count} txs)
-                    </span>
+                    {draft ? (
+                      <div className="flex min-w-0 items-center gap-2">
+                        <input
+                          type="color"
+                          aria-label={`${tx.type} category color`}
+                          value={draft[tx.type]?.color ?? pickerColors[index % CHART_COLORS.length]}
+                          onChange={(event) => updateCategory(tx.type, { color: event.target.value })}
+                          className="h-8 w-9 shrink-0 cursor-pointer"
+                        />
+                        <Input
+                          aria-label={`${tx.type} category name`}
+                          value={draft[tx.type]?.name ?? tx.type}
+                          onChange={(event) => updateCategory(tx.type, { name: event.target.value })}
+                        />
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-ink-2">
+                        <span
+                          className="w-2.5 h-2.5 shrink-0 rounded-sm"
+                          style={{ backgroundColor: categorySettings[tx.type]?.color ?? CHART_COLORS[index % CHART_COLORS.length] }}
+                          aria-hidden="true"
+                        />
+                        {categorySettings[tx.type]?.name ?? tx.type} ({tx.count} txs)
+                      </span>
+                    )}
                     <strong className="text-ink">${tx.amount}</strong>
                   </div>
                 ))}
