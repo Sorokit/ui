@@ -11,16 +11,19 @@ export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   shape?: SkeletonShape;
   /**
    * Animation variant.
-   * - "pulse"   — opacity pulsing via Tailwind's animate-pulse (default)
-   * - "shimmer" — a light sweep across the skeleton
+   * - "pulse"   : opacity pulsing via Tailwind's animate-pulse (default)
+   * - "shimmer" : a light sweep across the skeleton
    */
   variant?: "pulse" | "shimmer";
+  /** When true, stops the loading animation to conserve CPU once content is loaded (issue #1058) */
+  loaded?: boolean;
 }
 
 export function Skeleton({
   circle,
   shape = "rounded",
   variant = "pulse",
+  loaded = false,
   className,
   ...props
 }: SkeletonProps) {
@@ -39,9 +42,11 @@ export function Skeleton({
         // motion-reduce fallback, rather than an unconditional
         // animate-pulse/skeleton-shimmer (issue #962): the bare utility
         // would keep animating even with prefers-reduced-motion set.
-        variant === "pulse"
-          ? "motion-safe:animate-pulse motion-reduce:opacity-60"
-          : "motion-safe:skeleton-shimmer motion-reduce:skeleton-shimmer-static",
+        !loaded && (
+          variant === "pulse"
+            ? "motion-safe:animate-pulse motion-reduce:opacity-60"
+            : "motion-safe:skeleton-shimmer motion-reduce:skeleton-shimmer-static"
+        ),
         className,
       )}
       {...props}

@@ -467,7 +467,7 @@ export function NetworkBanner({
           className="inline-flex items-center gap-1.5 rounded p-1 hover:bg-black/10 dark:hover:bg-white/10 transition-colors focus:outline-none focus:ring-1 focus:ring-current"
         >
           {dotEl}
-          <span className={cn("sr-only", cfg.text)}>{label}</span>
+          <span className={cn("text-[10px] font-semibold", cfg.text)}>{label}</span>
           {healthIndicator}
         </button>
       ) : (
@@ -475,10 +475,16 @@ export function NetworkBanner({
           <div className="flex-1 min-w-[20px]" aria-hidden="true" />
           <div className="flex flex-wrap items-center justify-center gap-2 text-center">
             {dotEl}
+            <span
+              className="text-[10px] uppercase tracking-wider font-semibold opacity-75 rounded px-1.5 py-0.5 bg-black/10 dark:bg-white/10"
+              data-testid="network-banner-badge"
+            >
+              Network
+            </span>
             <span className={cfg.text} style={textStyle}>
               You are on <strong>{label}</strong>
               {network.name !== "mainnet" &&
-                " — transactions use test funds only"}
+                " - transactions use test funds only"}
             </span>
             {healthIndicator}
           </div>

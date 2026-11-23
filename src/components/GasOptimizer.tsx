@@ -927,7 +927,7 @@ function MultiplierSlider({
           Gas Price Multiplier
         </label>
         <span className="text-[13px] font-semibold text-brand">
-          {value.toFixed(1)}x
+          Multiplier: {value.toFixed(1)}x
         </span>
       </div>
       <input
@@ -940,11 +940,16 @@ function MultiplierSlider({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="w-full h-1.5 rounded-lg appearance-none bg-surface-2 cursor-pointer accent-brand"
         aria-label="Gas price multiplier"
+        aria-valuenow={value}
+        aria-valuemin={0.5}
+        aria-valuemax={2}
+        aria-valuetext={`Multiplier: ${value.toFixed(1)}x`}
+        title="Range: 0.5x to 2.0x"
       />
       <div className="flex justify-between text-[10px] text-ink-4">
-        <span>0.5x</span>
+        <span title="Min: 0.5x">0.5x</span>
         <span>1.0x</span>
-        <span>2.0x</span>
+        <span title="Max: 2.0x">2.0x</span>
       </div>
     </div>
   );

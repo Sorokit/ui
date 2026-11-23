@@ -200,10 +200,14 @@ describe("GasOptimizer", () => {
 
     const slider = screen.getByRole("slider", { name: "Gas price multiplier" });
     expect(slider).toHaveValue("1");
+    expect(slider).toHaveAttribute("aria-valuenow", "1");
+    expect(slider).toHaveAttribute("aria-valuemin", "0.5");
+    expect(slider).toHaveAttribute("aria-valuemax", "2");
 
     fireEvent.change(slider, { target: { value: "1.5" } });
     await waitFor(() => {
-      expect(screen.getByText("1.5x")).toBeInTheDocument();
+      expect(screen.getByText("Multiplier: 1.5x")).toBeInTheDocument();
+      expect(slider).toHaveAttribute("aria-valuenow", "1.5");
     });
   });
 
@@ -739,40 +743,46 @@ describe("GasOptimizer", () => {
       
       const { unmount } = render(<GasOptimizer refreshInterval={5000} />);
       
-      await vi.runOnlyPendingTimersAsync();
-      const count1 = getGasPrice.mock.calls.length;
-      
-      // Change visibility to false
-      act(() => {
-        observerCallback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
-      });
-      
-      // Advance timers by multiple intervals
-      await act(async () => {
-        vi.advanceTimersByTime(15000);
-      });
-      
-      // Should not have polled while invisible
-      expect(getGasPrice.mock.calls.length).toBe(count1);
-      
-      // Change visibility to true
-      act(() => {
-        observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
-      });
-      
-      // Wait for immediate resumption effect
-      await vi.runOnlyPendingTimersAsync();
-      
-      // Advance by one interval
-      await act(async () => {
-        vi.advanceTimersByTime(5000);
-      });
-      
-      expect(getGasPrice.mock.calls.length).toBeGreaterThan(count1);
-      
-      unmount();
-      vi.useRealTimers();
-      vi.unstubAllGlobals();
+      try {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+        const count1 = getGasPrice.mock.calls.length;
+        
+        // Change visibility to false
+        act(() => {
+          observerCallback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+        });
+        
+        // Advance timers by multiple intervals
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(15000);
+        });
+        
+        // Should not have polled while invisible
+        expect(getGasPrice.mock.calls.length).toBe(count1);
+        
+        // Change visibility to true
+        act(() => {
+          observerCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+        });
+        
+        // Wait for immediate resumption effect
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(50);
+        });
+        
+        // Advance by one interval
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5000);
+        });
+        
+        expect(getGasPrice.mock.calls.length).toBeGreaterThan(count1);
+      } finally {
+        unmount();
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+      }
     });
   });
 });

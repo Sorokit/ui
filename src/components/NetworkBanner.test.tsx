@@ -89,7 +89,7 @@ describe("NetworkBanner", () => {
     expect(screen.getByText("Testnet")).toBeInTheDocument();
     expect(
       screen.getByText(/You are on/i),
-    ).toHaveTextContent("You are on Testnet — transactions use test funds only");
+    ).toHaveTextContent("You are on Testnet - transactions use test funds only");
 
     const dot = container.querySelector(".rounded-full");
     expect(dot).toHaveClass("bg-orange");
@@ -99,6 +99,16 @@ describe("NetworkBanner", () => {
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
   });
 
+  it("renders Network badge and visible network label (#1062)", () => {
+    mockNetwork(TESTNET_NETWORK);
+    render(<NetworkBanner />);
+
+    const badge = screen.getByTestId("network-banner-badge");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveTextContent("Network");
+    expect(screen.getByText("Testnet")).toBeVisible();
+  });
+
   it("renders a visible banner on futurenet", () => {
     mockNetwork(FUTURENET_NETWORK);
     const { container } = render(<NetworkBanner />);
@@ -106,7 +116,7 @@ describe("NetworkBanner", () => {
     expect(screen.getByText("Futurenet")).toBeInTheDocument();
     expect(
       screen.getByText(/You are on/i),
-    ).toHaveTextContent("You are on Futurenet — transactions use test funds only");
+    ).toHaveTextContent("You are on Futurenet - transactions use test funds only");
 
     const dot = container.querySelector(".rounded-full");
     expect(dot).toHaveClass("bg-purple");
@@ -122,7 +132,7 @@ describe("NetworkBanner", () => {
     expect(screen.getByText("Localnet")).toBeInTheDocument();
     expect(
       screen.getByText(/You are on/i),
-    ).toHaveTextContent("You are on Localnet — transactions use test funds only");
+    ).toHaveTextContent("You are on Localnet - transactions use test funds only");
 
     const dot = container.querySelector(".rounded-full");
     expect(dot).toHaveClass("bg-ink-3");
@@ -135,7 +145,7 @@ describe("NetworkBanner", () => {
     expect(screen.getByText("custom-net")).toBeInTheDocument();
     expect(
       screen.getByText(/You are on/i),
-    ).toHaveTextContent("You are on custom-net — transactions use test funds only");
+    ).toHaveTextContent("You are on custom-net - transactions use test funds only");
   });
 
   it("merges per-network config overrides with the defaults", () => {

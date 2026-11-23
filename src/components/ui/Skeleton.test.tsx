@@ -78,6 +78,26 @@ describe("Skeleton", () => {
       expect(classes).toContain("motion-reduce:skeleton-shimmer-static");
     });
   });
+
+  // ── Loaded prop / CPU waste prevention (issue #1058) ─────────────────────
+
+  describe("loaded prop", () => {
+    it("stops animating when loaded is true", () => {
+      const { container } = render(<Skeleton loaded={true} />);
+      const el = container.firstElementChild as HTMLElement;
+      expect(el).not.toHaveClass("motion-safe:animate-pulse");
+      expect(el).not.toHaveClass("motion-safe:skeleton-shimmer");
+    });
+
+    it("resumes animation when loaded flips from true back to false", () => {
+      const { container, rerender } = render(<Skeleton loaded={true} />);
+      const el = container.firstElementChild as HTMLElement;
+      expect(el).not.toHaveClass("motion-safe:animate-pulse");
+
+      rerender(<Skeleton loaded={false} />);
+      expect(el).toHaveClass("motion-safe:animate-pulse");
+    });
+  });
 });
 
 describe("SkeletonRow", () => {

@@ -1,3 +1,6 @@
+import * as SeparatorPrimitive from "@radix-ui/react-separator";
+import React from "react";
+
 export interface SeparatorProps {
   className?: string;
   label?: string;
@@ -26,18 +29,14 @@ export function Separator({
   spacing = "md",
   decorative = false,
 }: SeparatorProps) {
-  const a11yProps = decorative
-    ? { role: "none" as const, "aria-hidden": true as const }
-    : { role: "separator" as const, "aria-orientation": orientation };
-
   if (orientation === "vertical") {
     return (
-      <div
-        {...a11yProps}
-        // self-stretch + min-h-full keep the divider's height tied to its
-        // flex container even when that container uses align-items:
-        // stretch, where an unconstrained h-full alone collapses to 0px
-        // (issue #963).
+      <SeparatorPrimitive.Root
+        orientation="vertical"
+        decorative={decorative}
+        role={decorative ? "none" : "separator"}
+        aria-hidden={decorative ? true : undefined}
+        aria-orientation={decorative ? undefined : "vertical"}
         className={`w-px h-full self-stretch min-h-full bg-line ${className ?? ""}`}
       />
     );
@@ -46,7 +45,10 @@ export function Separator({
   if (label) {
     return (
       <div
-        {...a11yProps}
+        role={decorative ? "none" : "separator"}
+        aria-hidden={decorative ? true : undefined}
+        aria-orientation={decorative ? undefined : orientation}
+        data-orientation={orientation}
         className={`flex items-center gap-3 ${spacingMap[spacing]} ${className ?? ""}`}
       >
         <div className="flex-1 h-px bg-line" />
@@ -57,8 +59,12 @@ export function Separator({
   }
 
   return (
-    <div
-      {...a11yProps}
+    <SeparatorPrimitive.Root
+      orientation="horizontal"
+      decorative={decorative}
+      role={decorative ? "none" : "separator"}
+      aria-hidden={decorative ? true : undefined}
+      aria-orientation={decorative ? undefined : "horizontal"}
       className={`h-px bg-line w-full ${spacingMap[spacing]} ${className ?? ""}`}
     />
   );

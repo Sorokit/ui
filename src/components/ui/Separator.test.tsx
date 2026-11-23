@@ -114,4 +114,15 @@ describe("Separator", () => {
     expect(root).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByText("OR")).toBeInTheDocument();
   });
+
+  // ── Orientation pass-through (issue #1057) ───────────────────────────────
+
+  it("renders horizontal by default and passes through vertical orientation to radix root", () => {
+    const { container: h } = render(<Separator />);
+    expect(h.firstElementChild).toHaveAttribute("data-orientation", "horizontal");
+
+    const { container: v } = render(<Separator orientation="vertical" />);
+    expect(v.firstElementChild).toHaveAttribute("data-orientation", "vertical");
+    expect(v.firstElementChild).toHaveClass("w-px");
+  });
 });
