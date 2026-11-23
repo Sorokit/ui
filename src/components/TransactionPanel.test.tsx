@@ -1501,7 +1501,13 @@ describe("TransactionPanel", () => {
 
       // Transaction state reset: submit button is back and no longer in Submitting... state
       expect(screen.queryByText("Submitting…")).not.toBeInTheDocument();
-      resolveSubmit!({ data: { hash: "late-hash" }, error: null });
+      await act(async () => {
+        resolveSubmit!({ data: { hash: "late-hash" }, error: null });
+      });
+      expect(screen.queryByText("late-hash")).not.toBeInTheDocument();
+    });
+  });
+
   describe("Transaction Templates (#1146)", () => {
     beforeEach(() => {
       localStorage.clear();
@@ -1695,5 +1701,22 @@ describe("TransactionPanel", () => {
       expect(scheduled[0].status).toBe("executed");
       expect(scheduled[0].txHash).toBe("sched-hash-1");
     });
+  });
+
+  it("shows saved payment favorites on focus and supports removing them", () => {
+    const destination = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    localStorage.setItem("sorokit.favorite-recipients", JSON.stringify([destination]));
+    try {
+      render(<TransactionPanel />);
+      const field = screen.getByLabelText("Destination Address");
+      fireEvent.focus(field);
+      fireEvent.click(screen.getByRole("button", { name: destination }));
+      expect(field).toHaveValue(destination);
+      fireEvent.focus(field);
+      fireEvent.click(screen.getByRole("button", { name: `Remove favorite ${destination}` }));
+      expect(localStorage.getItem("sorokit.favorite-recipients")).toBe("[]");
+    } finally {
+      localStorage.removeItem("sorokit.favorite-recipients");
+    }
   });
 });

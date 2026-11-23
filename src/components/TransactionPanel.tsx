@@ -120,6 +120,19 @@ export interface MultiSendRow {
   txHash?: string;
 }
 
+const FAVORITE_RECIPIENTS_KEY = "sorokit.favorite-recipients";
+
+function readFavoriteRecipients(): string[] {
+  try {
+    const data: unknown = JSON.parse(localStorage.getItem(FAVORITE_RECIPIENTS_KEY) ?? "[]");
+    return Array.isArray(data)
+      ? [...new Set(data.filter((item): item is string => typeof item === "string" && validateStellarAddress(item)))].slice(0, 50)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface TransactionPanelProps {
   defaultDestination?: string;
   defaultAmount?: string;
@@ -153,6 +166,21 @@ export function TransactionPanel({
     balances = [],
   } = useSorokit();
   const [dest, setDest] = useState(defaultDestination);
+  const [favorites, setFavorites] = useState(readFavoriteRecipients);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [sentRecipient, setSentRecipient] = useState("");
+
+  function toggleFavorite(recipient: string) {
+    const next = favorites.includes(recipient)
+      ? favorites.filter((entry) => entry !== recipient)
+      : [recipient, ...favorites].slice(0, 50);
+    setFavorites(next);
+    try {
+      localStorage.setItem(FAVORITE_RECIPIENTS_KEY, JSON.stringify(next));
+    } catch {
+      // Keep the current list usable when browser storage is unavailable.
+    }
+  }
   const [destDirty, setDestDirty] = useState(false);
   const [amount, setAmount] = useState(defaultAmount);
   const [amountDirty, setAmountDirty] = useState(false);
@@ -514,6 +542,7 @@ export function TransactionPanel({
         return;
       }
       setReceiptAmount(`${amount} ${selectedAsset}`);
+      setSentRecipient(dest.trim());
       setResult(data);
       setState("success");
       onSuccess?.(data!);
@@ -900,6 +929,11 @@ export function TransactionPanel({
                 )}
               </div>
             </div>
+            {sentRecipient && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => toggleFavorite(sentRecipient)}>
+                {favorites.includes(sentRecipient) ? "Remove favorite recipient" : "☆ Favorite recipient"}
+              </Button>
+            )}
             <TransactionStatusTracker hash={result.hash} amount={receiptAmount} className="mt-2" />
           </div>
         ) : !isConnected ? (
@@ -1205,8 +1239,13 @@ export function TransactionPanel({
                 )}
               </div>
             )}
+            <div onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setFavoritesOpen(false);
+            }}>
             <Input
               label="Destination Address"
+              onFocus={() => setFavoritesOpen(true)}
+              onKeyDown={(event) => { if (event.key === "Escape") setFavoritesOpen(false); }}
               placeholder="G..."
               value={dest}
               onChange={(e) => {
@@ -1226,6 +1265,20 @@ export function TransactionPanel({
               }
               disabled={state === "loading"}
             />
+            {favoritesOpen && favorites.length > 0 && (
+              <ul aria-label="Favorite recipients" className="mt-1 rounded-lg border border-line bg-surface p-2">
+                {favorites.map((recipient) => (
+                  <li key={recipient} className="flex items-center gap-2">
+                    <button type="button" className="min-w-0 flex-1 truncate text-left" title={recipient}
+                      onClick={() => { setDest(recipient); setDestDirty(true); setFavoritesOpen(false); }}>
+                      {recipient}
+                    </button>
+                    <button type="button" aria-label={`Remove favorite ${recipient}`} onClick={() => toggleFavorite(recipient)}>×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            </div>
             <Select
               label="Asset"
               value={selectedAsset}
