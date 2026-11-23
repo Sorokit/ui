@@ -5,6 +5,7 @@ import { Bell, Moon, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
+import { NotificationHistory } from "@/components/NotificationHistory";
 import type { NavSection } from "@/components/Sidebar";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
@@ -32,8 +33,10 @@ export function TopBar({
 }: TopBarProps) {
   const { error, clearError } = useSorokit();
   const toastContext = useOptionalToast();
-  const toasts = toastContext?.toasts ?? [];
-  const unreadCount = toastContext?.unreadCount ?? 0;
+  const notifications = toastContext?.history ?? [];
+  const unreadCount = toastContext?.unreadHistoryCount ?? 0;
+  const recordNotification = toastContext?.recordNotification;
+  const lastRecordedError = useRef<string | null>(null);
   const { pendingActions: hookPendingActions } = usePendingActions();
   const activePendingActions = propPendingActions ?? hookPendingActions;
   const totalBadgeCount = activePendingActions.length + unreadCount;
@@ -51,6 +54,14 @@ export function TopBar({
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("sorokit-theme", theme);
   }, [theme]);
+
+  // Banner errors have no toast, so copy them into the notification history.
+  useEffect(() => {
+    if (error && error !== lastRecordedError.current) {
+      recordNotification?.({ type: "error", title: error });
+    }
+    lastRecordedError.current = error;
+  }, [error, recordNotification]);
 
   const toggleTheme = () => {
     setTheme((current) => (current === "dark" ? "light" : "dark"));
@@ -233,25 +244,11 @@ export function TopBar({
                   </div>
 
                   {/* Toast/Recent Notifications section */}
-                  <div className="py-3">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3 block mb-2">
-                      Recent Activity
-                    </span>
-                    {toasts.length ? (
-                      <ul className="divide-y divide-line">
-                        {toasts.map((toast) => (
-                          <li key={toast.id} className="py-2.5 first:pt-1 last:pb-0">
-                            <p className="text-[13px] font-medium">{toast.title}</p>
-                            {toast.message && (
-                              <p className="mt-1 break-words text-xs text-ink-3">{toast.message}</p>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="py-3 text-center text-xs text-ink-3">No recent activity</p>
-                    )}
-                  </div>
+                  <NotificationHistory
+                    notifications={notifications}
+                    onDismiss={(id) => toastContext?.dismissNotification(id)}
+                    onClear={() => toastContext?.clearNotifications()}
+                  />
                 </div>
               </Dialog.Content>
             </Dialog.Portal>

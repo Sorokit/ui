@@ -322,7 +322,7 @@ export {
 } from "../hooks/usePendingActions";
 
 // Types
-export type { Toast, ToastType } from "../context/ToastContext";
+export type { NotificationEntry, Toast, ToastType } from "../context/ToastContext";
 export { ToastProvider, useToast } from "../context/ToastContext";
 export type {
   AccountData,
