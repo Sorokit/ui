@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import type { NavSection } from './components/Sidebar';
+import { KeyboardShortcutsHelp } from './components/KeyboardShortcutsHelp';
 import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
 import { ToastProvider, useToast } from './context/ToastContext';
@@ -52,7 +53,12 @@ function AppContent() {
     return <ConnectScreen />;
   }
 
-  return <Dashboard activeSection={section} onSectionChange={handleSectionChange} />;
+  return (
+    <>
+      <Dashboard activeSection={section} onSectionChange={handleSectionChange} />
+      <KeyboardShortcutsHelp />
+    </>
+  );
 }
 
 function App({ client }: AppProps) {
