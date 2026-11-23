@@ -1,9 +1,12 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SorokitProvider } from "@/context/SorokitProvider";
 import { useSorokit } from "@/context/useSorokit";
 import type { Balance, SorokitClient, Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
+import { createMockClient, MOCK_ADDRESS } from "@/lib/mock-client";
 
 import { AccountSidebar } from "./AccountSidebar";
 
@@ -12,6 +15,7 @@ vi.mock("@/context/useSorokit", () => ({
 }));
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
+  initClient: vi.fn(),
 }));
 
 const ADDRESS = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA";
@@ -170,6 +174,75 @@ describe("AccountSidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm disconnect?" }));
     expect(mockDisconnect).toHaveBeenCalledTimes(1);
     expect(mockClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on disconnect and reopens without the previous account data", async () => {
+    const { useSorokit: useActualSorokit } =
+      await vi.importActual<typeof import("@/context/useSorokit")>("@/context/useSorokit");
+    vi.mocked(useSorokit).mockImplementation(useActualSorokit);
+    const client = createMockClient({
+      balances: [makeBalance()],
+      history: [makeTx(1)],
+    });
+    const transactionLabel = /^Transaction .* Fee: 100 stroops$/;
+    const disconnect = vi.spyOn(client.wallet, "disconnect");
+
+    function WalletHarness() {
+      const [open, setOpen] = useState(false);
+      const { address, account, balances, connectWallet } = useActualSorokit();
+
+      return (
+        <>
+          <button onClick={() => void connectWallet()}>Connect wallet</button>
+          <button onClick={() => setOpen(true)}>Open account</button>
+          <output aria-label="Wallet data">
+            {JSON.stringify({ address, account, balances })}
+          </output>
+          <AccountSidebar open={open} onClose={() => setOpen(false)} />
+        </>
+      );
+    }
+
+    try {
+      render(
+        <SorokitProvider client={client}>
+          <WalletHarness />
+        </SorokitProvider>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Connect wallet" }));
+      fireEvent.click(screen.getByRole("button", { name: "Open account" }));
+      expect(await screen.findByText(MOCK_ADDRESS)).toBeInTheDocument();
+      expect(await screen.findByRole("listbox", { name: "Account balances" })).toBeInTheDocument();
+      expect(await screen.findByLabelText(transactionLabel)).toBeInTheDocument();
+      const walletData = screen.getByLabelText("Wallet data");
+      expect(JSON.parse(walletData.textContent ?? "{}")).toMatchObject({
+        address: MOCK_ADDRESS,
+        account: expect.any(Object),
+        balances: [makeBalance()],
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
+      fireEvent.click(screen.getByRole("button", { name: "Confirm disconnect?" }));
+
+      expect(disconnect).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("dialog", { name: "Account details" })).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(JSON.parse(walletData.textContent ?? "{}")).toEqual({
+          address: null,
+          account: null,
+          balances: [],
+        });
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Open account" }));
+      expect(screen.getByText(/connect your wallet/i)).toBeInTheDocument();
+      expect(screen.queryByText(MOCK_ADDRESS)).not.toBeInTheDocument();
+      expect(screen.queryByRole("listbox", { name: "Account balances" })).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(transactionLabel)).not.toBeInTheDocument();
+    } finally {
+      vi.mocked(useSorokit).mockReset();
+    }
   });
 
   it("toggles and persists the collapsed state", async () => {
