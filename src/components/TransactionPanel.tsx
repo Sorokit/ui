@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import type { PaymentDraft } from "@/lib/payment-draft";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
@@ -134,6 +135,7 @@ function readFavoriteRecipients(): string[] {
 }
 
 export interface TransactionPanelProps {
+  draft?: PaymentDraft;
   defaultDestination?: string;
   defaultAmount?: string;
   defaultMemo?: string;
@@ -146,6 +148,7 @@ export interface TransactionPanelProps {
 }
 
 export function TransactionPanel({
+  draft,
   defaultDestination = "",
   defaultAmount = "",
   defaultMemo = "",
@@ -213,6 +216,22 @@ export function TransactionPanel({
   const formId = useId();
 
   const [mode, setMode] = useState<"single" | "multi">(defaultMode);
+  const loadedDraft = useRef<PaymentDraft | undefined>(undefined);
+  useEffect(() => {
+    if (!draft || draft === loadedDraft.current || state === "loading") return;
+    loadedDraft.current = draft;
+    setMode("single");
+    setDest(draft.destination);
+    setDestDirty(false);
+    setAsset(draft.asset);
+    setAmount(draft.amount);
+    setAmountDirty(false);
+    setMemo("");
+    setPreview(null);
+    setResult(null);
+    setError(null);
+    setState("idle");
+  }, [draft, state]);
   const [multiRows, setMultiRows] = useState<MultiSendRow[]>([
     { id: "row-1", destination: "", amount: "", asset: "XLM", status: "idle" },
     { id: "row-2", destination: "", amount: "", asset: "XLM", status: "idle" },

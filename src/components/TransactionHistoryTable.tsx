@@ -27,6 +27,8 @@ const MEMO_TRUNCATE_LENGTH = 20;
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
 
+import { paymentDraft, type PaymentDraft } from "@/lib/payment-draft";
+
 export type SortField = "createdAt" | "ledger" | "feePaid" | "operationCount";
 export type SortDirection = "asc" | "desc";
 
@@ -43,6 +45,7 @@ export interface TransactionHistoryTableProps {
   pageSize?: number;
   /** Optional callback for CSV export. If provided, called instead of DOM download. */
   onExport?: (csv: string) => void;
+  onSendAgain?: (draft: PaymentDraft) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -394,6 +397,7 @@ export function TransactionHistoryTable({
   className,
   pageSize = PAGE_SIZE,
   onExport,
+  onSendAgain,
 }: TransactionHistoryTableProps) {
   const { address, isConnected, network, client } = useSorokit();
   const [allTxs, setAllTxs] = useState<Transaction[]>([]);
@@ -606,6 +610,7 @@ export function TransactionHistoryTable({
                 <tbody>
                   {paged.map((tx) => {
                     const { date, time } = formatDate(tx.createdAt);
+                    const draft = onSendAgain && paymentDraft(tx, address);
                     return (
                       <tr
                         key={tx.hash}
@@ -677,6 +682,11 @@ export function TransactionHistoryTable({
                           >
                             {tx.successful ? "Success" : "Failed"}
                           </Badge>
+                          {draft && (
+                            <button type="button" className="ml-2 text-xs text-brand" onClick={() => onSendAgain?.(draft)}>
+                              Send Again
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
