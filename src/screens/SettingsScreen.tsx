@@ -6,6 +6,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/Card";
+import { downloadAuditLog, useAuditLog } from "@/lib/audit-log";
 import { requestOnboardingReplay } from "@/lib/onboarding";
 import {
   type DisplayCurrency,
@@ -19,6 +20,9 @@ import {
 
 export function SettingsScreen() {
   const { fontScale, reduceMotion, currency } = usePreferences();
+  const auditLog = useAuditLog();
+  // Newest first, so the latest activity is what you see without scrolling.
+  const recentFirst = [...auditLog].reverse();
 
   return (
     <div className="flex flex-col gap-5">
@@ -100,6 +104,65 @@ export function SettingsScreen() {
               </option>
             ))}
           </select>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Audit log</CardTitle>
+          <CardDescription>
+            Wallet connections, disconnections and sent payments recorded on
+            this device.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {recentFirst.length === 0 ? (
+            <p className="text-[13px] text-ink-3">No activity recorded yet.</p>
+          ) : (
+            <div className="max-h-72 overflow-auto rounded-lg border border-line">
+              <table className="w-full text-left text-[12px]">
+                <caption className="sr-only">
+                  Audit log, {recentFirst.length}{" "}
+                  {recentFirst.length === 1 ? "entry" : "entries"}, newest first
+                </caption>
+                <thead className="bg-surface-2 text-ink-2">
+                  <tr>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Time
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Action
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">
+                      Details
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {recentFirst.map((entry) => (
+                    <tr key={entry.id}>
+                      <td className="px-3 py-2 whitespace-nowrap text-ink-2">
+                        <time dateTime={entry.timestamp}>
+                          {new Date(entry.timestamp).toLocaleString()}
+                        </time>
+                      </td>
+                      <td className="px-3 py-2 text-ink">{entry.action}</td>
+                      <td className="px-3 py-2 break-all text-ink-2">
+                        {entry.detail}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Button
+            variant="secondary"
+            disabled={auditLog.length === 0}
+            onClick={() => downloadAuditLog(auditLog)}
+          >
+            Export audit log
+          </Button>
         </CardContent>
       </Card>
 

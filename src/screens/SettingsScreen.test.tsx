@@ -1,7 +1,8 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { logAuditEvent, reloadAuditLog } from "@/lib/audit-log";
 import { ONBOARDING_REPLAY_EVENT } from "@/lib/onboarding";
 import { getPreferences, reloadPreferences } from "@/lib/preferences";
 
@@ -11,6 +12,7 @@ describe("SettingsScreen", () => {
   beforeEach(() => {
     window.localStorage.clear();
     reloadPreferences();
+    reloadAuditLog();
   });
 
   it("replays the tutorial from the Replay tutorial button", async () => {
@@ -82,5 +84,63 @@ describe("SettingsScreen", () => {
     expect(screen.getByTestId("font-scale-value")).toHaveTextContent("130%");
     expect(screen.getByRole("checkbox", { name: "Reduce motion" })).toBeChecked();
     expect(screen.getByRole("combobox", { name: "Currency" })).toHaveValue("GBP");
+  });
+
+  describe("audit log", () => {
+    it("says so when nothing has been recorded", () => {
+      render(<SettingsScreen />);
+
+      expect(screen.getByText("No activity recorded yet.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Export audit log" })).toBeDisabled();
+    });
+
+    it("lists recorded actions newest first in an accessible table", () => {
+      logAuditEvent("connect", "GABC");
+      logAuditEvent("send", "10 XLM to GDEST");
+      render(<SettingsScreen />);
+
+      const table = screen.getByRole("table", { name: /audit log, 2 entries/i });
+      const rows = within(table).getAllByRole("row").slice(1);
+      expect(rows).toHaveLength(2);
+      expect(within(rows[0]).getByText("send")).toBeInTheDocument();
+      expect(within(rows[0]).getByText("10 XLM to GDEST")).toBeInTheDocument();
+      expect(within(rows[1]).getByText("connect")).toBeInTheDocument();
+      expect(
+        within(table).getAllByRole("columnheader").map((h) => h.textContent),
+      ).toEqual(["Time", "Action", "Details"]);
+    });
+
+    it("shows a new entry as soon as it is recorded", () => {
+      render(<SettingsScreen />);
+
+      act(() => logAuditEvent("disconnect", "GABC"));
+
+      expect(screen.getByText("GABC")).toBeInTheDocument();
+    });
+
+    it("exports the log as a CSV file", async () => {
+      const user = userEvent.setup();
+      logAuditEvent("connect", "GABC");
+      const originalCreate = URL.createObjectURL;
+      const originalRevoke = URL.revokeObjectURL;
+      const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:audit");
+      URL.createObjectURL = createObjectURL;
+      URL.revokeObjectURL = vi.fn();
+      const click = vi
+        .spyOn(HTMLAnchorElement.prototype, "click")
+        .mockImplementation(() => {});
+
+      try {
+        render(<SettingsScreen />);
+        await user.click(screen.getByRole("button", { name: "Export audit log" }));
+
+        expect(click).toHaveBeenCalledTimes(1);
+        expect(createObjectURL.mock.calls[0][0].type).toBe("text/csv;charset=utf-8;");
+      } finally {
+        URL.createObjectURL = originalCreate;
+        URL.revokeObjectURL = originalRevoke;
+        click.mockRestore();
+      }
+    });
   });
 });

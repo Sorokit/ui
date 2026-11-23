@@ -6,6 +6,7 @@ import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { useSorokit } from './context/useSorokit';
+import { useAuditLogging } from './hooks/useAuditLogging';
 import type { SorokitClient } from './lib/client';
 import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
 import { applyPreferences } from './lib/preferences';
@@ -23,6 +24,7 @@ function ToastRenderer() {
 
 function AppContent() {
   const { isConnected } = useSorokit();
+  useAuditLogging();
 
   // Apply the saved font size and motion preferences on load, including on the
   // connect screen.
