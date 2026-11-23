@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -49,6 +49,25 @@ describe("TransactionStatusTracker", () => {
   afterEach(() => {
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
+  });
+
+  it("prints a receipt with the confirmed hash and supplied amount", async () => {
+    const receiptDocument = document.implementation.createHTMLDocument();
+    const print = vi.fn();
+    const open = vi.spyOn(window, "open").mockReturnValue({ document: receiptDocument, print } as unknown as Window);
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus: vi.fn().mockResolvedValue({ data: "success", error: null }) },
+    } as unknown as ReturnType<typeof getClient>);
+    try {
+      render(<TransactionStatusTracker hash="receipt-hash" amount="12 XLM" />);
+      await flushAsyncUpdates();
+      fireEvent.click(screen.getByRole("button", { name: "Print receipt" }));
+      expect(receiptDocument.body.textContent).toContain("receipt-hash");
+      expect(receiptDocument.body.textContent).toContain("12 XLM");
+      expect(print).toHaveBeenCalledOnce();
+    } finally {
+      open.mockRestore();
+    }
   });
 
   it("shows pending and confirmed states while polling until resolution", async () => {

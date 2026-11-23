@@ -320,6 +320,8 @@ export const TxRow = memo(function TxRow({
   );
 });
 
+import { paymentDraft, type PaymentDraft } from "@/lib/payment-draft";
+
 type StatusFilter = "all" | "success" | "failed";
 
 export interface TransactionHistoryProps {
@@ -327,12 +329,14 @@ export interface TransactionHistoryProps {
   endDate?: string;
   /** Render a 7-day transaction-activity sparkline in the card header. */
   showTrend?: boolean;
+  onSendAgain?: (draft: PaymentDraft) => void;
 }
 
 export function TransactionHistory({
   startDate,
   endDate,
   showTrend,
+  onSendAgain,
 }: TransactionHistoryProps = {}) {
   const { address, isConnected, network, client: contextClient } = useSorokit();
   const client = contextClient ?? getClient();
@@ -736,7 +740,17 @@ export function TransactionHistory({
         <>
           <div>
             {filteredTxs.map((tx) => (
-              <TxRow key={tx.hash} tx={tx} networkName={network?.name} />
+              <div key={tx.hash}>
+                <TxRow tx={tx} networkName={network?.name} />
+                {(() => {
+                  const draft = onSendAgain && paymentDraft(tx, address);
+                  return draft && (
+                    <button type="button" className="px-3 pb-2 text-xs text-brand" onClick={() => onSendAgain?.(draft)}>
+                      Send Again
+                    </button>
+                  );
+                })()}
+              </div>
             ))}
             {searchActive && filteredTxs.length === 0 && !searchingAll && (
               <p className="text-[13px] text-ink-3 text-center py-8">

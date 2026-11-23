@@ -34,6 +34,7 @@ interface TrackedTransaction {
 
 interface TransactionStatusTrackerProps {
   hash?: string;
+  amount?: string;
   hashes?: string[];
   pollIntervalMs?: number;
   className?: string;
@@ -119,6 +120,36 @@ function formatTimestamp(value: string | null): string {
   });
 }
 
+function printReceipt(entry: TrackedTransaction, amount?: string): boolean {
+  const receipt = window.open("", "_blank");
+  if (!receipt) return false;
+  receipt.opener = null;
+  const doc = receipt.document;
+  doc.title = "Transaction receipt";
+  const style = doc.createElement("style");
+  style.textContent = "body{font:14pt system-ui;margin:2rem;color:#111} dd{overflow-wrap:anywhere;margin:0 0 1em} dt{font-weight:bold}";
+  doc.head.append(style);
+  const title = doc.createElement("h1");
+  title.textContent = "Transaction receipt";
+  const details = doc.createElement("dl");
+  const rows = [
+    ["Transaction hash", entry.hash],
+    ["Status", "Confirmed"],
+    ["Confirmed at", formatTimestamp(entry.confirmedAt)],
+    ...(amount ? [["Amount", amount]] : []),
+  ];
+  for (const [label, value] of rows) {
+    const term = doc.createElement("dt");
+    const description = doc.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    details.append(term, description);
+  }
+  doc.body.replaceChildren(title, details);
+  receipt.print();
+  return true;
+}
+
 function getStatusLabel(status: TrackerStatus): string {
   switch (status) {
     case "confirmed":
@@ -173,6 +204,7 @@ function createTrackedTransaction(hash: string): TrackedTransaction {
 export function TransactionStatusTracker({
   hash,
   hashes = [],
+  amount,
   pollIntervalMs = 2000,
   className,
 }: TransactionStatusTrackerProps) {
@@ -187,6 +219,7 @@ export function TransactionStatusTracker({
   const trackedRef = useRef(tracked);
   const txIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [inputValue, setInputValue] = useState("");
+  const [printFailure, setPrintFailure] = useState<string>();
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   useEffect(() => {
@@ -449,6 +482,12 @@ export function TransactionStatusTracker({
                           {copiedHash === entry.hash ? "Copied" : "Copy"}
                         </span>
                       </button>
+                      {entry.status === "confirmed" && (
+                        <Button type="button" size="sm" onClick={() => setPrintFailure(printReceipt(entry, amount) ? undefined : entry.hash)}>
+                          Print receipt
+                        </Button>
+                      )}
+                      {printFailure === entry.hash && <span role="status">Allow pop-ups to print the receipt.</span>}
                       {explorerUrl && (
                         <a
                           href={explorerUrl}

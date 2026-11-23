@@ -47,6 +47,21 @@ beforeEach(() => {
 });
 
 describe("TransactionHistoryTable", () => {
+  it("prepares a draft from an eligible outgoing payment", async () => {
+    const destination = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+    const payment = {
+      ...mockTransactions[0], successful: true, amount: "2.5", asset: "XLM",
+      destination, source: "GABC123...",
+    };
+    vi.mocked(getClient).mockReturnValue({
+      transaction: { getHistory: vi.fn().mockResolvedValue({ data: [payment], error: null, total: 1 }) },
+    } as unknown as ReturnType<typeof getClient>);
+    const onSendAgain = vi.fn();
+    render(<TransactionHistoryTable onSendAgain={onSendAgain} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Send Again" }));
+    expect(onSendAgain).toHaveBeenCalledWith({ destination, asset: "XLM", amount: "2.5" });
+  });
+
   it("renders header with title", () => {
     render(<TransactionHistoryTable />);
     expect(screen.getByText("Transaction History")).toBeInTheDocument();

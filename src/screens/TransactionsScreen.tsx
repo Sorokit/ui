@@ -12,6 +12,7 @@ import { TransactionPanel } from "@/components/TransactionPanel";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import type { PaymentDraft } from "@/lib/payment-draft";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
@@ -92,6 +93,8 @@ interface ExportState {
 const FEE_REFRESH_INTERVAL_MS = 15_000;
 
 export function TransactionsScreen() {
+  const [draft, setDraft] = useState<PaymentDraft>();
+  const panel = useRef<HTMLDivElement>(null);
   const { title, sub } = SCREEN_LABELS.transactions;
   const { address, client: contextClient } = useSorokit();
   const client = contextClient ?? getClient();
@@ -231,7 +234,7 @@ export function TransactionsScreen() {
       <FeeEstimator refreshInterval={FEE_REFRESH_INTERVAL_MS} />
       <MultiSigTransactionBuilder />
       <ErrorBoundary isolate>
-        <TransactionPanel />
+        <div ref={panel}><TransactionPanel draft={draft} /></div>
       </ErrorBoundary>
 
       <div className="rounded-xl border border-line bg-surface p-4 flex flex-col gap-3">
@@ -280,7 +283,10 @@ export function TransactionsScreen() {
       <TaxReportExport />
 
       <ErrorBoundary isolate>
-        <TransactionHistory startDate={startDate} endDate={endDate} />
+        <TransactionHistory startDate={startDate} endDate={endDate} onSendAgain={(payment) => {
+          setDraft(payment);
+          panel.current?.scrollIntoView?.({ block: "start" });
+        }} />
       </ErrorBoundary>
       <ActivityTimeline />
 

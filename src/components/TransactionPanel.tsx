@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import type { PaymentDraft } from "@/lib/payment-draft";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
@@ -120,7 +121,21 @@ export interface MultiSendRow {
   txHash?: string;
 }
 
+const FAVORITE_RECIPIENTS_KEY = "sorokit.favorite-recipients";
+
+function readFavoriteRecipients(): string[] {
+  try {
+    const data: unknown = JSON.parse(localStorage.getItem(FAVORITE_RECIPIENTS_KEY) ?? "[]");
+    return Array.isArray(data)
+      ? [...new Set(data.filter((item): item is string => typeof item === "string" && validateStellarAddress(item)))].slice(0, 50)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export interface TransactionPanelProps {
+  draft?: PaymentDraft;
   defaultDestination?: string;
   defaultAmount?: string;
   defaultMemo?: string;
@@ -133,6 +148,7 @@ export interface TransactionPanelProps {
 }
 
 export function TransactionPanel({
+  draft,
   defaultDestination = "",
   defaultAmount = "",
   defaultMemo = "",
@@ -153,6 +169,21 @@ export function TransactionPanel({
     balances = [],
   } = useSorokit();
   const [dest, setDest] = useState(defaultDestination);
+  const [favorites, setFavorites] = useState(readFavoriteRecipients);
+  const [favoritesOpen, setFavoritesOpen] = useState(false);
+  const [sentRecipient, setSentRecipient] = useState("");
+
+  function toggleFavorite(recipient: string) {
+    const next = favorites.includes(recipient)
+      ? favorites.filter((entry) => entry !== recipient)
+      : [recipient, ...favorites].slice(0, 50);
+    setFavorites(next);
+    try {
+      localStorage.setItem(FAVORITE_RECIPIENTS_KEY, JSON.stringify(next));
+    } catch {
+      // Keep the current list usable when browser storage is unavailable.
+    }
+  }
   const [destDirty, setDestDirty] = useState(false);
   const [amount, setAmount] = useState(defaultAmount);
   const [amountDirty, setAmountDirty] = useState(false);
@@ -160,6 +191,7 @@ export function TransactionPanel({
   const [memoType, setMemoType] = useState<MemoType>("text");
   const [memo, setMemo] = useState(defaultMemo);
   const [state, setState] = useState<State>("idle");
+  const [receiptAmount, setReceiptAmount] = useState<string>();
   const [result, setResult] = useState<TxResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<TransactionPreviewData | null>(null);
@@ -184,6 +216,22 @@ export function TransactionPanel({
   const formId = useId();
 
   const [mode, setMode] = useState<"single" | "multi">(defaultMode);
+  const loadedDraft = useRef<PaymentDraft | undefined>(undefined);
+  useEffect(() => {
+    if (!draft || draft === loadedDraft.current || state === "loading") return;
+    loadedDraft.current = draft;
+    setMode("single");
+    setDest(draft.destination);
+    setDestDirty(false);
+    setAsset(draft.asset);
+    setAmount(draft.amount);
+    setAmountDirty(false);
+    setMemo("");
+    setPreview(null);
+    setResult(null);
+    setError(null);
+    setState("idle");
+  }, [draft, state]);
   const [multiRows, setMultiRows] = useState<MultiSendRow[]>([
     { id: "row-1", destination: "", amount: "", asset: "XLM", status: "idle" },
     { id: "row-2", destination: "", amount: "", asset: "XLM", status: "idle" },
@@ -512,6 +560,8 @@ export function TransactionPanel({
         onError?.(message);
         return;
       }
+      setReceiptAmount(`${amount} ${selectedAsset}`);
+      setSentRecipient(dest.trim());
       setResult(data);
       setState("success");
       onSuccess?.(data!);
@@ -898,7 +948,12 @@ export function TransactionPanel({
                 )}
               </div>
             </div>
-            <TransactionStatusTracker hash={result.hash} className="mt-2" />
+            {sentRecipient && (
+              <Button type="button" size="sm" variant="ghost" onClick={() => toggleFavorite(sentRecipient)}>
+                {favorites.includes(sentRecipient) ? "Remove favorite recipient" : "☆ Favorite recipient"}
+              </Button>
+            )}
+            <TransactionStatusTracker hash={result.hash} amount={receiptAmount} className="mt-2" />
           </div>
         ) : !isConnected ? (
           <div className="flex flex-col items-center gap-3 py-8">
@@ -1203,8 +1258,13 @@ export function TransactionPanel({
                 )}
               </div>
             )}
+            <div onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) setFavoritesOpen(false);
+            }}>
             <Input
               label="Destination Address"
+              onFocus={() => setFavoritesOpen(true)}
+              onKeyDown={(event) => { if (event.key === "Escape") setFavoritesOpen(false); }}
               placeholder="G..."
               value={dest}
               onChange={(e) => {
@@ -1224,6 +1284,20 @@ export function TransactionPanel({
               }
               disabled={state === "loading"}
             />
+            {favoritesOpen && favorites.length > 0 && (
+              <ul aria-label="Favorite recipients" className="mt-1 rounded-lg border border-line bg-surface p-2">
+                {favorites.map((recipient) => (
+                  <li key={recipient} className="flex items-center gap-2">
+                    <button type="button" className="min-w-0 flex-1 truncate text-left" title={recipient}
+                      onClick={() => { setDest(recipient); setDestDirty(true); setFavoritesOpen(false); }}>
+                      {recipient}
+                    </button>
+                    <button type="button" aria-label={`Remove favorite ${recipient}`} onClick={() => toggleFavorite(recipient)}>×</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            </div>
             <Select
               label="Asset"
               value={selectedAsset}

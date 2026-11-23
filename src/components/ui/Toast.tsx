@@ -54,6 +54,7 @@ interface ToastItemProps {
   onPause?: (id: string) => void;
   /** Resume the countdown once the pointer leaves the toast. */
   onResume?: (id: string) => void;
+  onKeep?: (id: string) => void;
 }
 
 /**
@@ -68,7 +69,7 @@ function focusAdjacentToast(current: HTMLElement) {
   if (next?.hasAttribute("data-toast-id")) next.focus();
 }
 
-function ToastItem({ toast, onDismiss, onPause, onResume }: ToastItemProps) {
+function ToastItem({ toast, onDismiss, onPause, onResume, onKeep }: ToastItemProps) {
   const { icon: Icon, bg, fg } = iconMap[toast.type];
 
   return (
@@ -84,7 +85,9 @@ function ToastItem({ toast, onDismiss, onPause, onResume }: ToastItemProps) {
       // time to read it or interact with its action button.
       onMouseEnter={() => onPause?.(toast.id)}
       onMouseLeave={() => onResume?.(toast.id)}
-      onFocus={() => onPause?.(toast.id)}
+      onFocus={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onPause?.(toast.id);
+      }}
       onBlur={(e) => {
         // React bubbles focus/blur, so moving focus between the toast and one
         // of its own buttons fires blur here too. Only resume once focus has
@@ -131,6 +134,11 @@ function ToastItem({ toast, onDismiss, onPause, onResume }: ToastItemProps) {
           <ToastPrimitive.Description className="mt-0.5 text-[12px] text-ink-3 leading-relaxed break-words">
             {toast.message}
           </ToastPrimitive.Description>
+        )}
+        {toast.duration !== 0 && onKeep && (
+          <button type="button" className="mt-2 mr-3 text-xs text-brand" onClick={() => onKeep(toast.id)}>
+            Keep
+          </button>
         )}
         {toast.action && (
           <ToastPrimitive.Action
@@ -182,6 +190,7 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
           onDismiss={onDismiss}
           onPause={toast?.pauseToast}
           onResume={toast?.resumeToast}
+          onKeep={toast?.keepToast}
         />
       ))}
       {/*

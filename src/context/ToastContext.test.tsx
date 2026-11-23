@@ -122,6 +122,21 @@ describe("ToastContext", () => {
       expect(api().toasts.map((t) => t.title)).toEqual(["Sticky"]);
     });
 
+    it("extends the remaining countdown by five seconds while paused", () => {
+      renderToasts();
+      let id = "";
+      act(() => { id = api().success("Kept", { duration: 1000 }); });
+      act(() => { vi.advanceTimersByTime(500); });
+      act(() => { api().pauseToast(id); api().keepToast(id); });
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(api().toasts).toHaveLength(1);
+      act(() => api().resumeToast(id));
+      act(() => { vi.advanceTimersByTime(5499); });
+      expect(api().toasts).toHaveLength(1);
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(api().toasts).toHaveLength(0);
+    });
+
     it("uses a 5s default duration", () => {
       renderToasts();
       act(() => {
