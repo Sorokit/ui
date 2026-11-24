@@ -182,7 +182,7 @@ export function MultiSigTransactionBuilder() {
   const [notes, setNotes] = useState("");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [loadedMessage, setLoadedMessage] = useState<string | null>(null);
-  const { success: showSuccessToast } = useToast();
+  const { success: showSuccessToast, warning: showWarningToast } = useToast();
 
   const { totalWeight, valid } = useMemo(() => validateThreshold(signers, threshold), [signers, threshold]);
   const duplicateSignerIndices = useMemo(() => findDuplicateSignerIndices(signers), [signers]);
@@ -246,6 +246,7 @@ export function MultiSigTransactionBuilder() {
         setNotes("");
         setStep(0);
         setLoadedMessage("Saved state was corrupt or invalid and has been reset");
+        showWarningToast("Saved state was corrupt or invalid and has been reset");
         return;
       }
       setSigners(migrated.signers ?? [createSigner()]);
@@ -264,6 +265,7 @@ export function MultiSigTransactionBuilder() {
       setNotes("");
       setStep(0);
       setLoadedMessage("Saved state was corrupt or invalid and has been reset");
+      showWarningToast("Saved state was corrupt or invalid and has been reset");
     }
   }
 

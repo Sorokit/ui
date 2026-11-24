@@ -676,12 +676,8 @@ export function SorokitProvider({
         address,
         { data: null, error: message },
         { data: null, error: message },
-      if (controller.signal.aborted || !isMountedRef.current) return;
-      reportError(
-        e instanceof Error ? e.message : "Failed to refresh account data",
-        "account",
-        "error",
       );
+      if (controller.signal.aborted || !isMountedRef.current) return;
       reportError(message, "account", usedCache ? "info" : "error");
     } finally {
       if (accountRequestRef.current === controller) {

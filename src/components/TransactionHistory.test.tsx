@@ -64,6 +64,7 @@ describe("TransactionHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    localStorage.clear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
     mockClient.transaction.getHistory = vi.fn().mockResolvedValue({ data: [], error: null, total: 0 });
     vi.mocked(getClient).mockReturnValue(mockClient);
