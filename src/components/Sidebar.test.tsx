@@ -355,6 +355,7 @@ describe("Sidebar", () => {
       "Network",
       "Recovery Assistant",
       "Advanced Charting",
+      "Portfolio Analytics",
       "Yield Farming",
       "Budget Manager",
       "NFTs",
