@@ -13,7 +13,21 @@ import { afterEach, vi } from "vitest";
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  if (typeof document !== "undefined") {
+    document.body.innerHTML = "";
+  }
 });
+
+if (typeof navigator !== "undefined" && (!navigator.clipboard || !navigator.clipboard.writeText)) {
+  Object.defineProperty(navigator, "clipboard", {
+    value: {
+      writeText: () => Promise.resolve(),
+      readText: () => Promise.resolve(""),
+    },
+    configurable: true,
+    writable: true,
+  });
+}
 
 // jsdom ships working Web Storage implementations, but Node's experimental
 // global Web Storage API (stable default as of Node 22+) can shadow them with a
