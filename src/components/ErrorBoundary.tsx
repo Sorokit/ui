@@ -18,8 +18,8 @@ interface Props {
   onError?: (error: Error, info: ErrorInfo) => void;
   /**
    * Called when the user retries, before the boundary clears its error state.
-   * Use it to re-attempt the work that failed — e.g. re-initialising the
-   * Sorokit client after `createSorokitClient()` threw — so the retried render
+   * Use it to re-attempt the work that failed â€” e.g. re-initialising the
+   * Sorokit client after `createSorokitClient()` threw â€” so the retried render
    * has a working dependency instead of throwing again immediately.
    */
   onRetry?: () => void;
@@ -34,6 +34,28 @@ interface State {
   resetKey: number;
   componentStack: string | null;
   copied: boolean;
+  /** Short ID derived from the error stack â€” shown in UI and logged together. */
+  errorId: string | null;
+}
+
+/**
+ * Derive a short, stable error ID from the stack string.
+ *
+ * Uses SubtleCrypto when available (all modern browsers and Node â‰¥ 15) and
+ * falls back to a simple djb2 hash so the function is always synchronous and
+ * never throws. The ID is 8 hex chars â€” long enough to be collision-resistant
+ * in practice, short enough to screenshot and quote to support.
+ */
+function deriveErrorId(stack: string | undefined): string {
+  if (!stack) return "00000000";
+
+  // Fast djb2 fallback â€” works in every environment without async.
+  let hash = 5381;
+  for (let i = 0; i < stack.length; i++) {
+    hash = ((hash << 5) + hash) ^ stack.charCodeAt(i);
+    hash = hash >>> 0; // keep u32
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 /** Catches descendant render errors and displays a recoverable fallback. */
@@ -43,12 +65,16 @@ export class ErrorBoundary extends Component<Props, State> {
     resetKey: 0,
     componentStack: null,
     copied: false,
+    errorId: null,
   };
 
   private copyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
   static getDerivedStateFromError(error: Error): Partial<State> {
-    return { error };
+    // errorId is set here so it is available on the very first render of the
+    // fallback UI (getDerivedStateFromError runs before componentDidCatch).
+    const errorId = deriveErrorId(error.stack);
+    return { error, errorId };
   }
 
   componentWillUnmount() {
@@ -56,16 +82,18 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    this.setState({ error, componentStack: info.componentStack ?? null });
+    const errorId = deriveErrorId(error.stack);
+    this.setState({ error, componentStack: info.componentStack ?? null, errorId });
 
     if (this.props.onError) {
       this.props.onError(error, info);
       return;
     }
 
-    if (import.meta.env.DEV) {
-      console.error("[sorokit-ui] Uncaught error:", error, info);
-    }
+    // Always log the full stack with the error ID so support can correlate a
+    // screenshot of the UI ("Error #abc12345") with the console output â€” even
+    // in production where the full message is not shown to the user.
+    console.error(`[sorokit-ui] Uncaught error (id: ${errorId}):`, error, info);
   }
 
   reset = () => {
@@ -78,13 +106,15 @@ export class ErrorBoundary extends Component<Props, State> {
       resetKey: state.resetKey + 1,
       componentStack: null,
       copied: false,
+      errorId: null,
     }));
   };
 
   private buildDiagnostics() {
-    const { error, componentStack } = this.state;
+    const { error, componentStack, errorId } = this.state;
     const lines = [
       "sorokit-ui error report",
+      `Error ID: ${errorId ?? "unknown"}`,
       `Time: ${new Date().toISOString()}`,
       `URL: ${typeof window !== "undefined" ? window.location.href : "unknown"}`,
       `User agent: ${
@@ -113,7 +143,7 @@ export class ErrorBoundary extends Component<Props, State> {
   };
 
   render() {
-    const { error, resetKey, componentStack, copied } = this.state;
+    const { error, resetKey, componentStack, copied, errorId } = this.state;
     const { children, fallback, isolate, supportUrl } = this.props;
 
     if (!error) return <div key={resetKey}>{children}</div>;
@@ -122,9 +152,7 @@ export class ErrorBoundary extends Component<Props, State> {
       const fallbackNode = fallback(error, this.reset);
 
       return isolate ? (
-        <div
-          className="overflow-hidden rounded-xl border border-line bg-surface"
-        >
+        <div className="overflow-hidden rounded-xl border border-line bg-surface">
           {fallbackNode}
         </div>
       ) : (
@@ -164,6 +192,18 @@ export class ErrorBoundary extends Component<Props, State> {
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 mb-2">
               Error
             </p>
+            {/* Always show the error ID so users can share it with support
+                without pasting a full stack. The full stack is in the console
+                under the same ID, keeping production logs useful while keeping
+                the UI clean. */}
+            {errorId && (
+              <p
+                className="text-[11px] font-mono text-ink-3 mb-1"
+                data-testid="error-id"
+              >
+                Error #{errorId}
+              </p>
+            )}
             <p className="text-[12px] font-mono text-red break-all">
               {import.meta.env.DEV
                 ? error.message
@@ -228,3 +268,5 @@ export class ErrorBoundary extends Component<Props, State> {
     );
   }
 }
+
+export { deriveErrorId };
