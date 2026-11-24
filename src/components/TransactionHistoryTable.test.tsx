@@ -132,6 +132,77 @@ describe("TransactionHistoryTable", () => {
     });
   });
 
+  describe("Status filter buttons (#1128)", () => {
+    it("renders status filter buttons (All, Pending, Confirmed, Failed)", async () => {
+      render(<TransactionHistoryTable />);
+      await waitFor(() => screen.getByText(/25 transactions/));
+
+      const allBtn = screen.getByRole("button", { name: "All" });
+      const pendingBtn = screen.getByRole("button", { name: "Pending" });
+      const confirmedBtn = screen.getByRole("button", { name: "Confirmed" });
+      const failedBtn = screen.getByRole("button", { name: "Failed" });
+
+      expect(allBtn).toBeInTheDocument();
+      expect(pendingBtn).toBeInTheDocument();
+      expect(confirmedBtn).toBeInTheDocument();
+      expect(failedBtn).toBeInTheDocument();
+
+      // "All" is active by default
+      expect(allBtn).toHaveAttribute("aria-pressed", "true");
+      expect(pendingBtn).toHaveAttribute("aria-pressed", "false");
+      expect(confirmedBtn).toHaveAttribute("aria-pressed", "false");
+      expect(failedBtn).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("filters only confirmed (success) transactions on Confirmed click", async () => {
+      render(<TransactionHistoryTable />);
+      await waitFor(() => screen.getByText(/25 transactions/));
+
+      const confirmedBtn = screen.getByRole("button", { name: "Confirmed" });
+      fireEvent.click(confirmedBtn);
+
+      expect(confirmedBtn).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+
+      await waitFor(() => {
+        expect(screen.queryByText("Failed")).not.toBeInTheDocument();
+        const successBadges = screen.getAllByText("Success");
+        expect(successBadges.length).toBeGreaterThan(0);
+      });
+    });
+
+    it("filters only failed transactions on Failed click and only one filter active simultaneously", async () => {
+      render(<TransactionHistoryTable />);
+      await waitFor(() => screen.getByText(/25 transactions/));
+
+      const failedBtn = screen.getByRole("button", { name: "Failed" });
+      fireEvent.click(failedBtn);
+
+      expect(failedBtn).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Confirmed" })).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "false");
+
+      await waitFor(() => {
+        expect(screen.queryByText("Success")).not.toBeInTheDocument();
+        const failedBadges = screen.getAllByText("Failed");
+        expect(failedBadges.length).toBeGreaterThan(0);
+      });
+    });
+
+    it("shows empty state when filter matches no transactions (e.g. Pending)", async () => {
+      render(<TransactionHistoryTable />);
+      await waitFor(() => screen.getByText(/25 transactions/));
+
+      const pendingBtn = screen.getByRole("button", { name: "Pending" });
+      fireEvent.click(pendingBtn);
+
+      expect(pendingBtn).toHaveAttribute("aria-pressed", "true");
+      await waitFor(() => {
+        expect(screen.getByText("No transactions match the current filters")).toBeInTheDocument();
+      });
+    });
+  });
+
   it("sort toggles direction on second click", async () => {
     render(<TransactionHistoryTable />);
     await waitFor(() => screen.getByText(/25 transactions/));
