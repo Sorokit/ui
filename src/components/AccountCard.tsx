@@ -1,9 +1,11 @@
-import { InformationCircleIcon } from "@hugeicons/core-free-icons";
+import { InformationCircleIcon, QrCodeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useId, useMemo, useState } from "react";
 
 import { AddressDisplay } from "@/components/AddressDisplay";
+import { QRCode } from "@/components/QRCode";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { LabelledValue } from "@/components/ui/LabelledValue";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/context/ToastContext";
@@ -155,6 +157,7 @@ export function AccountCard() {
   const sequenceLabelId = useId();
   const [showSequenceTooltip, setShowSequenceTooltip] = useState(false);
   const [showThresholds, setShowThresholds] = useState(false);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   const initials = useMemo(
     () => (address ? computeInitials(address) : ""),
@@ -232,24 +235,41 @@ export function AccountCard() {
               onCopy={handleCopySuccess}
               onCopyError={handleCopyError}
             />
-            <a
-              href={getStellarExpertUrl(address, network?.name) ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-disabled={getStellarExpertUrl(address, network?.name) === null}
-              title={
-                getStellarExpertUrl(address, network?.name) === null
-                  ? "Stellar Expert is not available for this network"
-                  : undefined
-              }
-              className={`text-[11px] hover:underline ${
-                getStellarExpertUrl(address, network?.name) === null
-                  ? "text-ink-4 cursor-not-allowed pointer-events-none"
-                  : "text-brand"
-              }`}
-            >
-              View on Stellar Expert →
-            </a>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowQrModal(true)}
+                className="gap-1.5"
+                aria-label="Export as QR Code"
+              >
+                <HugeiconsIcon
+                  icon={QrCodeIcon}
+                  size={14}
+                  color="currentColor"
+                  strokeWidth={1.5}
+                />
+                QR Code
+              </Button>
+              <a
+                href={getStellarExpertUrl(address, network?.name) ?? undefined}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-disabled={getStellarExpertUrl(address, network?.name) === null}
+                title={
+                  getStellarExpertUrl(address, network?.name) === null
+                    ? "Stellar Expert is not available for this network"
+                    : undefined
+                }
+                className={`text-[11px] hover:underline ${
+                  getStellarExpertUrl(address, network?.name) === null
+                    ? "text-ink-4 cursor-not-allowed pointer-events-none"
+                    : "text-brand"
+                }`}
+              >
+                View on Stellar Expert →
+              </a>
+            </div>
             {account && (
               <div className="grid grid-cols-2 gap-5">
                 <LabelledValue label="Sequence" labelId={sequenceLabelId}>
@@ -329,6 +349,39 @@ export function AccountCard() {
           </div>
         )}
       </div>
+
+      {/* QR Code Modal Dialog (#1129) */}
+      {showQrModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="qr-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-line bg-surface p-6 shadow-2xl flex flex-col items-center gap-4">
+            <h3 id="qr-modal-title" className="text-[16px] font-semibold text-ink">
+              Account QR Code
+            </h3>
+            <p className="text-[12px] text-ink-3 text-center">
+              Scan or screenshot to share your Stellar address
+            </p>
+            <div className="p-3 bg-white rounded-xl shadow-xs border border-line">
+              <QRCode value={address} size={200} label="Stellar Address QR" />
+            </div>
+            <div className="w-full rounded-lg bg-surface-2 p-2.5 text-center font-mono text-[11px] text-ink-2 break-all select-all border border-line">
+              {address}
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowQrModal(false)}
+              className="w-full mt-2"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
