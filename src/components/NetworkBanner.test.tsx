@@ -251,6 +251,35 @@ describe("NetworkBanner", () => {
       expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
     });
 
+    it("persists dismissal in sessionStorage and remains dismissed across remount", () => {
+      const setItemSpy = vi.spyOn(sessionStorage, "setItem");
+      const getItemSpy = vi.spyOn(sessionStorage, "getItem");
+      mockNetwork(TESTNET_NETWORK);
+
+      const { unmount } = render(<NetworkBanner />);
+      expect(screen.getByText("Testnet")).toBeInTheDocument();
+
+      const button = screen.getByRole("button", { name: /dismiss banner/i });
+      fireEvent.click(button);
+
+      expect(screen.queryByText("Testnet")).not.toBeInTheDocument();
+      expect(setItemSpy).toHaveBeenCalledWith(
+        "sorokit-banner-dismissed-testnet",
+        "true",
+      );
+      expect(sessionStorage.getItem("sorokit-banner-dismissed-testnet")).toBe("true");
+
+      unmount();
+
+      const { container } = render(<NetworkBanner />);
+      expect(container).toBeEmptyDOMElement();
+      expect(screen.queryByText("Testnet")).not.toBeInTheDocument();
+      expect(getItemSpy).toHaveBeenCalled();
+
+      setItemSpy.mockRestore();
+      getItemSpy.mockRestore();
+    });
+
     it("does not render when banner has been dismissed in current session", () => {
       window.sessionStorage.setItem("sorokit-banner-dismissed-testnet", "true");
       mockNetwork(TESTNET_NETWORK);
