@@ -1,11 +1,16 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { recordRender } from '../lib/performance';
 import { PerformanceMonitor, Profiled } from './PerformanceMonitor';
+
+const { emptyMetrics } = vi.hoisted(() => ({
+  emptyMetrics: [],
+}));
 
 // Mock the performance module
 vi.mock('../lib/performance', () => ({
-  getMetrics: vi.fn(() => []),
+  getMetrics: vi.fn(() => emptyMetrics),
   recordRender: vi.fn(),
   subscribeMetrics: vi.fn(() => () => {}),
 }));
@@ -168,8 +173,6 @@ describe('PerformanceMonitor', () => {
 });
 
 describe('Profiled component', () => {
-  const { recordRender } = await import('../lib/performance');
-
   beforeEach(() => {
     vi.clearAllMocks();
   });

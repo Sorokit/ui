@@ -13,9 +13,6 @@ import { afterEach, vi } from "vitest";
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  if (typeof document !== "undefined") {
-    document.body.innerHTML = "";
-  }
 });
 
 if (typeof navigator !== "undefined" && (!navigator.clipboard || !navigator.clipboard.writeText)) {

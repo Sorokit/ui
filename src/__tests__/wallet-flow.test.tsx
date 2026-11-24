@@ -132,10 +132,16 @@ describe("Wallet Connect Flow Integration", () => {
       });
 
       // Second attempt succeeds
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+      });
       const retryBtn = screen.getByRole("button", { name: /try again/i });
       await act(async () => {
         fireEvent.click(retryBtn);
       });
+      await waitFor(() =>
+        screen.getByRole("dialog", { name: /connect a wallet/i }),
+      );
       await act(async () => {
         fireEvent.click(getWalletButton(/Freighter/i));
       });

@@ -7,6 +7,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 
@@ -90,7 +91,7 @@ export type TestExports = {
 // already parses all of that correctly as part of parsing the file once for
 // its own purpose.
 
-const SRC_DIR = resolve(dirname(new URL(import.meta.url).pathname), ".");
+const SRC_DIR = dirname(fileURLToPath(import.meta.url));
 const WALKED_DIRS = ["components", "context"];
 const SOURCE_EXTENSIONS = [".ts", ".tsx"];
 
