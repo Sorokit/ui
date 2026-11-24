@@ -170,16 +170,6 @@ export function WalletConnectModal({
   const [isMobile, setIsMobile] = useState<boolean>(() =>
     isMobileEnvironment(),
   );
-  // Extension detection runs when the modal opens (not during render), so a
-  // wallet that injects itself after the React tree mounted is still picked up.
-  const [installedWallets, setInstalledWallets] = useState<
-    Record<string, boolean>
-  >({});
-
-  useEffect(() => {
-    if (!open) return;
-    const detect = () => {
-  const isMobile = isMobileEnvironment();
   const isInfo = errorSeverity === "info";
 
   useEffect(() => {
@@ -187,6 +177,8 @@ export function WalletConnectModal({
     clearError();
   }, [open, clearError]);
 
+  // Extension detection runs when the modal opens (not during render), so a
+  // wallet that injects itself after the React tree mounted is still picked up.
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     let active = true;
@@ -197,16 +189,6 @@ export function WalletConnectModal({
       for (const wallet of walletOptions) {
         next[wallet.id] = isWalletExtensionInstalled(wallet.id);
       }
-      setInstalledWallets(next);
-      setIsMobile(isMobileEnvironment());
-    };
-    // Deferred like the effect below to avoid setState within the effect body.
-    const timerId = window.setTimeout(detect, 0);
-    // Slow browsers can finish injecting extensions shortly after open.
-    const recheckId = window.setTimeout(detect, 1000);
-    return () => {
-      window.clearTimeout(timerId);
-      window.clearTimeout(recheckId);
       setInstalledWallets((prev) => {
         const keys = Object.keys(next);
         if (
@@ -217,9 +199,12 @@ export function WalletConnectModal({
         }
         return next;
       });
+      setIsMobile(isMobileEnvironment());
     };
 
-    refresh();
+    // Deferred so the effect body never sets state synchronously; extensions
+    // that inject shortly after open are caught by the events and the poll.
+    const initialId = window.setTimeout(refresh, 0);
     window.addEventListener("stellar#initialized", refresh);
     window.addEventListener("stellar:initialized", refresh);
     const pollId = window.setInterval(refresh, 200);
@@ -227,6 +212,7 @@ export function WalletConnectModal({
 
     return () => {
       active = false;
+      window.clearTimeout(initialId);
       window.removeEventListener("stellar#initialized", refresh);
       window.removeEventListener("stellar:initialized", refresh);
       window.clearInterval(pollId);

@@ -234,11 +234,13 @@ describe("Multi-Asset Payment Flow", () => {
         expect(screen.getByLabelText("Amount (USDC)")).toBeInTheDocument();
       });
 
-      // Try to enter 7+ decimals (should fail or be truncated)
-      fireEvent.change(screen.getByLabelText("Amount (USDC)"), { target: { value: "10.1234567" } });
+      // Stellar assets carry 7 decimals; one more is rejected by validation.
+      fireEvent.change(screen.getByLabelText("Amount (USDC)"), {
+        target: { value: "10.12345678" },
+      });
 
       await waitFor(() => {
-        expect(screen.getByText(/too many decimal places/i)).toBeInTheDocument();
+        expect(screen.getByText(/cannot exceed \d+ decimal places/i)).toBeInTheDocument();
       });
     });
 
@@ -271,3 +273,4 @@ describe("Multi-Asset Payment Flow", () => {
       });
     });
   });
+});

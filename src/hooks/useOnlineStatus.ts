@@ -17,8 +17,6 @@ export function useOnlineStatus(): boolean {
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
-    // Resync in case the state changed between render and effect.
-    setOnline(readOnline());
     return () => {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
