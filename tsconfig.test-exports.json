@@ -3,6 +3,6 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "files": ["src/verify-exports.ts"],
+  "files": ["src/verify-exports.ts", "src/declarations.d.ts"],
   "include": []
 }

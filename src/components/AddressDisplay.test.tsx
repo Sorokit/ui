@@ -591,30 +591,34 @@ describe("AddressDisplay", () => {
       const paragraph = document.createElement("p");
       paragraph.textContent = "pre-existing selection";
       document.body.appendChild(paragraph);
-      const range = document.createRange();
-      range.selectNodeContents(paragraph);
-      const selection = document.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(paragraph);
+        const selection = document.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
 
-      render(<AddressDisplay address={address} />);
-      await act(async () => {
-        fireEvent.click(
-          screen.getByRole("button", { name: "Copy address to clipboard" }),
-        );
-      });
+        render(<AddressDisplay address={address} />);
+        await act(async () => {
+          fireEvent.click(
+            screen.getByRole("button", { name: "Copy address to clipboard" }),
+          );
+        });
 
-      expect(sawReadOnly).toBe(true);
-      expect(document.getSelection()?.toString()).toBe("pre-existing selection");
-      // The temporary textarea must not outlive the copy.
-      expect(document.querySelector("textarea")).toBeNull();
-
-      document.body.removeChild(paragraph);
-      Object.defineProperty(navigator, "clipboard", {
-        value: { writeText: mockWriteText },
-        configurable: true,
-        writable: true,
-      });
+        expect(sawReadOnly).toBe(true);
+        expect(document.getSelection()?.toString()).toBe("pre-existing selection");
+        // The temporary textarea must not outlive the copy.
+        expect(document.querySelector("textarea")).toBeNull();
+      } finally {
+        if (paragraph.parentNode) {
+          paragraph.parentNode.removeChild(paragraph);
+        }
+        Object.defineProperty(navigator, "clipboard", {
+          value: { writeText: mockWriteText },
+          configurable: true,
+          writable: true,
+        });
+      }
     });
   });
 });

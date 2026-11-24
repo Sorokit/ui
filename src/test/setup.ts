@@ -27,6 +27,10 @@ ensureClipboard();
 
 afterEach(() => {
   cleanup();
+  while (document.body.firstChild) {
+    document.body.removeChild(document.body.firstChild);
+  }
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   ensureClipboard();
 });
