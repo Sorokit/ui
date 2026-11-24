@@ -1,19 +1,44 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SorokitProvider } from '@/context/SorokitProvider';
+import { useSorokit } from '@/context/useSorokit';
 import { getClient, initClient } from '@/lib/client';
 
 import { TaxReportExport } from './TaxReportExport';
 
+vi.mock('@/context/useSorokit', () => ({
+  useSorokit: vi.fn(),
+}));
+
+const ADDRESS = 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA';
+
 describe('TaxReportExport', () => {
   let mockClient: ReturnType<typeof getClient>;
+
+  function mockUseSorokit(overrides: Partial<ReturnType<typeof useSorokit>> = {}) {
+    return {
+      address: ADDRESS,
+      client: mockClient,
+      isConnected: true,
+      isConnecting: false,
+      isDisconnecting: false,
+      network: { name: 'testnet', status: 'online' } as any,
+      balances: [],
+      account: null,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      clearError: vi.fn(),
+      error: null,
+      ...overrides,
+    };
+  }
 
   beforeEach(() => {
     mockClient = {
       wallet: {
         connect: vi.fn().mockResolvedValue({
-          data: { address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA' },
+          data: { address: ADDRESS },
           error: null,
         }),
         disconnect: vi.fn().mockResolvedValue(undefined),
@@ -38,9 +63,23 @@ describe('TaxReportExport', () => {
           error: null,
         }),
       },
+      transaction: {
+        getHistory: vi.fn().mockResolvedValue({
+          data: [],
+          total: 0,
+          error: null,
+        }),
+      },
+      operation: {
+        getOperations: vi.fn().mockResolvedValue({
+          data: [],
+          error: null,
+        }),
+      },
     } as unknown as ReturnType<typeof getClient>;
 
     initClient(mockClient);
+    vi.mocked(useSorokit).mockImplementation(() => mockUseSorokit() as any);
   });
 
   const renderWithProvider = (element: React.ReactElement) => {
@@ -152,18 +191,9 @@ describe('TaxReportExport', () => {
 
   describe('load transactions button', () => {
     it('disables load button when wallet not connected', () => {
-      const disconnectedClient = {
-        ...mockClient,
-        wallet: {
-          connect: vi.fn().mockResolvedValue({
-            data: null,
-            error: null,
-          }),
-          disconnect: vi.fn().mockResolvedValue(undefined),
-        },
-      } as unknown as ReturnType<typeof getClient>;
-
-      initClient(disconnectedClient);
+      vi.mocked(useSorokit).mockReturnValueOnce(
+        mockUseSorokit({ address: null, isConnected: false }),
+      );
       renderWithProvider(<TaxReportExport />);
 
       expect(
@@ -187,13 +217,14 @@ describe('TaxReportExport', () => {
     it('displays error message when transaction load fails', async () => {
       const errorClient = {
         ...mockClient,
-        account: {
-          ...mockClient.account,
-          getOperations: vi.fn().mockRejectedValue(new Error('Network error')),
+        transaction: {
+          getHistory: vi.fn().mockRejectedValue(new Error('Network error')),
         },
       } as unknown as ReturnType<typeof getClient>;
 
-      initClient(errorClient);
+      vi.mocked(useSorokit).mockReturnValueOnce(
+        mockUseSorokit({ client: errorClient }),
+      );
       renderWithProvider(<TaxReportExport />);
 
       const loadBtn = screen.getByRole('button', { name: /Load transactions/i });
@@ -223,7 +254,7 @@ describe('TaxReportExport', () => {
       renderWithProvider(<TaxReportExport />);
 
       // Test that price inputs accept numbers
-      const inputs = screen.getAllByRole('textbox');
+      const inputs = screen.queryAllByRole('spinbutton');
       expect(inputs).toBeDefined();
     });
 
@@ -290,18 +321,9 @@ describe('TaxReportExport', () => {
     });
 
     it('renders correctly when wallet is disconnected', () => {
-      const disconnectedClient = {
-        ...mockClient,
-        wallet: {
-          connect: vi.fn().mockResolvedValue({
-            data: null,
-            error: null,
-          }),
-          disconnect: vi.fn().mockResolvedValue(undefined),
-        },
-      } as unknown as ReturnType<typeof getClient>;
-
-      initClient(disconnectedClient);
+      vi.mocked(useSorokit).mockReturnValueOnce(
+        mockUseSorokit({ address: null, isConnected: false }),
+      );
       renderWithProvider(<TaxReportExport />);
 
       expect(screen.getByTestId('tax-report-export')).toBeInTheDocument();
