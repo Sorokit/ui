@@ -30,8 +30,10 @@ const MEMO_TRUNCATE_LENGTH = 20;
 export type SortField = "createdAt" | "ledger" | "feePaid" | "operationCount";
 export type SortDirection = "asc" | "desc";
 
+export type TransactionStatusFilter = "all" | "success" | "confirmed" | "failed" | "pending";
+
 export interface TransactionFilters {
-  status: "all" | "success" | "failed";
+  status: TransactionStatusFilter;
   dateFrom: string;
   dateTo: string;
   amountFrom: string;
@@ -69,8 +71,14 @@ function truncateMemo(memo: string): string {
 
 function matchesFilters(tx: Transaction, filters: TransactionFilters): boolean {
   if (filters.status !== "all") {
-    if (filters.status === "success" && !tx.successful) return false;
-    if (filters.status === "failed" && tx.successful) return false;
+    const isPending = (tx as unknown as { status?: string }).status === "pending";
+    if (filters.status === "pending") {
+      if (!isPending) return false;
+    } else if (filters.status === "success" || filters.status === "confirmed") {
+      if (isPending || !tx.successful) return false;
+    } else if (filters.status === "failed") {
+      if (isPending || tx.successful) return false;
+    }
   }
   if (filters.dateFrom && new Date(tx.createdAt) < new Date(filters.dateFrom))
     return false;
@@ -222,6 +230,39 @@ interface FilterBarProps {
 function FilterBar({ filters, onChange, show, onToggle }: FilterBarProps) {
   return (
     <div className="border-b border-line">
+      {/* Status Filter Buttons */}
+      <div className="flex items-center gap-1.5 px-5 py-2.5 border-b border-line bg-surface/40 overflow-x-auto" role="group" aria-label="Filter transactions by status">
+        <span className="text-[11px] font-medium text-ink-3 mr-1">Status:</span>
+        {(
+          [
+            { label: "All", value: "all" },
+            { label: "Pending", value: "pending" },
+            { label: "Confirmed", value: "confirmed" },
+            { label: "Failed", value: "failed" },
+          ] as const
+        ).map(({ label, value }) => {
+          const isActive =
+            filters.status === value ||
+            (value === "confirmed" && filters.status === "success");
+          return (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onChange({ ...filters, status: value })}
+              className={cn(
+                "px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors",
+                isActive
+                  ? "bg-brand text-white shadow-xs"
+                  : "bg-surface-2 text-ink-2 hover:text-ink hover:bg-surface-3",
+              )}
+              aria-pressed={isActive}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
       <button
         type="button"
         onClick={onToggle}
@@ -249,6 +290,8 @@ function FilterBar({ filters, onChange, show, onToggle }: FilterBarProps) {
             aria-label="Filter by status"
           >
             <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Confirmed</option>
             <option value="success">Success</option>
             <option value="failed">Failed</option>
           </select>
