@@ -76,6 +76,7 @@ export function RecentTransactionsWidget({
       return;
     }
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let client: any;
     try {
       client = sorokit.client;
@@ -91,6 +92,7 @@ export function RecentTransactionsWidget({
 
     client.transaction
       .getHistory(address, 1, limit)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then((res: any) => {
         if (!active) return;
         setInternalTxs(res.data ?? []);

@@ -289,13 +289,13 @@ export const TxRow = memo(function TxRow({
             onClick={(e) => {
               e.stopPropagation();
               e.preventDefault();
-              navigator.clipboard?.writeText(tx.hash).catch(() => {});
+              navigator.clipboard?.writeText(tx.hash)?.catch?.(() => {});
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 e.stopPropagation();
-                navigator.clipboard?.writeText(tx.hash).catch(() => {});
+                navigator.clipboard?.writeText(tx.hash)?.catch?.(() => {});
               }
             }}
             className="p-1 rounded hover:bg-surface-2 text-ink-3 hover:text-ink transition-colors cursor-pointer"

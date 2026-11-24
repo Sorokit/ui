@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+
 import { SeedPhraseInput, splitPhrase, validateSeedWords } from "./SeedPhraseInput";
 
 describe("SeedPhraseInput", () => {
@@ -263,7 +264,7 @@ describe("SeedPhraseInput", () => {
       const inputs = screen.getAllByRole("textbox");
 
       // Create invalid phrase
-      inputs.forEach((input, i) => {
+      inputs.forEach((input) => {
         fireEvent.change(input, { target: { value: "abandon" } });
       });
 
@@ -291,7 +292,7 @@ describe("SeedPhraseInput", () => {
       render(<SeedPhraseInput />);
       const inputs = screen.getAllByRole("textbox");
 
-      inputs.forEach((input, i) => {
+      inputs.forEach((input) => {
         fireEvent.change(input, { target: { value: "abandon" } });
       });
 

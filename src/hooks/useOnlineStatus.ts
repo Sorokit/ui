@@ -18,7 +18,9 @@ export function useOnlineStatus(): boolean {
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
     // Resync in case the state changed between render and effect.
-    setOnline(readOnline());
+    queueMicrotask(() => {
+      setOnline(readOnline());
+    });
     return () => {
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
