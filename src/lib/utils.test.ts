@@ -5,6 +5,7 @@ import {
   decodeMuxedAccount,
   formatTokenAmount,
   isMuxedAccount,
+  safeFormat,
   toXLM,
   truncateAddress,
   truncateAddressResponsive,
@@ -408,5 +409,36 @@ describe("toXLM", () => {
     expect(toXLM("100abc")).toBe("0.0000100");
     expect(toXLM("abc")).toBe("0.0000000");
     expect(toXLM("")).toBe("0.0000000");
+  });
+});
+
+describe("safeFormat edge cases (#1068)", () => {
+  /** Grouping separators are locale-dependent, so compare the numeric value. */
+  const asNumber = (formatted: string) => Number(formatted.replace(/[^0-9.-]/g, ""));
+
+  it.each([
+    ["0", 0],
+    ["1", 1],
+    ["1000000", 1000000],
+    ["0.0000001", 0],
+    ["-100", -100],
+    ["1234.5678", 1234.5678],
+  ])("formats %s without throwing and keeps its value", (input, expected) => {
+    const formatted = safeFormat(input);
+
+    expect(formatted).toMatch(/[.,]\d{2,4}$/);
+    expect(asNumber(formatted)).toBeCloseTo(expected, 5);
+  });
+
+  it("keeps at least two and at most four fraction digits for very large values", () => {
+    const formatted = safeFormat("1234567890123");
+
+    expect(formatted).toMatch(/[.,]\d{2,4}$/);
+    expect(asNumber(formatted)).toBeCloseTo(1234567890123, 0);
+  });
+
+  it("still falls back to 0.00 for blank and non-numeric input", () => {
+    expect(safeFormat("")).toBe("0.00");
+    expect(safeFormat("not-a-number")).toBe("0.00");
   });
 });
