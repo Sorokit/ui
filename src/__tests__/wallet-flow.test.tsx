@@ -76,10 +76,15 @@ describe("Wallet Connect Flow Integration", () => {
       await act(async () => {
         fireEvent.click(connectBtn);
       });
+      await waitFor(() =>
+        screen.getByRole("dialog", { name: /connect a wallet/i }),
+      );
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
+      });
 
       await waitFor(() => {
-        // Verify that the button remains in a state allowing retry
-        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+        expect(screen.getByText(/User rejected connection request/i)).toBeInTheDocument();
       });
     });
 
@@ -115,14 +120,24 @@ describe("Wallet Connect Flow Integration", () => {
       await act(async () => {
         fireEvent.click(connectBtn);
       });
+      await waitFor(() =>
+        screen.getByRole("dialog", { name: /connect a wallet/i }),
+      );
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
+      });
 
       await waitFor(() => {
         expect(flakeyClient.wallet.connect).toHaveBeenCalledTimes(1);
       });
 
       // Second attempt succeeds
+      const retryBtn = screen.getByRole("button", { name: /try again/i });
       await act(async () => {
-        fireEvent.click(connectBtn);
+        fireEvent.click(retryBtn);
+      });
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
       });
 
       await waitFor(() => {

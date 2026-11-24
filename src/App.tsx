@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import type { NavSection } from './components/Sidebar';
-import { ToastContainer } from './components/ui/Toast';
-import { SorokitProvider } from './context/SorokitProvider';
-import { ToastProvider, useToast } from './context/ToastContext';
-import { useSorokit } from './context/useSorokit';
-import type { SorokitClient } from './lib/client';
-import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
-import { ConnectScreen } from './screens/ConnectScreen';
-import { Dashboard } from './screens/Dashboard';
+import type { NavSection } from '@/components/Sidebar';
+import { ToastContainer } from '@/components/ui/Toast';
+import { SorokitProvider } from '@/context/SorokitProvider';
+import { ToastProvider, useToast } from '@/context/ToastContext';
+import { useSorokit } from '@/context/useSorokit';
+import type { SorokitClient } from '@/lib/client';
+import { SECTION_PATHS, sectionForPath } from '@/lib/nav-routes';
+import { ConnectScreen } from '@/screens/ConnectScreen';
+import { Dashboard } from '@/screens/Dashboard';
 
 interface AppProps {
   client: SorokitClient;
