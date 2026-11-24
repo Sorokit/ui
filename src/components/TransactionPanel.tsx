@@ -8,6 +8,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { useOptionalToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
@@ -152,6 +153,7 @@ export function TransactionPanel({
     isConnected,
     balances = [],
   } = useSorokit();
+  const toast = useOptionalToast();
   const [dest, setDest] = useState(defaultDestination);
   const [destDirty, setDestDirty] = useState(false);
   const [amount, setAmount] = useState(defaultAmount);
@@ -514,6 +516,11 @@ export function TransactionPanel({
       }
       setResult(data);
       setState("success");
+      const txHash = data?.hash ?? "";
+      toast?.success("Transaction submitted", {
+        message: txHash ? `Transaction hash: ${txHash}` : undefined,
+        duration: 5000,
+      });
       onSuccess?.(data!);
       setDest("");
       setAmount("");

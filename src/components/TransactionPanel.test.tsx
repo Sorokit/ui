@@ -2,6 +2,8 @@ import { act,fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
+import { ToastContainer } from "@/components/ui/Toast";
+import { ToastProvider, useToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
@@ -1696,4 +1698,136 @@ describe("TransactionPanel", () => {
       expect(scheduled[0].txHash).toBe("sched-hash-1");
     });
   });
+
+  describe("success toast after submit (#1060)", () => {
+    it("shows success toast with transaction hash after successful submit", async () => {
+      const txResult = { hash: "test_tx_hash_12345", ledger: 100 };
+      const mockSubmit = vi.fn().mockResolvedValue({ data: txResult, error: null });
+      mockGetClient(mockSubmit);
+
+      function Harness() {
+        const { toasts, removeToast } = useToast();
+        return (
+          <>
+            <TransactionPanel />
+            <ToastContainer toasts={toasts} onDismiss={removeToast} />
+          </>
+        );
+      }
+
+      render(
+        <ToastProvider>
+          <Harness />
+        </ToastProvider>,
+      );
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: VALID_DEST },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      await reviewAndConfirm();
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toBeInTheDocument();
+      expect(alert).toHaveTextContent("Transaction submitted");
+      expect(alert).toHaveTextContent("test_tx_hash_12345");
+    });
+
+    it("dismisses success toast when dismiss button is clicked", async () => {
+      const txResult = { hash: "test_tx_hash_dismiss", ledger: 101 };
+      const mockSubmit = vi.fn().mockResolvedValue({ data: txResult, error: null });
+      mockGetClient(mockSubmit);
+
+      function Harness() {
+        const { toasts, removeToast } = useToast();
+        return (
+          <>
+            <TransactionPanel />
+            <ToastContainer toasts={toasts} onDismiss={removeToast} />
+          </>
+        );
+      }
+
+      render(
+        <ToastProvider>
+          <Harness />
+        </ToastProvider>,
+      );
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: VALID_DEST },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      await reviewAndConfirm();
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toBeInTheDocument();
+
+      const dismissBtn = screen.getByRole("button", { name: /dismiss/i });
+      fireEvent.click(dismissBtn);
+
+      await waitFor(() => {
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      });
+    });
+
+    it("dismisses success toast automatically after 5 seconds", async () => {
+      vi.useFakeTimers();
+      const txResult = { hash: "test_tx_hash_timer", ledger: 102 };
+      const mockSubmit = vi.fn().mockResolvedValue({ data: txResult, error: null });
+      mockGetClient(mockSubmit);
+
+      function Harness() {
+        const { toasts, removeToast } = useToast();
+        return (
+          <>
+            <TransactionPanel />
+            <ToastContainer toasts={toasts} onDismiss={removeToast} />
+          </>
+        );
+      }
+
+      render(
+        <ToastProvider>
+          <Harness />
+        </ToastProvider>,
+      );
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: VALID_DEST },
+      });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "10" },
+      });
+
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      fireEvent.click(screen.getByRole("button", { name: /confirm & sign/i }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toBeInTheDocument();
+      expect(alert).toHaveTextContent("test_tx_hash_timer");
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      vi.useRealTimers();
+    });
+  });
 });
+});
+});
+
