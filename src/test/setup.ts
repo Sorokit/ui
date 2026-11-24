@@ -10,21 +10,26 @@ import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+function ensureClipboard() {
+  if (typeof navigator !== "undefined" && (!navigator.clipboard || !navigator.clipboard.writeText)) {
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: () => Promise.resolve(),
+        readText: () => Promise.resolve(""),
+      },
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
+ensureClipboard();
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  ensureClipboard();
 });
-
-if (typeof navigator !== "undefined" && (!navigator.clipboard || !navigator.clipboard.writeText)) {
-  Object.defineProperty(navigator, "clipboard", {
-    value: {
-      writeText: () => Promise.resolve(),
-      readText: () => Promise.resolve(""),
-    },
-    configurable: true,
-    writable: true,
-  });
-}
 
 // jsdom ships working Web Storage implementations, but Node's experimental
 // global Web Storage API (stable default as of Node 22+) can shadow them with a

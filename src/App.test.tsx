@@ -37,7 +37,6 @@ function setPath(path: string) {
 
 describe("App routing", () => {
   beforeEach(() => {
-    document.body.innerHTML = "";
     localStorage.clear();
     setPath("/");
   });
