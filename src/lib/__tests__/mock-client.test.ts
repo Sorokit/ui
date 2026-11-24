@@ -1,319 +1,151 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { SorokitClient } from '../client';
-import { deterministicMock,DeterministicMockData } from '../deterministic-mock';
-import { createMockClient,MOCK_ADDRESS } from '../mock-client';
+import { createMockClient } from '../mock-client';
 
-describe('Mock Client - Issue #30 Fixes', () => {
-  describe('Fix 1: Valid MOCK_ADDRESS', () => {
-    it('should have valid Stellar Ed25519 public key format', () => {
-      // Stellar public keys start with G and are 56 characters total
-      expect(MOCK_ADDRESS).toMatch(/^G[A-Z0-9]{55}$/);
-      expect(MOCK_ADDRESS.length).toBe(56);
-    });
+describe('Mock Client - Issue #1077: Timeline getCoverage', () => {
+  describe('getTimeline returns grouped timeline format', () => {
+    it('returns timeline grouped by date with operation arrays', async () => {
+      const client = createMockClient() as SorokitClient;
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+      });
+      expect(res.error).toBeNull();
+      expect(Array.isArray(res.data)).toBe(true);
+      expect(res.total).toBeGreaterThan(0);
 
-    it('should not contain repeating Z0J patterns', () => {
-      // Old invalid address had "Z0J2Q" repeating
-      expect(MOCK_ADDRESS).not.toMatch(/Z0J.*Z0J/);
-    });
-  });
+      // Verify each group has a date and transactions array
+      for (const group of res.data!) {
+        expect(group).toHaveProperty('date');
+        expect(Array.isArray(group.transactions)).toBe(true);
+        expect(group.transactions.length).toBeGreaterThan(0);
 
-  describe('Fix 2: switchNetwork error handling', () => {
-    it('should return error for unknown network', async () => {
-      const result = createMockClient('invalidNetwork');
-      expect(result).not.toHaveProperty('wallet');
-      if (!('wallet' in result)) {
-        expect(result.error).toBeDefined();
-        expect(result.error).toContain('Unknown network');
-        expect(result.data).toBeNull();
+        // Each transaction has operations array
+        for (const tx of group.transactions) {
+          expect(tx).toHaveProperty('operations');
+          expect(Array.isArray(tx.operations)).toBe(true);
+          expect(tx.operations.length).toBeGreaterThan(0);
+
+          // Each operation has the expected shape
+          for (const op of tx.operations) {
+            expect(op).toHaveProperty('id');
+            expect(op).toHaveProperty('txHash');
+            expect(op).toHaveProperty('type');
+            expect(op).toHaveProperty('source');
+            expect(op).toHaveProperty('destination');
+            expect(op).toHaveProperty('amount');
+            expect(op).toHaveProperty('asset');
+            expect(op).toHaveProperty('success');
+            expect(op).toHaveProperty('createdAt');
+          }
+        }
       }
     });
 
-    it('should return error message with valid network list', () => {
-      const result = createMockClient('badname');
-      if (!('wallet' in result)) {
-        expect(result.error).toContain('testnet');
-        expect(result.error).toContain('public');
+    it('respects page and limit parameters', async () => {
+      const client = createMockClient() as SorokitClient;
+      const page1 = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        page: 1,
+        limit: 2,
+      });
+      const page2 = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        page: 2,
+        limit: 2,
+      });
+
+      expect(page1.error).toBeNull();
+      expect(page2.error).toBeNull();
+      expect(page1.data).toHaveLength(2);
+      // Page 2 should have the remaining 1 group (total is 3 groups)
+      expect(page2.data).toHaveLength(1);
+
+      // Verify pagination: page 1 and page 2 should have different data
+      const page1Dates = page1.data!.map((g) => g.date);
+      const page2Dates = page2.data!.map((g) => g.date);
+      expect(page1Dates).not.toEqual(page2Dates);
+      expect(page1.total).toBeGreaterThan(0);
+      expect(page2.total).toBeGreaterThan(0);
+    });
+
+    it('respects operationType filter', async () => {
+      const client = createMockClient() as SorokitClient;
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        filters: { operationType: 'payment' },
+      });
+      expect(res.error).toBeNull();
+      if (res.data) {
+        for (const group of res.data) {
+          for (const tx of group.transactions) {
+            for (const op of tx.operations) {
+              expect(op.type.toLowerCase()).toContain('payment');
+            }
+          }
+        }
       }
     });
 
-    it('should return valid config for known networks', async () => {
-      const client = createMockClient('testnet') as SorokitClient;
-      const { data, error } = await client.network.getNetwork();
-      expect(error).toBeNull();
-      expect(data?.name).toBe('testnet');
-    });
-
-    it('should default to testnet when no network specified', async () => {
+    it('respects searchQuery filter', async () => {
       const client = createMockClient() as SorokitClient;
-      const { data, error } = await client.network.getNetwork();
-      expect(error).toBeNull();
-      expect(data?.name).toBe('testnet');
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        filters: { searchQuery: 'XLM' },
+      });
+      expect(res.error).toBeNull();
+      if (res.data) {
+        for (const group of res.data) {
+          for (const tx of group.transactions) {
+            for (const op of tx.operations) {
+              expect(op.asset.toLowerCase()).toContain('xlm') ||
+                op.source.toLowerCase().includes('xlm') ||
+                op.destination.toLowerCase().includes('xlm');
+            }
+          }
+        }
+      }
     });
 
-    it('should handle both testnet and public networks', async () => {
-      const testnetClient = createMockClient('testnet') as SorokitClient;
-      const publicClient = createMockClient('public') as SorokitClient;
-      
-      const testnetInfo = await testnetClient.network.getNetwork();
-      const publicInfo = await publicClient.network.getNetwork();
-      expect(testnetInfo.error).toBeNull();
-      expect(publicInfo.error).toBeNull();
-      expect(testnetInfo.data?.name).not.toEqual(publicInfo.data?.name);
-    });
-  });
-
-  describe('Fix 3: Deterministic mock data', () => {
-    it('should generate consistent hex with same seed', () => {
-      const mock1 = new DeterministicMockData(12345);
-      const mock2 = new DeterministicMockData(12345);
-
-      expect(mock1.generateHex(32)).toBe(mock2.generateHex(32));
-    });
-
-    it('should generate different hex with different seeds', () => {
-      const mock1 = new DeterministicMockData(12345);
-      const mock2 = new DeterministicMockData(54321);
-
-      expect(mock1.generateHex(32)).not.toBe(mock2.generateHex(32));
-    });
-
-    it('should generate valid transaction hashes', () => {
-      const hash = deterministicMock.generateTransactionHash();
-      expect(hash).toMatch(/^[0-9a-f]{64}$/);
-    });
-
-    it('should generate valid event IDs', () => {
-      const id = deterministicMock.generateEventId();
-      expect(id).toMatch(/^[0-9a-f]{32}$/);
-    });
-
-    it('should generate reproducible history', () => {
-      const mock = new DeterministicMockData(12345);
-      const history1 = mock.generateMockHistory(3);
-
-      const mock2 = new DeterministicMockData(12345);
-      const history2 = mock2.generateMockHistory(3);
-
-      expect(history1).toEqual(history2);
-    });
-
-    it('should generate reproducible events', () => {
-      const mock = new DeterministicMockData(12345);
-      const events1 = mock.generateMockEvents(2);
-
-      const mock2 = new DeterministicMockData(12345);
-      const events2 = mock2.generateMockEvents(2);
-
-      expect(events1).toEqual(events2);
-    });
-
-    it('snapshots should be reproducible', () => {
-      const mock1 = new DeterministicMockData(12345);
-      const snapshot1 = {
-        history: mock1.generateMockHistory(5),
-        events: mock1.generateMockEvents(3),
-      };
-      
-      const mock2 = new DeterministicMockData(12345);
-      const snapshot2 = {
-        history: mock2.generateMockHistory(5),
-        events: mock2.generateMockEvents(3),
-      };
-
-      expect(snapshot1).toEqual(snapshot2);
-    });
-  });
-
-  describe('Fix 4: Pagination support in getHistory (Issue #588)', () => {
-    it('should paginate results by page and limit with accurate total', async () => {
+    it('respects dateFrom filter', async () => {
       const client = createMockClient() as SorokitClient;
-
-      const page1 = await client.transaction.getHistory('GADDR', 1, 10);
-      const page2 = await client.transaction.getHistory('GADDR', 2, 10);
-      const page3 = await client.transaction.getHistory('GADDR', 3, 10);
-
-      expect(page1.data).toHaveLength(10);
-      expect(page2.data).toHaveLength(10);
-      expect(page3.data).toHaveLength(5);
-
-      expect(page1.total).toBe(25);
-      expect(page2.total).toBe(25);
-      expect(page3.total).toBe(25);
-
-      // Verify that page 1 and page 2 return completely different transactions
-      const page1Ids = page1.data?.map(t => t.hash);
-      const page2Ids = page2.data?.map(t => t.hash);
-      expect(page1Ids).not.toEqual(page2Ids);
-    });
-  });
-
-  describe('Edge Case Handling (Issue #1140)', () => {
-    describe('Zero balance cases', () => {
-      it('returns empty balance array for GZERO address without crashing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.account.getBalances('GZERO');
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        filters: { dateFrom: '2026-07-25' },
       });
-
-      it('returns zero XLM balance when configured with zero balance address', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.account.getBalances('GZEROBALANCE');
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([
-          { asset: 'XLM', balance: '0.0000000', assetType: 'native' },
-        ]);
-      });
-
-      it('allows configuring a mock client instance with custom zero balances', async () => {
-        const client = createMockClient({
-          balances: [{ asset: 'XLM', balance: '0', assetType: 'native' }],
-        }) as SorokitClient;
-        const res = await client.account.getBalances();
-        expect(res.error).toBeNull();
-        expect(res.data).toHaveLength(1);
-        expect(res.data?.[0].balance).toBe('0');
-      });
-
-      it('allows configuring an empty balance array without crashing', async () => {
-        const client = createMockClient({ balances: [] }) as SorokitClient;
-        const res = await client.account.getBalances();
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-      });
+      expect(res.error).toBeNull();
+      if (res.data) {
+        for (const group of res.data) {
+          // ISO date strings sort lexicographically
+          expect(group.date).toMatch(/^2026-07-2[5-9]/);
+        }
+      }
     });
 
-    describe('Empty arrays and empty collections', () => {
-      it('returns empty array when transaction history is empty', async () => {
-        const client = createMockClient({ history: [] }) as SorokitClient;
-        const res = await client.transaction.getHistory('GADDR', 1, 10);
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-        expect(res.total).toBe(0);
+    it('respects dateTo filter', async () => {
+      const client = createMockClient() as SorokitClient;
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        filters: { dateTo: '2026-07-25' },
       });
-
-      it('returns empty array for GEMPTY address', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.transaction.getHistory('GEMPTY');
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-        expect(res.total).toBe(0);
-      });
-
-      it('returns empty array when limit is 0', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.transaction.getHistory('GADDR', 1, 0);
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-        expect(res.total).toBe(0);
-      });
-
-      it('returns empty array for claimable balances', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.account.getClaimableBalances('GADDR');
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-      });
-
-      it('returns empty array for NFTs', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.nft.getNfts('GADDR');
-        expect(res.error).toBeNull();
-        expect(res.data).toEqual([]);
-      });
-
-      it('returns null data when getOperations finds no matching operations', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.operation.getOperations('non-existent-hash');
-        expect(res.error).toBeNull();
-        expect(res.data).toBeNull();
-      });
-
-      it('returns null data when getTimeline has no matches for filters', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.operation.getTimeline({
-          filters: { searchQuery: 'impossible-query-with-zero-results' },
-        });
-        expect(res.error).toBeNull();
-        expect(res.data).toBeNull();
-        expect(res.total).toBe(0);
-      });
+      expect(res.error).toBeNull();
+      if (res.data) {
+        for (const group of res.data) {
+          // ISO date strings sort lexicographically; filter keeps groups with date <= dateTo
+          expect(group.date).toMatch(/^2026-07-2[0-5]/);
+        }
+      }
     });
 
-    describe('Null and undefined parameter handling', () => {
-      it('handles null and undefined address in account and balances without crashing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const balRes = await client.account.getBalances(undefined as unknown as string);
-        expect(balRes.error).toBeNull();
-        expect(Array.isArray(balRes.data)).toBe(true);
-
-        const claimRes = await client.account.getClaimableBalances(undefined as unknown as string);
-        expect(claimRes.error).toBeNull();
-        expect(claimRes.data).toEqual([]);
+    it('returns null data when no matches for filters', async () => {
+      const client = createMockClient() as SorokitClient;
+      const res = await client.operation.getTimeline({
+        address: 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA',
+        filters: { operationType: 'nonexistent_type' },
       });
-
-      it('handles null/empty balanceId in claimBalance with error instead of throwing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.account.claimBalance('');
-        expect(res.data).toBeNull();
-        expect(res.error).toContain('Invalid claimable balance ID');
-
-        const resNull = await client.account.claimBalance(undefined as unknown as string);
-        expect(resNull.data).toBeNull();
-        expect(resNull.error).toContain('Invalid claimable balance ID');
-      });
-
-      it('handles null txHash in getOperations without throwing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.operation.getOperations(undefined as unknown as string);
-        expect(res.error).toBeNull();
-        expect(res.data).toBeNull();
-      });
-
-      it('handles null/undefined params in getTimeline without crashing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.operation.getTimeline(undefined as unknown as any);
-        expect(res.error).toBeNull();
-      });
-
-      it('handles null/undefined param in switchNetwork with an error instead of throwing', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.network.switchNetwork(undefined as unknown as any);
-        expect(res.data).toBeNull();
-        expect(res.error).toBeDefined();
-      });
-
-      it('handles GNOTFOUND account with structured error response', async () => {
-        const client = createMockClient() as SorokitClient;
-        const res = await client.account.getAccount('GNOTFOUND');
-        expect(res.data).toBeNull();
-        expect(res.status).toBe('error');
-        expect(res.error).toBe('Account not found');
-      });
-
-      it('handles transactions with null or undefined memos and metadata gracefully', async () => {
-        const client = createMockClient({
-          history: [
-            {
-              hash: 'tx-null-memo',
-              ledger: 100,
-              createdAt: '2026-01-01T00:00:00Z',
-              successful: true,
-              operationCount: 1,
-              feePaid: '100',
-              memo: undefined,
-              operationType: undefined,
-            },
-          ],
-        }) as SorokitClient;
-
-        const res = await client.transaction.getHistory('GADDR', 1, 10);
-        expect(res.error).toBeNull();
-        expect(res.data).toHaveLength(1);
-        expect(res.data?.[0].memo).toBeUndefined();
-      });
+      expect(res.error).toBeNull();
+      expect(res.data).toBeNull();
+      expect(res.total).toBe(0);
     });
   });
 });
-

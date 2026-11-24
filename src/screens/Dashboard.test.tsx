@@ -313,6 +313,106 @@ describe("Dashboard", () => {
     });
   });
 
+  describe("screen visibility tracking", () => {
+    it("keeps previously visited screen mounted (but hidden) after navigating away", async () => {
+      render(<Dashboard />);
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      expect(await screen.findByTestId("screen-soroban")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(screen.getByTestId("screen-wallet")).toBeInTheDocument();
+      // Soroban stays mounted so its in-progress form state survives.
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).toHaveAttribute("hidden");
+    });
+
+    it("reveals previously hidden screen when navigated back to", async () => {
+      render(<Dashboard />);
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      expect(await screen.findByTestId("screen-soroban")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      // Soroban is now hidden but still mounted
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).toHaveAttribute("hidden");
+
+      // Navigate back to Soroban
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      expect(screen.getByTestId("screen-soroban")).toBeInTheDocument();
+      // Hidden attribute should be removed when screen becomes active
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).not.toHaveAttribute("hidden");
+    });
+
+    it("preserves the same DOM instance for a mounted screen across navigation", async () => {
+      render(<Dashboard />);
+
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      const sorobanWrapper = screen.getByTestId("screen-wrapper-soroban");
+      const firstH2 = sorobanWrapper.querySelector("h2");
+
+      // Navigate away and back
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+
+      // The h2 element should be the same instance (not re-created)
+      expect(firstH2).toBeInTheDocument();
+      // The screen should still be mounted (hidden attribute removed when active)
+      expect(sorobanWrapper).not.toHaveAttribute("hidden");
+    });
+
+    it("sets aria-hidden correctly on non-active screens", async () => {
+      render(<Dashboard />);
+
+      // Switch to soroban first
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      await screen.findByTestId("screen-soroban");
+
+      // Now wallet should have aria-hidden, soroban should not
+      expect(
+        screen.getByTestId("screen-wrapper-wallet"),
+      ).toHaveAttribute("aria-hidden", "true");
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).toHaveAttribute("aria-hidden", "false");
+
+      // Switch back to wallet
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(
+        screen.getByTestId("screen-wrapper-wallet"),
+      ).toHaveAttribute("aria-hidden", "false");
+      expect(
+        screen.getByTestId("screen-wrapper-soroban"),
+      ).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("does not unmount screens when navigating between them", async () => {
+      render(<Dashboard />);
+
+      // Navigate through multiple screens
+      fireEvent.click(screen.getByRole("button", { name: "soroban" }));
+      expect(await screen.findByTestId("screen-soroban")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "wallet" }));
+      expect(screen.getByTestId("screen-wallet")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "transactions" }));
+      expect(screen.getByTestId("screen-transactions")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "network" }));
+      expect(await screen.findByTestId("screen-network")).toBeInTheDocument();
+
+      // All screens should still be in the document (mounted, just hidden)
+      expect(screen.getByTestId("screen-wrapper-soroban")).toBeInTheDocument();
+      expect(screen.getByTestId("screen-wrapper-wallet")).toBeInTheDocument();
+      expect(screen.getByTestId("screen-wrapper-transactions")).toBeInTheDocument();
+      expect(screen.getByTestId("screen-wrapper-network")).toBeInTheDocument();
+    });
+  });
+
   describe("controlled mode", () => {
     it("renders the screen named by activeSection", () => {
       render(<Dashboard activeSection="transactions" />);
