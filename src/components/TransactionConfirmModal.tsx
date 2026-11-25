@@ -38,8 +38,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Separator } from "@/components/ui/Separator";
 import { STROOPS_PER_XLM } from "@/lib/staking";
-import { friendlyError, truncateAddress } from "@/lib/utils";
+import { cn, friendlyError, truncateAddress } from "@/lib/utils";
 
 export interface TransactionOperationSummary {
   /** Short operation type label, e.g. "Payment", "Change Trust" */
@@ -210,12 +211,16 @@ export function TransactionConfirmModal({
                       stroops={transaction.fee.baseFeeStroops}
                     />
                     {transaction.fee.networkFeeStroops !== undefined && (
-                      <FeeRow
-                        label="Network fee"
-                        stroops={transaction.fee.networkFeeStroops}
-                      />
+                      <>
+                        <Separator spacing="sm" className="border-b border-line" />
+                        <FeeRow
+                          label="Network fee"
+                          stroops={transaction.fee.networkFeeStroops}
+                        />
+                      </>
                     )}
-                    <div className="flex items-center justify-between pt-2 border-t border-line font-semibold">
+                    <Separator spacing="sm" className="border-b border-line" />
+                    <div className="flex items-center justify-between font-semibold">
                       <span className="text-ink-2">Total</span>
                       <span className="text-ink tabular-nums">
                         {transaction.fee.totalStroops} stroops (
@@ -307,9 +312,17 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function FeeRow({ label, stroops }: { label: string; stroops: string }) {
+function FeeRow({
+  label,
+  stroops,
+  className,
+}: {
+  label: string;
+  stroops: string;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={cn("flex items-center justify-between", className)}>
       <span className="text-ink-3">{label}</span>
       <span className="text-ink tabular-nums">
         {stroops} stroops ({stroopsToXlmLabel(stroops)})
