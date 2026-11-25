@@ -42,6 +42,11 @@ const PortfolioAnalyticsScreen = lazy(() =>
 const RecoveryScreen = lazy(() =>
   import("@/screens/RecoveryScreen").then((m) => ({ default: m.RecoveryScreen })),
 );
+const SettingsScreen = lazy(() =>
+  import("@/screens/SettingsScreen").then((m) => ({
+    default: m.SettingsScreen,
+  })),
+);
 const SorobanScreen = lazy(() =>
   import("@/screens/SorobanScreen").then((m) => ({ default: m.SorobanScreen })),
 );
@@ -69,6 +74,7 @@ const SCREENS: Record<NavSection, ComponentType> = {
   budget: BudgetScreen,
   nfts: NFTScreen,
   governance: GovernanceDashboard,
+  settings: SettingsScreen,
 };
 
 const SCREEN_LABELS: Record<NavSection, string> = {
@@ -84,6 +90,7 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   budget: "Budget",
   nfts: "NFTs",
   governance: "Governance",
+  settings: "Settings",
 };
 
 /**

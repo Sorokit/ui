@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/Input";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { Balance } from "@/lib/client";
+import { usePreferences } from "@/lib/preferences";
 import { cn, safeFormat } from "@/lib/utils";
 
 type SortMode = "default" | "balance-desc" | "alpha";
@@ -141,7 +142,7 @@ export interface BalanceListProps {
   /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a fiat-equivalent figure. */
   xlmPrice?: number;
   /** Fiat currency used to format the XLM-equivalent total (issue #665).
-   * Defaults to USD; EUR and GBP are also supported.
+   * Defaults to the display currency chosen in Settings (USD, EUR or GBP).
    */
   currency?: string;
 }
@@ -157,8 +158,10 @@ export function BalanceList({
   detailRef,
   showTotal,
   xlmPrice,
-  currency = "USD",
+  currency,
 }: BalanceListProps) {
+  const preferredCurrency = usePreferences().currency;
+  const displayCurrency = currency ?? preferredCurrency;
   const { balances, isLoadingAccount, isConnected, network } = useSorokit();
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
@@ -234,7 +237,7 @@ export function BalanceList({
             <p className="text-[11px] text-ink-3 mt-0.5">
               ~{xlmTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM
               {typeof xlmPrice === "number"
-                ? ` (~${CURRENCY_SYMBOLS[currency] ?? `${currency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
+                ? ` (~${CURRENCY_SYMBOLS[displayCurrency] ?? `${displayCurrency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
                 : ""}
             </p>
           )}

@@ -101,6 +101,25 @@ describe("computeBudgetBreakdown", () => {
       expect(splitTotalPct).toBe(100);
     });
   });
+
+  it("handles transaction with no type falls back to 'Unknown'", () => {
+    const txNoType: Transaction = {
+      hash: "tx-no-type",
+      ledger: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+      successful: true,
+      operationCount: 1,
+      feePaid: "100",
+      // type is intentionally missing
+    };
+
+    const breakdown = computeBudgetBreakdown([txNoType]);
+
+    expect(breakdown.total).toBe(100);
+    expect(breakdown.categories).toHaveLength(1);
+    expect(breakdown.categories[0].type).toBe("Unknown");
+    expect(breakdown.categories[0].amount).toBe(100);
+  });
 });
 
 // ─── monthKeyUtc (issue #971) ───────────────────────────────────────────────
@@ -324,6 +343,11 @@ describe("calculateMonthlySpending", () => {
       categories,
     );
     expect(result.categories[0].limit).toBeUndefined();
+  });
+
+  it("falls back to Uncategorized when memo is undefined", () => {
+    const result = calculateMonthlySpending([tx({ memo: undefined })], "2026-01", categories);
+    expect(result.categories[0].category).toBe("Uncategorized");
   });
 });
 

@@ -149,6 +149,41 @@ function getStatusTone(status: TrackerStatus): "success" | "error" | "warning" {
   }
 }
 
+/**
+ * Returns an estimated completion time based on tracker status and network.
+ */
+export function getEstimatedTime(
+  status: TrackerStatus,
+  network?: NetworkInfo | null,
+): string {
+  if (status === "confirmed") {
+    return "Completed";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "timeout_expired") {
+    return "Expired";
+  }
+  if (status === "network_error") {
+    return "Delayed (retrying...)";
+  }
+
+  const networkName = network?.name?.toLowerCase();
+  switch (networkName) {
+    case "localnet":
+    case "standalone":
+      return "~5 seconds";
+    case "testnet":
+      return "~20 seconds";
+    case "futurenet":
+      return "~30 seconds";
+    case "mainnet":
+    default:
+      return "~45 seconds";
+  }
+}
+
 function isTerminalStatus(status: TrackerStatus): boolean {
   return (
     status === "confirmed" ||
@@ -420,6 +455,12 @@ export function TransactionStatusTracker({
                         <Badge variant={getStatusTone(entry.status)}>
                           {statusLabel}
                         </Badge>
+                        <div
+                          className="text-[12px] text-ink-3"
+                          data-testid={`tracker-estimated-time-${entry.hash}`}
+                        >
+                          Estimated time: {getEstimatedTime(entry.status, network)}
+                        </div>
                         {entry.status === "network_error" && (
                           <span className="text-[11px] text-ink-3">
                             Network issue — retrying soon
@@ -463,7 +504,7 @@ export function TransactionStatusTracker({
                     </div>
                   </div>
 
-                  <div className="mt-3 grid gap-2 text-[12px] text-ink-3 sm:grid-cols-2">
+                  <div className="mt-3 grid gap-2 text-[12px] text-ink-3 sm:grid-cols-3">
                     <div>
                       <p className="font-semibold uppercase tracking-[0.08em] text-ink-4">
                         Submitted
@@ -483,6 +524,12 @@ export function TransactionStatusTracker({
                           ? formatTimestamp(entry.confirmedAt)
                           : formatTimestamp(entry.lastCheckedAt)}
                       </p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-[0.08em] text-ink-4">
+                        Estimated Time
+                      </p>
+                      <p>{getEstimatedTime(entry.status, network)}</p>
                     </div>
                   </div>
 
