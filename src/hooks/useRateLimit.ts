@@ -1,10 +1,10 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import {
-  rateLimitTracker,
   type RateLimitConfig,
   type RateLimitSnapshot,
   type RateLimitTracker,
+  rateLimitTracker,
 } from "@/lib/rate-limit";
 
 export interface UseRateLimitResult extends RateLimitSnapshot {

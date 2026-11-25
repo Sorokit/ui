@@ -1,7 +1,21 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-function readOnline(): boolean {
+function subscribe(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("online", callback);
+  window.addEventListener("offline", callback);
+  return () => {
+    window.removeEventListener("online", callback);
+    window.removeEventListener("offline", callback);
+  };
+}
+
+function getSnapshot(): boolean {
   return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+function getServerSnapshot(): boolean {
+  return true;
 }
 
 /**
@@ -9,21 +23,5 @@ function readOnline(): boolean {
  * and follows the window `online` / `offline` events.
  */
 export function useOnlineStatus(): boolean {
-  const [online, setOnline] = useState(readOnline);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const goOnline = () => setOnline(true);
-    const goOffline = () => setOnline(false);
-    window.addEventListener("online", goOnline);
-    window.addEventListener("offline", goOffline);
-    // Resync in case the state changed between render and effect.
-    setOnline(readOnline());
-    return () => {
-      window.removeEventListener("online", goOnline);
-      window.removeEventListener("offline", goOffline);
-    };
-  }, []);
-
-  return online;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

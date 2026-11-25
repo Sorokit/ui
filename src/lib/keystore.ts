@@ -43,12 +43,15 @@ export interface KeystoreFile {
 }
 
 export class KeystoreError extends Error {
+  readonly code: "invalid-file" | "wrong-password" | "unsupported" | "no-crypto";
+
   constructor(
     message: string,
-    readonly code: "invalid-file" | "wrong-password" | "unsupported" | "no-crypto",
+    code: "invalid-file" | "wrong-password" | "unsupported" | "no-crypto",
   ) {
     super(message);
     this.name = "KeystoreError";
+    this.code = code;
   }
 }
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type {
   AccountData,
   Balance,
@@ -7,7 +8,6 @@ import type {
   NetworkName,
   SorokitClient,
 } from "@/lib/client";
-import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { initClient } from "@/lib/client";
 import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
 
@@ -676,12 +676,8 @@ export function SorokitProvider({
         address,
         { data: null, error: message },
         { data: null, error: message },
-      if (controller.signal.aborted || !isMountedRef.current) return;
-      reportError(
-        e instanceof Error ? e.message : "Failed to refresh account data",
-        "account",
-        "error",
       );
+      if (controller.signal.aborted || !isMountedRef.current) return;
       reportError(message, "account", usedCache ? "info" : "error");
     } finally {
       if (accountRequestRef.current === controller) {

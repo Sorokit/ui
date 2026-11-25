@@ -1502,6 +1502,9 @@ describe("TransactionPanel", () => {
       // Transaction state reset: submit button is back and no longer in Submitting... state
       expect(screen.queryByText("Submitting…")).not.toBeInTheDocument();
       resolveSubmit!({ data: { hash: "late-hash" }, error: null });
+    });
+  });
+
   describe("Transaction Templates (#1146)", () => {
     beforeEach(() => {
       localStorage.clear();
