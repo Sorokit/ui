@@ -63,7 +63,7 @@ test("navigates through every dashboard section", async ({ page }) => {
 
   await expect(
     page.getByText(
-      "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXHPA",
+      "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA",
       { exact: true },
     ).first(),
   ).toBeVisible();
