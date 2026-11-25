@@ -3,6 +3,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 
 import { AccountCard } from "@/components/AccountCard";
+import { AccountSummaryCard } from "@/components/AccountSummaryCard";
 import { BalanceList } from "@/components/BalanceList";
 import { ClaimableBalanceCard } from "@/components/ClaimableBalanceCard";
 import { KeystoreBackup } from "@/components/KeystoreBackup";
@@ -171,6 +172,7 @@ export function AccountScreen() {
         </div>
       )}
 
+      {isConnected && account && <AccountSummaryCard />}
       <AccountCard />
       <BalanceList />
       <ClaimableBalanceCard />

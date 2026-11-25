@@ -20,6 +20,7 @@ export const SECTION_PATHS: Record<NavSection, string> = {
   budget: "/budget",
   nfts: "/nfts",
   governance: "/governance",
+  settings: "/settings",
 };
 
 const PATH_TO_SECTION: Record<string, NavSection> = Object.fromEntries(
