@@ -12,6 +12,7 @@ import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
 import { RateLimitIndicator } from "@/components/RateLimitIndicator";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
@@ -224,6 +225,7 @@ export function Dashboard({
           onNavigate={handleNavigate}
         />
         <NetworkBanner active={active} />
+        <NetworkStatusBanner />
         <RateLimitIndicator />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div

@@ -217,11 +217,10 @@ export function isMuxedAccount(address: string): boolean {
  * in stellar/js-stellar-base.
  */
 export function validateStellarAddress(address: string): boolean {
-  const trimmed = address.trim();
-  if (/^G[A-Z2-7]{55}$/.test(trimmed)) {
-    return decodeStrKey(trimmed, STRKEY_VERSION_ED25519_PUBLIC_KEY, 32) !== null;
+  if (/^G[A-Z2-7]{55}$/.test(address)) {
+    return decodeStrKey(address, STRKEY_VERSION_ED25519_PUBLIC_KEY, 32) !== null;
   }
-  return isMuxedAccount(trimmed);
+  return isMuxedAccount(address);
 }
 
 /** Decimal places of XLM and of most Stellar classic assets. */

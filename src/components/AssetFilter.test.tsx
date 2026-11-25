@@ -69,6 +69,37 @@ describe("AssetFilter", () => {
     expect(screen.queryByText("XLM")).not.toBeInTheDocument();
   });
 
+  it("highlights matching substrings in asset codes", () => {
+    renderComponent();
+    fireEvent.change(screen.getByPlaceholderText(/search/i), {
+      target: { value: "sdc" },
+    });
+
+    const highlight = screen.getByTestId("asset-filter-highlight");
+    expect(highlight).toHaveTextContent("SDC");
+    expect(highlight.tagName).toBe("MARK");
+  });
+
+  it("highlights matching substrings in asset names case-insensitively", () => {
+    renderComponent();
+    fireEvent.change(screen.getByPlaceholderText(/search/i), {
+      target: { value: "coin" },
+    });
+
+    const highlight = screen.getByTestId("asset-filter-highlight");
+    expect(highlight).toHaveTextContent("Coin");
+  });
+
+  it("highlights matching substrings in issuer prefixes", () => {
+    renderComponent();
+    fireEvent.change(screen.getByPlaceholderText(/search/i), {
+      target: { value: "gardnv" },
+    });
+
+    const highlight = screen.getByTestId("asset-filter-highlight");
+    expect(highlight).toHaveTextContent("GARDNV");
+  });
+
   it("filters assets by issuer search", () => {
     renderComponent();
     const input = screen.getByPlaceholderText(/search/i);
