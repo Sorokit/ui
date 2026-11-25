@@ -330,6 +330,52 @@ describe("Sidebar", () => {
       expect(transactions).toHaveAttribute("aria-describedby");
     });
 
+    describe("arrow key navigation", () => {
+    vi.stubGlobal("innerWidth", 375);
+
+    it("arrow down moves focus forward", async () => {
+      render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={true} onClose={onClose} />,
+      );
+
+      // Get focusable elements from the sidebar (same as component does)
+      const sidebar = screen.getByRole("navigation", { name: "Main navigation" })
+        .closest("aside")!;
+      const focusableElements = sidebar.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ) as NodeListOf<HTMLElement>;
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      fireEvent.focus(firstFocusable);
+      expect(document.activeElement).toBe(firstFocusable);
+
+      fireEvent.keyDown(window, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(lastFocusable);
+    });
+
+    it("arrow up moves focus backward", async () => {
+      render(
+        <Sidebar active="wallet" onNavigate={onNavigate} open={true} onClose={onClose} />,
+      );
+
+      // Get focusable elements from the sidebar (same as component does)
+      const sidebar = screen.getByRole("navigation", { name: "Main navigation" })
+        .closest("aside")!;
+      const focusableElements = sidebar.querySelectorAll(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ) as NodeListOf<HTMLElement>;
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements[focusableElements.length - 1];
+
+      fireEvent.focus(lastFocusable);
+      expect(document.activeElement).toBe(lastFocusable);
+
+      fireEvent.keyDown(window, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(firstFocusable);
+    });
+  });
+
     it("highlights the Transactions item for a nested transaction route", () => {
       render(
         <Sidebar
