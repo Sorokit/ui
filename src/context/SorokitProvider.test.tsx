@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
+import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
 import { getClient } from "@/lib/client";
 import { createMockClient, MOCK_ADDRESS } from "@/lib/mock-client";
 
@@ -1822,4 +1823,182 @@ describe("SorokitProvider", () => {
       expect(getClient()).toBe(switchedClient);
     });
   });
+
+  describe("initial network status validation (#1105)", () => {
+    const StatusProbe = () => {
+      const { network, networkStatus, networkStatusWarning, error } =
+        useSorokit();
+      return (
+        <div>
+          <div data-testid="network">{network?.name ?? "none"}</div>
+          <div data-testid="network-status">{networkStatus ?? "none"}</div>
+          <div data-testid="network-warning">
+            {networkStatusWarning ?? "none"}
+          </div>
+          <div data-testid="error">{error ?? "none"}</div>
+        </div>
+      );
+    };
+
+    const networkClient = (status?: string) =>
+      ({
+        ...mockClient,
+        network: {
+          getNetwork: vi
+            .fn()
+            .mockResolvedValue({
+              data: { name: "mainnet", status },
+              error: null,
+            }),
+          switchNetwork: vi.fn().mockImplementation(async (param) => ({
+            data: {
+              name: typeof param === "string" ? param : param.name,
+              status: "online",
+            },
+            error: null,
+          })),
+        },
+      }) as unknown as ReturnType<typeof getClient>;
+
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("does not warn when the network status is online", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("online"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent("online");
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("warns when the initial network is degraded", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("degraded"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "degraded",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent(
+        /degraded/i,
+      );
+      expect(screen.getByTestId("error")).toHaveTextContent(/degraded/i);
+      expect(onError).toHaveBeenCalledWith(
+        expect.stringMatching(/degraded/i),
+        "network",
+      );
+    });
+
+    it("warns when the initial network is offline", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("offline"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "offline",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent(/offline/i);
+      expect(onError).toHaveBeenCalledWith(
+        expect.stringMatching(/offline/i),
+        "network",
+      );
+    });
+
+    it("does not warn when the network reports no status", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient(undefined),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "unknown",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("shows a banner warning with switch options for a degraded network", async () => {
+      const client = networkClient("degraded");
+      renderWithProvider(
+        <>
+          <StatusProbe />
+          <NetworkStatusBanner />
+        </>,
+        { client },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status-banner")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("network-status-banner")).toHaveAttribute(
+        "data-status",
+        "degraded",
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(/degraded/i);
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Switch to Testnet" }),
+        );
+      });
+
+      expect(client.network.switchNetwork).toHaveBeenCalledWith("testnet");
+      await waitFor(() => {
+        expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+        expect(
+          screen.queryByTestId("network-status-banner"),
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    it("clears the init warning after switching to an online network", async () => {
+      const client = networkClient("offline");
+      renderWithProvider(
+        <>
+          <StatusProbe />
+          <NetworkStatusBanner />
+        </>,
+        { client },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-warning")).toHaveTextContent(
+          /offline/i,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Switch to Testnet" }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(client.network.switchNetwork).toHaveBeenCalledWith("testnet");
+        expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+        expect(
+          screen.queryByTestId("network-status-banner"),
+        ).not.toBeInTheDocument();
+      });
+    });
+  });
 });
+

@@ -90,6 +90,8 @@ export { AddressDisplay } from "./AddressDisplay";
 // Network
 export type { BannerConfig, NetworkBannerProps } from "./NetworkBanner";
 export { BANNER_CONFIG, NetworkBanner } from "./NetworkBanner";
+export type { NetworkStatusBannerProps } from "./NetworkStatusBanner";
+export { NetworkStatusBanner } from "./NetworkStatusBanner";
 export { NetworkSwitcher } from "./NetworkSwitcher";
 
 // Allowances
