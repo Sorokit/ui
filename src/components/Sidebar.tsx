@@ -143,6 +143,58 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
         onClose();
       }
 
+      if (e.key === "ArrowDown") {
+        if (!sidebarRef.current) return;
+        const focusableElements =
+          sidebarRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (document.activeElement === lastElement) {
+          firstElement.focus();
+        } else if (document.activeElement === firstElement) {
+          lastElement.focus();
+        } else {
+          const currentIndex = Array.from(focusableElements).indexOf(
+            document.activeElement as HTMLElement,
+          );
+          if (currentIndex >= 0 && currentIndex < focusableElements.length - 1) {
+            focusableElements[currentIndex + 1].focus();
+          }
+        }
+        e.preventDefault();
+      }
+
+      if (e.key === "ArrowUp") {
+        if (!sidebarRef.current) return;
+        const focusableElements =
+          sidebarRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (document.activeElement === firstElement) {
+          lastElement.focus();
+        } else if (document.activeElement === lastElement) {
+          firstElement.focus();
+        } else {
+          const currentIndex = Array.from(focusableElements).indexOf(
+            document.activeElement as HTMLElement,
+          );
+          if (currentIndex > 0 && currentIndex <= focusableElements.length - 1) {
+            focusableElements[currentIndex - 1].focus();
+          }
+        }
+        e.preventDefault();
+      }
+
       if (e.key === "Tab") {
         if (!sidebarRef.current) return;
         const focusableElements =
