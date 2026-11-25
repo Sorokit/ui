@@ -401,10 +401,12 @@ describe("Sidebar", () => {
       "Network",
       "Recovery Assistant",
       "Advanced Charting",
+      "Portfolio Analytics",
       "Yield Farming",
       "Budget Manager",
       "NFTs",
       "Governance",
+      "Settings",
     ];
 
     it("renders every nav item as a natively focusable button, not a div", () => {
