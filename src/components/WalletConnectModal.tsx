@@ -172,9 +172,6 @@ export function WalletConnectModal({
   );
   // Extension detection runs when the modal opens (not during render), so a
   // wallet that injects itself after the React tree mounted is still picked up.
-  const [installedWallets, setInstalledWallets] = useState<
-    Record<string, boolean>
-  >({});
 
   useEffect(() => {
     if (!open) return;
