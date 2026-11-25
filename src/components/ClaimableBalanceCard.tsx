@@ -6,6 +6,7 @@ import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { ClaimableBalance } from "@/lib/client";
 import { cn, safeFormat, truncateAddress } from "@/lib/utils";
+import { CopyAddressButton } from "@/components/CopyAddressButton";
 
 function isPredicateExpired(predicate: unknown, _currentTime: number): boolean {
   if (!predicate || typeof predicate !== "object") return false;
@@ -139,6 +140,7 @@ export function BalanceRow({
             Sponsor
           </span>
           <span data-address>{truncateAddress(cb.sponsor, 8, 6)}</span>
+          <CopyAddressButton address={cb.sponsor} ariaLabel="Copy sponsor address" size="sm" />
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-mono text-ink-3">
