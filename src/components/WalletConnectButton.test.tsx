@@ -536,4 +536,139 @@ describe("WalletConnectButton", () => {
       expect(standardSpan).toHaveTextContent("GABC12...WXYZ");
     });
   });
+
+  describe("State Transition Integration Flow (#1066)", () => {
+    it("transitions through idle -> modal -> connecting -> connected", async () => {
+      const fullAddress = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      let currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        address: null,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+
+      vi.mocked(useSorokit).mockImplementation(() => currentState);
+
+      const { rerender } = render(<WalletConnectButton />);
+
+      // 1. Idle state renders "Connect Wallet"
+      const connectBtn = screen.getByRole("button", { name: "Connect Wallet" });
+      expect(connectBtn).toBeInTheDocument();
+      expect(connectBtn).not.toBeDisabled();
+
+      // 2. Click opens wallet selection modal
+      fireEvent.click(connectBtn);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog", { name: /connect a wallet/i }),
+        ).toBeInTheDocument(),
+      );
+
+      // 3. Selecting a wallet triggers connectWallet and transitions to connecting
+      fireEvent.click(getWalletButton(/Freighter/i));
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: true,
+        address: null,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      const connectingBtn = screen.getByRole("button", {
+        name: /connecting…/i,
+        hidden: true,
+      });
+      expect(connectingBtn).toBeDisabled();
+      expect(connectingBtn).toHaveAttribute("aria-busy", "true");
+
+      // 4. After connect, button shows truncated address and modal closes
+      currentState = mockUseSorokit({
+        isConnected: true,
+        isConnecting: false,
+        address: fullAddress,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: /connect a wallet/i }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.getByText(truncateAddress(fullAddress))).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: `Wallet connected: ${fullAddress}. Click to manage.`,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("transitions through idle -> modal -> connecting -> error when connect fails", async () => {
+      const failingConnect = vi.fn().mockRejectedValue(new Error("User declined"));
+      let currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        address: null,
+        error: null,
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+
+      vi.mocked(useSorokit).mockImplementation(() => currentState);
+
+      const { rerender } = render(<WalletConnectButton />);
+
+      // 1. Idle
+      fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog", { name: /connect a wallet/i }),
+        ).toBeInTheDocument(),
+      );
+
+      // 2. Select wallet -> connecting
+      fireEvent.click(getWalletButton(/Freighter/i));
+      expect(failingConnect).toHaveBeenCalledTimes(1);
+
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: true,
+        error: null,
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+      expect(
+        screen.getByRole("button", { name: /connecting…/i, hidden: true }),
+      ).toBeDisabled();
+
+      // 3. Error during connect shows error state inside modal, then inline alert after closing modal
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        error: "User declined",
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      await waitFor(() =>
+        expect(screen.getByText("User declined")).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+
+      expect(screen.getByTestId("connection-error-alert")).toHaveTextContent(
+        "User declined",
+      );
+      expect(
+        screen.getByRole("button", { name: "Connect Wallet" }),
+      ).toBeInTheDocument();
+    });
+  });
 });

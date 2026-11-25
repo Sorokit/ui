@@ -6,6 +6,7 @@ import { getClient } from "@/lib/client";
 
 import {
   computeBackoffDelayMs,
+  getEstimatedTime,
   isRateLimitError,
   isTimeoutExpiredError,
   TransactionStatusTracker,
@@ -432,5 +433,122 @@ describe("computeBackoffDelayMs (#687)", () => {
     const spy = vi.spyOn(Math, "random").mockReturnValue(1);
     expect(computeBackoffDelayMs(10, 1000)).toBe(30_000);
     spy.mockRestore();
+  });
+});
+
+describe("getEstimatedTime (#1094)", () => {
+  it("returns network-specific estimates for pending status", () => {
+    expect(getEstimatedTime("pending", { name: "localnet", rpcUrl: "", horizonUrl: "", passphrase: "" })).toBe("~5 seconds");
+    expect(getEstimatedTime("pending", { name: "standalone", rpcUrl: "", horizonUrl: "", passphrase: "" })).toBe("~5 seconds");
+    expect(getEstimatedTime("pending", { name: "testnet", rpcUrl: "", horizonUrl: "", passphrase: "" })).toBe("~20 seconds");
+    expect(getEstimatedTime("pending", { name: "futurenet", rpcUrl: "", horizonUrl: "", passphrase: "" })).toBe("~30 seconds");
+    expect(getEstimatedTime("pending", { name: "mainnet", rpcUrl: "", horizonUrl: "", passphrase: "" })).toBe("~45 seconds");
+    expect(getEstimatedTime("pending", null)).toBe("~45 seconds");
+  });
+
+  it("returns terminal and network error estimates", () => {
+    expect(getEstimatedTime("confirmed")).toBe("Completed");
+    expect(getEstimatedTime("failed")).toBe("Failed");
+    expect(getEstimatedTime("timeout_expired")).toBe("Expired");
+    expect(getEstimatedTime("network_error")).toBe("Delayed (retrying...)");
+  });
+});
+
+describe("TransactionStatusTracker estimated time display (#1094)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockUseSorokit.mockReturnValue({
+      network: { name: "testnet", rpcUrl: "", horizonUrl: "", passphrase: "" },
+      get client() { return getClient(); }
+    } as unknown as ReturnType<typeof useSorokit>);
+  });
+
+  afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+  });
+
+  it("displays estimated time for current pending status", async () => {
+    const getStatus = vi.fn().mockResolvedValue({ data: "pending", error: null });
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus },
+    } as unknown as ReturnType<typeof getClient>);
+
+    await act(async () => {
+      render(<TransactionStatusTracker hash="tx-est-1" pollIntervalMs={1000} />);
+    });
+    await flushAsyncUpdates();
+
+    expect(
+      screen.getByTestId("tracker-estimated-time-tx-est-1"),
+    ).toHaveTextContent("Estimated time: ~20 seconds");
+    expect(screen.getByText("Estimated Time")).toBeInTheDocument();
+  });
+
+  it("updates estimated time as transaction status progresses to confirmed", async () => {
+    const getStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ data: "pending", error: null })
+      .mockResolvedValueOnce({ data: "success", error: null });
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus },
+    } as unknown as ReturnType<typeof getClient>);
+
+    await act(async () => {
+      render(<TransactionStatusTracker hash="tx-est-2" pollIntervalMs={1000} />);
+    });
+    await flushAsyncUpdates();
+
+    expect(
+      screen.getByTestId("tracker-estimated-time-tx-est-2"),
+    ).toHaveTextContent("Estimated time: ~20 seconds");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    await flushAsyncUpdates();
+
+    expect(
+      screen.getByTestId("tracker-estimated-time-tx-est-2"),
+    ).toHaveTextContent("Estimated time: Completed");
+  });
+
+  it("updates estimated time when transaction fails", async () => {
+    const getStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ data: "failed", error: "op_underfunded" });
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus },
+    } as unknown as ReturnType<typeof getClient>);
+
+    await act(async () => {
+      render(<TransactionStatusTracker hash="tx-est-3" pollIntervalMs={1000} />);
+    });
+    await flushAsyncUpdates();
+
+    expect(
+      screen.getByTestId("tracker-estimated-time-tx-est-3"),
+    ).toHaveTextContent("Estimated time: Failed");
+  });
+
+  it("reflects mainnet estimated time of ~45 seconds", async () => {
+    mockUseSorokit.mockReturnValue({
+      network: { name: "mainnet", rpcUrl: "", horizonUrl: "", passphrase: "" },
+      get client() { return getClient(); }
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    const getStatus = vi.fn().mockResolvedValue({ data: "pending", error: null });
+    mockGetClient.mockReturnValue({
+      transaction: { getStatus },
+    } as unknown as ReturnType<typeof getClient>);
+
+    await act(async () => {
+      render(<TransactionStatusTracker hash="tx-est-4" pollIntervalMs={1000} />);
+    });
+    await flushAsyncUpdates();
+
+    expect(
+      screen.getByTestId("tracker-estimated-time-tx-est-4"),
+    ).toHaveTextContent("Estimated time: ~45 seconds");
   });
 });

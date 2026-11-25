@@ -6,6 +6,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { FeeEstimator } from "@/components/FeeEstimator";
 import { GasOptimizer } from "@/components/GasOptimizer";
 import { MultiSigTransactionBuilder } from "@/components/MultiSigTransactionBuilder";
+import { TaxReportExport } from "@/components/TaxReportExport";
 import { TransactionHistory } from "@/components/TransactionHistory";
 import { TransactionPanel } from "@/components/TransactionPanel";
 import { Button } from "@/components/ui/Button";
@@ -275,6 +276,8 @@ export function TransactionsScreen() {
           </Button>
         </div>
       </div>
+
+      <TaxReportExport />
 
       <ErrorBoundary isolate>
         <TransactionHistory startDate={startDate} endDate={endDate} />

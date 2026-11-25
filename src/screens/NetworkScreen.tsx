@@ -2,6 +2,7 @@ import { Loading01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
+import { RateLimitSettings } from "@/components/RateLimitIndicator";
 import { Badge } from "@/components/ui/Badge";
 import { InfoCell } from "@/components/ui/InfoCell";
 import { useSorokit } from "@/context/useSorokit";
@@ -95,6 +96,7 @@ export function NetworkScreen() {
 
   return (
     <div className="flex flex-col gap-5">
+      <RateLimitSettings />
       {network && (
         <div className="rounded-xl border border-line bg-surface overflow-hidden">
           <div className="px-6 py-4 border-b border-line">

@@ -174,8 +174,8 @@ describe("ErrorBoundary", () => {
     expect(onErrorSpy).toHaveBeenCalled();
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
     const errorArg = onErrorSpy.mock.calls[0][0];
     const infoArg = onErrorSpy.mock.calls[0][1];
@@ -197,8 +197,8 @@ describe("ErrorBoundary", () => {
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
   });
 
@@ -215,27 +215,44 @@ describe("ErrorBoundary", () => {
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
     expect(onErrorSpy).toHaveBeenCalled();
   });
 
-  it("calls console.error in development mode by default", () => {
+  it("logs the original error, its cause, and the failing component in development", () => {
     vi.stubEnv("DEV", true);
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cause = new Error("Original failure");
+    let originalError: Error | undefined;
+
+    function NestedFailure(): never {
+      originalError = new Error("Nested failure", { cause });
+      throw originalError;
+    }
 
     render(
       <ErrorBoundary>
-        <ThrowingComponent shouldThrow={true} />
+        <div>
+          <NestedFailure />
+        </div>
       </ErrorBoundary>
     );
 
-    expect(consoleSpy).toHaveBeenCalled();
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+    const log = consoleSpy.mock.calls.find(
+      ([message]) => message === "[sorokit-ui] Uncaught error:",
+    );
+    expect(log).toBeDefined();
+    expect(log?.[1]).toBe(originalError);
+    expect(log?.[1]).toHaveProperty("cause", cause);
+    expect(log?.[1]).toHaveProperty(
+      "stack",
+      expect.stringContaining("NestedFailure"),
+    );
+    expect(log?.[2]).toHaveProperty(
+      "componentStack",
+      expect.stringContaining("NestedFailure"),
     );
   });
 

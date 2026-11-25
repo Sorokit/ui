@@ -21,9 +21,11 @@ export const SCREEN_LABELS: Record<NavSection, { title: string; sub: string }> =
     nfts: { title: "NFT Gallery", sub: "Browse and manage your NFT collection" },
     recovery: { title: "Account Recovery", sub: "Recover your wallet access" },
     charts: { title: "Analytics & Charts", sub: "Market and balance analytics" },
+    portfolio: { title: "Portfolio Analytics", sub: "Allocation and performance" },
     farming: { title: "Yield Farming", sub: "Manage liquidity and rewards" },
     budget: { title: "Budgeting", sub: "Track spending and budget limits" },
     governance: { title: "Governance", sub: "Vote on proposals and delegate" },
+    settings: { title: "Settings", sub: "Preferences and help" },
   };
 
 /**
@@ -39,10 +41,12 @@ export const PAGE_TITLES: Record<NavSection, string> = {
   network: pageTitle(SCREEN_LABELS.network.title),
   recovery: pageTitle(SCREEN_LABELS.recovery.title),
   charts: pageTitle(SCREEN_LABELS.charts.title),
+  portfolio: pageTitle(SCREEN_LABELS.portfolio.title),
   farming: pageTitle(SCREEN_LABELS.farming.title),
   budget: pageTitle(SCREEN_LABELS.budget.title),
   nfts: pageTitle(SCREEN_LABELS.nfts.title),
   governance: pageTitle(SCREEN_LABELS.governance.title),
+  settings: pageTitle(SCREEN_LABELS.settings.title),
 };
 
 /**

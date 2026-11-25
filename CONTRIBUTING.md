@@ -80,6 +80,57 @@ describe('MyComponent', () => {
 });
 ```
 
+### Testing Error States and Recovery (#1086)
+
+Always test error states and recovery paths in your tests. This ensures the UI gracefully handles failures:
+
+```typescript
+describe('MyComponent Error Handling', () => {
+  it('displays error message when API call fails', async () => {
+    const failingClient = {
+      account: {
+        getAccount: vi.fn().mockResolvedValue({
+          data: null,
+          error: 'Failed to fetch account'
+        })
+      }
+    };
+
+    renderWithProvider(<MyComponent />, { client: failingClient });
+    
+    await waitFor(() => {
+      expect(screen.getByText(/failed to fetch/i)).toBeInTheDocument();
+    });
+  });
+
+  it('allows retry after a failed operation', async () => {
+    const flakeyClient = {
+      account: {
+        getAccount: vi
+          .fn()
+          .mockResolvedValueOnce({ data: null, error: 'Network error' })
+          .mockResolvedValueOnce({ data: { sequence: '123' }, error: null })
+      }
+    };
+
+    renderWithProvider(<MyComponent />, { client: flakeyClient });
+    
+    // First attempt fails
+    await waitFor(() => {
+      expect(screen.getByText(/network error/i)).toBeInTheDocument();
+    });
+
+    // User clicks retry
+    fireEvent.click(screen.getByRole('button', { name: /retry/i }));
+
+    // Second attempt succeeds
+    await waitFor(() => {
+      expect(screen.getByText('123')).toBeInTheDocument();
+    });
+  });
+});
+```
+
 ### Mocking getClient()
 
 Mock the Sorokit client for isolated component tests:
@@ -168,6 +219,106 @@ dependencies in `devDependencies` where possible and lazy-loading heavy assets.
 - CI checks must pass (lint, typecheck, build, bundle size, exports, tests)
 - New components must include JSDoc comments
 - Breaking changes need documentation updates
+
+## State Management Best Practices (#1084)
+
+### Handling Loading, Error, and Success States
+
+When components fetch data or perform async operations, always handle three states:
+
+```typescript
+export function MyComponent() {
+  const { isLoading, error, data } = useSomeData();
+
+  if (isLoading) {
+    return <Skeleton className="h-6 w-24" />;
+  }
+
+  if (error) {
+    return (
+      <div role="alert" className="text-red-600">
+        <p>Failed to load data: {error}</p>
+        <button onClick={() => refetch()}>Try again</button>
+      </div>
+    );
+  }
+
+  if (!data) {
+    return <p>No data available</p>;
+  }
+
+  return <div>{/* render data */}</div>;
+}
+```
+
+### Error Boundary Pattern
+
+Always wrap context-dependent components with error boundaries to prevent full app crashes:
+
+```typescript
+<ErrorBoundary fallback={<ErrorScreen />}>
+  <MyComponent />
+</ErrorBoundary>
+```
+
+### Empty States
+
+Handle empty states separately from error states:
+
+```typescript
+if (isLoading) return <Skeleton />;
+if (error) return <ErrorMessage error={error} />;
+if (!data || data.length === 0) {
+  return <EmptyState message="No items found" />;
+}
+return <ItemList items={data} />;
+```
+
+### Null Safety
+
+Use optional chaining and nullish coalescing to prevent undefined errors:
+
+```typescript
+// Good
+const balance = account?.balances?.[0]?.amount ?? '0';
+
+// Avoid
+const balance = account.balances[0].amount; // Crashes if account or balances is null
+```
+
+### Conditional Rendering
+
+Always verify data exists before rendering:
+
+```typescript
+// Good
+{account && <AccountInfo account={account} />}
+
+// Avoid
+<AccountInfo account={account} /> {/* Crashes if account is null */}
+```
+
+## Async Race Conditions and State Management
+
+When working with asynchronous operations (network calls, timers), be aware of potential race conditions:
+
+- **Issue #1087**: Use `AbortController` to cancel in-flight requests when components unmount or state changes
+- Always clean up timers and listeners in component cleanup functions
+- Test rapid state changes to catch race conditions early
+
+### Common Race Condition Scenarios
+
+1. **Network request arrives after unmount**: Component fetches data on mount, but unmounts before the response arrives. The component tries to update state, causing a memory leak warning.
+   
+   **Solution**: Cancel the request or check if component is still mounted before updating state.
+
+2. **Multiple rapid state updates**: User triggers multiple updates in quick succession (e.g., rapid network switches), causing inconsistent state.
+   
+   **Solution**: Use debouncing or ensure state transitions are atomic.
+
+3. **Stale closures in event handlers**: Event handlers capture state from an earlier render, leading to stale data being used.
+   
+   **Solution**: Use `useCallback` with proper dependency arrays, or access current state from refs when necessary.
 
 ## Questions?
 

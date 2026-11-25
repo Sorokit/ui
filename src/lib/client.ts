@@ -300,6 +300,14 @@ export type Transaction = {
   operationType?: string;
   type?: string;
   contractId?: string;
+  /** Recipient of a payment, when the backend reports one (searchable, #1159). */
+  destination?: string;
+  /** Sender of a payment, when the backend reports one. */
+  source?: string;
+  /** Payment amount as a decimal string, when the backend reports one. */
+  amount?: string;
+  /** Asset code of the payment, when the backend reports one. */
+  asset?: string;
 };
 
 export type ClaimableBalance = {

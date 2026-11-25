@@ -12,6 +12,7 @@ import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { RateLimitIndicator } from "@/components/RateLimitIndicator";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { PAGE_TITLES } from "@/lib/nav-labels";
@@ -32,8 +33,18 @@ const NetworkScreen = lazy(() =>
 const NFTScreen = lazy(() =>
   import("@/screens/NFTScreen").then((m) => ({ default: m.NFTScreen })),
 );
+const PortfolioAnalyticsScreen = lazy(() =>
+  import("@/screens/PortfolioAnalyticsScreen").then((m) => ({
+    default: m.PortfolioAnalyticsScreen,
+  })),
+);
 const RecoveryScreen = lazy(() =>
   import("@/screens/RecoveryScreen").then((m) => ({ default: m.RecoveryScreen })),
+);
+const SettingsScreen = lazy(() =>
+  import("@/screens/SettingsScreen").then((m) => ({
+    default: m.SettingsScreen,
+  })),
 );
 const SorobanScreen = lazy(() =>
   import("@/screens/SorobanScreen").then((m) => ({ default: m.SorobanScreen })),
@@ -57,10 +68,12 @@ const SCREENS: Record<NavSection, ComponentType> = {
   network: NetworkScreen,
   recovery: RecoveryScreen,
   charts: ChartingScreen,
+  portfolio: PortfolioAnalyticsScreen,
   farming: YieldFarmingScreen,
   budget: BudgetScreen,
   nfts: NFTScreen,
   governance: GovernanceDashboard,
+  settings: SettingsScreen,
 };
 
 const SCREEN_LABELS: Record<NavSection, string> = {
@@ -71,10 +84,12 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   network: "Network",
   recovery: "Recovery",
   charts: "Charts",
+  portfolio: "Portfolio Analytics",
   farming: "Yield Farming",
   budget: "Budget",
   nfts: "NFTs",
   governance: "Governance",
+  settings: "Settings",
 };
 
 /**
@@ -209,6 +224,7 @@ export function Dashboard({
           onNavigate={handleNavigate}
         />
         <NetworkBanner active={active} />
+        <RateLimitIndicator />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div
             className="mx-auto px-6 py-8 sm:px-10 sm:py-10 min-h-[300px]"

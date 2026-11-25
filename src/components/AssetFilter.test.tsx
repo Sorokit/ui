@@ -150,6 +150,30 @@ describe("AssetFilter", () => {
     expect(screen.getByText(/no assets/i)).toBeInTheDocument();
   });
 
+  it("clears every selected asset, including rows hidden by a filter", () => {
+    const { container } = renderComponent();
+    const clearAll = screen.getByRole("button", { name: "Clear All" });
+    expect(clearAll).toBeDisabled();
+
+    const rows = container.querySelectorAll("[data-asset-row]");
+    expect(rows).toHaveLength(mockAssets.length);
+    rows.forEach((row) => {
+      fireEvent.click(row);
+      expect(row).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(clearAll).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Verified", exact: true }));
+    expect(container.querySelectorAll("[data-asset-row]")).toHaveLength(2);
+    fireEvent.click(clearAll);
+    expect(clearAll).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    container.querySelectorAll("[data-asset-row]").forEach((row) => {
+      expect(row).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
   it("calls onAssetSelect when clicking an asset", () => {
     const onSelect = vi.fn();
     renderComponent({ onAssetSelect: onSelect });

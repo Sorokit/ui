@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import { logAuditEvent } from "@/lib/audit-log";
 import { type NetworkInfo, type TxResult } from "@/lib/client";
 import {
   cn,
@@ -425,6 +426,10 @@ export function TransactionPanel({
           );
         } else {
           successfulCount++;
+          logAuditEvent(
+            "send",
+            `${row.amount.trim()} ${row.asset} to ${row.destination.trim()}`,
+          );
           setMultiRows((prev) =>
             prev.map((r) =>
               r.id === row.id
@@ -514,6 +519,10 @@ export function TransactionPanel({
       }
       setResult(data);
       setState("success");
+      logAuditEvent(
+        "send",
+        `${amount.trim()} ${selectedAsset} to ${dest.trim()}`,
+      );
       onSuccess?.(data!);
       setDest("");
       setAmount("");
@@ -651,6 +660,12 @@ export function TransactionPanel({
         });
         setScheduledTxs(updated);
         saveScheduledTransactions(updated);
+        if (!err) {
+          logAuditEvent(
+            "send",
+            `${target.amount} ${target.asset} to ${target.destination}`,
+          );
+        }
         if (typeof window !== "undefined") {
           window.dispatchEvent(new CustomEvent("sorokit:scheduled-tx-updated"));
         }

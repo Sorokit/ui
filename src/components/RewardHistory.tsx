@@ -50,6 +50,10 @@ export interface RewardHistoryProps {
 const CHART_WIDTH = 560;
 const CHART_HEIGHT = 80;
 const BAR_GAP = 2;
+const MS_PER_DAY = 86_400_000;
+const relativeDayFormatter = new Intl.RelativeTimeFormat("en", {
+  numeric: "auto",
+});
 
 function RewardBarChart({ data }: { data: DailyReward[] }) {
   if (data.length === 0) {
@@ -60,6 +64,7 @@ function RewardBarChart({ data }: { data: DailyReward[] }) {
     );
   }
 
+  const today = Date.parse(new Date().toISOString().slice(0, 10));
   const maxVal = Math.max(...data.map((d) => d.totalXlm), 0.001);
   const barW = Math.max(
     1,
@@ -76,6 +81,10 @@ function RewardBarChart({ data }: { data: DailyReward[] }) {
     >
       <title>Reward history — last {REWARD_HISTORY_DAYS} days</title>
       {data.map((day, i) => {
+        const dayOffset = (Date.parse(day.date) - today) / MS_PER_DAY;
+        const dateLabel = Number.isFinite(dayOffset)
+          ? `${day.date} (${relativeDayFormatter.format(dayOffset, "day")})`
+          : day.date;
         const barHeight = Math.max(2, (day.totalXlm / maxVal) * CHART_HEIGHT);
         const x = i * (barW + BAR_GAP);
         const y = CHART_HEIGHT - barHeight;
@@ -90,7 +99,7 @@ function RewardBarChart({ data }: { data: DailyReward[] }) {
               className="fill-brand opacity-70 hover:opacity-100 transition-opacity"
             />
             <title>
-              {day.date}: {day.totalXlm.toFixed(4)} XLM
+              {dateLabel}: {day.totalXlm.toFixed(4)} XLM
             </title>
           </g>
         );
@@ -192,6 +201,7 @@ function downloadRewardCsv(
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+/** Displays daily staking rewards and a filterable, exportable reward history. */
 export function RewardHistory({
   dailyRewards,
   events,

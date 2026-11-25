@@ -38,6 +38,12 @@ export interface SorokitState {
   balances: Balance[];
   isLoadingAccount: boolean;
   refreshAccount: () => Promise<void>;
+  /** True while the browser has no connectivity (#1163). */
+  isOffline?: boolean;
+  /** True when `account` / `balances` came from the offline cache (#1163). */
+  isCached?: boolean;
+  /** Epoch ms of the last successful sync of the data on screen (#1163). */
+  lastSyncedAt?: number | null;
   network: NetworkInfo | null;
   /**
    * The network the client was initialised with, captured on mount before any

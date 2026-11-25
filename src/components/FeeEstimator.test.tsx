@@ -266,7 +266,44 @@ describe("FeeEstimator", { timeout: 15000 }, () => {
       vi.useRealTimers();
     });
 
-    it("pauses polling while hidden and resumes when visible again (#533)", async () => {
+    it("handles changing fee values on successive polling ticks", async () => {
+    vi.useFakeTimers();
+    const estimateFee = vi.fn()
+      .mockResolvedValueOnce({ data: { baseFee: "100", recommended: "500" }, error: null })
+      .mockResolvedValueOnce({ data: { baseFee: "200", recommended: "600" }, error: null })
+      .mockResolvedValueOnce({ data: { baseFee: "300", recommended: "900" }, error: null });
+    vi.mocked(getClient).mockReturnValue({
+      transaction: { estimateFee },
+    } as unknown as SorokitClient);
+
+    render(<FeeEstimator refreshInterval={1000} />);
+
+    // Let initial mount fetch trigger and resolve
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(1);
+
+    // First interval tick - fee changes
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("200")).toBeInTheDocument();
+    expect(screen.queryByText("500")).not.toBeInTheDocument();
+
+    // Second interval tick - fee changes again
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("300")).toBeInTheDocument();
+    expect(screen.queryByText("600")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it("pauses polling while hidden and resumes when visible again (#533)", async () => {
       vi.useFakeTimers();
       const estimateFee = vi.fn().mockResolvedValue({
         data: { baseFee: "100", recommended: "500" },

@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { RecoveryGuide } from "@/components/RecoveryGuide";
 import { SeedPhraseInput } from "@/components/SeedPhraseInput";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -101,6 +102,8 @@ export function RecoveryScreen() {
         <h2 className="text-2xl font-bold text-ink">Account Recovery Assistant</h2>
         <p className="text-[13px] text-ink-3">Configure secure, multi-signature account recovery to protect your Stellar assets.</p>
       </div>
+
+      <RecoveryGuide />
 
       {/* Security Audit & Recommendations */}
       <Card className="border-line bg-surface">

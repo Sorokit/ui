@@ -36,6 +36,7 @@ interface State {
   copied: boolean;
 }
 
+/** Catches descendant render errors and displays a recoverable fallback. */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = {
     error: null,
@@ -63,7 +64,7 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     if (import.meta.env.DEV) {
-      console.error("[sorokit-ui] Uncaught error:", error, info.componentStack);
+      console.error("[sorokit-ui] Uncaught error:", error, info);
     }
   }
 
