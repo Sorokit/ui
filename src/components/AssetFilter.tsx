@@ -87,6 +87,44 @@ function getAssetName(asset: AssetItem): string {
   return asset.displayName ?? asset.assetCode ?? asset.asset;
 }
 
+function HighlightedText({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{text}</>;
+
+  const lowerText = text.toLocaleLowerCase();
+  const lowerQuery = trimmedQuery.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerQuery);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(text.slice(cursor, matchIndex));
+    }
+    const matchEnd = matchIndex + trimmedQuery.length;
+    parts.push(
+      <mark
+        key={`${matchIndex}-${matchEnd}`}
+        data-testid="asset-filter-highlight"
+        className="rounded-sm bg-[rgba(249,115,22,0.22)] text-inherit"
+      >
+        {text.slice(matchIndex, matchEnd)}
+      </mark>,
+    );
+    cursor = matchEnd;
+    matchIndex = lowerText.indexOf(lowerQuery, cursor);
+  }
+
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
 function parseBalance(balance: string): number {
   return Number.parseFloat(balance) || 0;
 }
@@ -183,6 +221,7 @@ interface DefaultAssetRowProps {
   onSelect?: (asset: AssetItem) => void;
   isFocused: boolean;
   isSelected: boolean;
+  highlightQuery: string;
 }
 
 function DefaultAssetRow({
@@ -192,6 +231,7 @@ function DefaultAssetRow({
   onSelect,
   isFocused,
   isSelected,
+  highlightQuery,
 }: DefaultAssetRowProps) {
   const code = getAssetCode(asset);
   const name = getAssetName(asset);
@@ -244,15 +284,20 @@ function DefaultAssetRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2.5">
           <span className="truncate text-[13px] font-medium text-ink">
-            {code}
+            <HighlightedText text={code} query={highlightQuery} />
           </span>
           {name !== code && (
-            <span className="truncate text-[11px] text-ink-4">{name}</span>
+            <span className="truncate text-[11px] text-ink-4">
+              <HighlightedText text={name} query={highlightQuery} />
+            </span>
           )}
         </div>
         {asset.assetIssuer && (
           <div className="truncate text-[11px] text-ink-4">
-            {asset.assetIssuer.slice(0, 8)}…
+            <HighlightedText
+              text={`${asset.assetIssuer.slice(0, 8)}…`}
+              query={highlightQuery}
+            />
           </div>
         )}
       </div>
@@ -874,6 +919,7 @@ function AssetFilter({
                 onSelect={toggleSelection}
                 isSelected={selectedKeys.has(getAssetKey(asset))}
                 isFocused={index === effectiveFocusedIndex}
+                highlightQuery={deferredSearch}
               />
             ),
           )
