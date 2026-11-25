@@ -182,6 +182,7 @@ interface DefaultAssetRowProps {
   onFavoriteToggle: (asset: AssetItem) => void;
   onSelect?: (asset: AssetItem) => void;
   isFocused: boolean;
+  isSelected: boolean;
 }
 
 function DefaultAssetRow({
@@ -190,6 +191,7 @@ function DefaultAssetRow({
   onFavoriteToggle,
   onSelect,
   isFocused,
+  isSelected,
 }: DefaultAssetRowProps) {
   const code = getAssetCode(asset);
   const name = getAssetName(asset);
@@ -200,13 +202,14 @@ function DefaultAssetRow({
     <div
       role="button"
       tabIndex={0}
+      aria-pressed={isSelected}
       className={cn(
         "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors cursor-pointer",
         isFocused ? "bg-surface-2" : "hover:bg-surface-2",
       )}
       onClick={() => onSelect?.(asset)}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           onSelect?.(asset);
         }
@@ -258,6 +261,7 @@ function DefaultAssetRow({
         <span className="text-[13px] font-medium text-ink">
           {balance.toLocaleString(undefined, { maximumFractionDigits: 7 })}
         </span>
+        {isSelected && <HugeiconsIcon icon={Tick01Icon} size={14} className="text-brand" />}
         {asset.isVerified && (
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-green-500/10 text-[10px] text-green-500">
             ✓
@@ -328,11 +332,17 @@ interface AssetFilterProps {
   countLabel?: (filtered: number, total: number) => string;
   showNetworkFilter?: boolean;
   allowCustomAssets?: boolean;
-  renderRow?: (asset: AssetItem, isFavorite: boolean) => ReactNode;
+  /** Custom rows can use the supplied selection state and toggle handler. */
+  renderRow?: (
+    asset: AssetItem,
+    isFavorite: boolean,
+    selection: { isSelected: boolean; toggle: () => void },
+  ) => ReactNode;
   /** Called whenever a filter changes (or is cleared) so the parent can reset its page index. */
   onPageReset?: () => void;
 }
 
+/** Filters assets and lets users toggle or clear selections. */
 function AssetFilter({
   assets,
   onAssetSelect: onSelect,
@@ -344,6 +354,7 @@ function AssetFilter({
   onPageReset,
 }: AssetFilterProps) {
   // ── State ──────────────────────────────────────────────────────────────────
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
@@ -390,6 +401,8 @@ function AssetFilter({
     () => [...assets, ...customAssets],
     [assets, customAssets],
   );
+
+  const hasSelection = selectedKeys.size > 0 && allAssets.some((asset) => selectedKeys.has(getAssetKey(asset)));
 
   // ── Favorite check helper ──────────────────────────────────────────────────
   const isFav = useCallback(
@@ -503,6 +516,17 @@ function AssetFilter({
       ? -1
       : Math.max(-1, Math.min(focusedIndex, filtered.length - 1));
 
+  const toggleSelection = useCallback((asset: AssetItem) => {
+    const key = getAssetKey(asset);
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    onSelect?.(asset);
+  }, [onSelect]);
+
   // ── Keyboard navigation ────────────────────────────────────────────────────
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -549,7 +573,7 @@ function AssetFilter({
         case "Enter":
           if (effectiveFocusedIndex >= 0 && effectiveFocusedIndex < filtered.length) {
             e.preventDefault();
-            onSelect?.(filtered[effectiveFocusedIndex]);
+            toggleSelection(filtered[effectiveFocusedIndex]);
           }
           break;
         case "Escape":
@@ -559,7 +583,7 @@ function AssetFilter({
           break;
       }
     },
-    [filtered, effectiveFocusedIndex, onSelect],
+    [filtered, effectiveFocusedIndex, toggleSelection],
   );
 
   // Issue #664: move focus into the sort popover and trap Tab / Escape inside it.
@@ -655,7 +679,7 @@ function AssetFilter({
       </div>
 
       {/* ── Verified filter tabs + favorites toggle ───────────────────────── */}
-      <div className="flex items-center gap-2 px-4 pb-2">
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
@@ -695,6 +719,14 @@ function AssetFilter({
               icon={showFavoritesOnly ? StarFillIcon : StarIcon}
               size={14}
             />
+          </button>
+          <button
+            type="button"
+            disabled={!hasSelection}
+            onClick={() => setSelectedKeys(new Set())}
+            className="rounded-full px-2.5 py-1 text-[11px] font-medium text-brand disabled:text-ink-4"
+          >
+            Clear All
           </button>
           {hasActiveFilters && (
             <button
@@ -827,14 +859,20 @@ function AssetFilter({
         ) : (
           filtered.map((asset, index) =>
             renderRow ? (
-              <div key={getAssetKey(asset)}>{renderRow(asset, isFav(asset))}</div>
+              <div key={getAssetKey(asset)}>
+                {renderRow(asset, isFav(asset), {
+                  isSelected: selectedKeys.has(getAssetKey(asset)),
+                  toggle: () => toggleSelection(asset),
+                })}
+              </div>
             ) : (
               <DefaultAssetRow
                 key={getAssetKey(asset)}
                 asset={asset}
                 isFavorite={isFav(asset)}
                 onFavoriteToggle={toggleFavorite}
-                onSelect={onSelect}
+                onSelect={toggleSelection}
+                isSelected={selectedKeys.has(getAssetKey(asset))}
                 isFocused={index === effectiveFocusedIndex}
               />
             ),

@@ -7,6 +7,7 @@ import {
   Globe02Icon,
   Legal01Icon,
   Plant01Icon,
+  Setting06Icon,
   Shield02Icon,
   User02Icon,
   Wallet01Icon,
@@ -34,7 +35,8 @@ export type NavSection =
   | "farming"
   | "budget"
   | "nfts"
-  | "governance";
+  | "governance"
+  | "settings";
 
 export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "wallet", label: "Wallet", icon: Wallet01Icon },
@@ -53,6 +55,7 @@ export const NAV: { id: NavSection; label: string; icon: IconSvgElement }[] = [
   { id: "budget", label: "Budget Manager", icon: Wallet03Icon },
   { id: "nfts", label: "NFTs", icon: Blockchain01Icon },
   { id: "governance", label: "Governance", icon: Legal01Icon },
+  { id: "settings", label: "Settings", icon: Setting06Icon },
 ];
 
 export function isItemActive(itemId: string, active: string): boolean {
@@ -141,6 +144,58 @@ export function Sidebar({ active, onNavigate, open, onClose }: SidebarProps) {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
+      }
+
+      if (e.key === "ArrowDown") {
+        if (!sidebarRef.current) return;
+        const focusableElements =
+          sidebarRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (document.activeElement === lastElement) {
+          firstElement.focus();
+        } else if (document.activeElement === firstElement) {
+          lastElement.focus();
+        } else {
+          const currentIndex = Array.from(focusableElements).indexOf(
+            document.activeElement as HTMLElement,
+          );
+          if (currentIndex >= 0 && currentIndex < focusableElements.length - 1) {
+            focusableElements[currentIndex + 1].focus();
+          }
+        }
+        e.preventDefault();
+      }
+
+      if (e.key === "ArrowUp") {
+        if (!sidebarRef.current) return;
+        const focusableElements =
+          sidebarRef.current.querySelectorAll<HTMLElement>(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+          );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (document.activeElement === firstElement) {
+          lastElement.focus();
+        } else if (document.activeElement === lastElement) {
+          firstElement.focus();
+        } else {
+          const currentIndex = Array.from(focusableElements).indexOf(
+            document.activeElement as HTMLElement,
+          );
+          if (currentIndex > 0 && currentIndex <= focusableElements.length - 1) {
+            focusableElements[currentIndex - 1].focus();
+          }
+        }
+        e.preventDefault();
       }
 
       if (e.key === "Tab") {

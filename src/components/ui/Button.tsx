@@ -83,6 +83,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       onKeyDown,
       onKeyDownCapture,
       "aria-disabled": ariaDisabled,
+      "aria-label": ariaLabel,
+      "aria-busy": ariaBusyProp,
       ...props
     },
     ref,
@@ -93,6 +95,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const [armed, setArmed] = useState(false);
     const isInert = !!disabled || !!loading;
     const isAriaDisabled = ariaDisabled === true || ariaDisabled === "true";
+    const computedAriaBusy = loading !== undefined ? loading : ariaBusyProp;
+    const computedAriaLabel = ariaLabel ?? (loading ? "Loading" : undefined);
 
     // Runs in the capture phase, before any onClick — including one that a
     // slotted `asChild` child carries itself, which Slot would otherwise invoke
@@ -219,7 +223,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           target="_blank"
           rel="noopener noreferrer"
           aria-disabled={isInert || ariaDisabled || undefined}
-          aria-busy={loading || undefined}
+          aria-busy={computedAriaBusy}
+          aria-label={computedAriaLabel}
           className={classes}
           onClickCapture={handleClickCapture as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onClick={handleClick as unknown as React.MouseEventHandler<HTMLAnchorElement>}
@@ -241,7 +246,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         aria-disabled={
           loading || (asChild && isInert) || ariaDisabled || undefined
         }
-        aria-busy={loading || undefined}
+        aria-busy={computedAriaBusy}
+        aria-label={computedAriaLabel}
         className={classes}
         onClickCapture={handleClickCapture}
         onClick={handleClick}

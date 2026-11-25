@@ -56,7 +56,16 @@ export { ErrorBoundary } from "./ErrorBoundary";
 export { AccountCard, AccountCardCompact } from "./AccountCard";
 export type { AccountSidebarProps } from "./AccountSidebar";
 export { AccountSidebar } from "./AccountSidebar";
+export {
+  AccountSummaryCard,
+  computeAccountHealth,
+} from "./AccountSummaryCard";
 export { BalanceList } from "./BalanceList";
+export { KeystoreBackup } from "./KeystoreBackup";
+export type { OfflineBadgeProps } from "./OfflineBadge";
+export { OfflineBadge } from "./OfflineBadge";
+export type { RateLimitIndicatorProps } from "./RateLimitIndicator";
+export { RateLimitIndicator, RateLimitSettings } from "./RateLimitIndicator";
 export { WalletConnectButton } from "./WalletConnectButton";
 export type { WalletConnectModalProps, WalletOption } from "./WalletConnectModal";
 export {

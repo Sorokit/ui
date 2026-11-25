@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { PerformanceMonitor, Profiled } from './components/PerformanceMonitor'
 import type { SorokitClient } from './lib/client'
 import { createMockClient } from './lib/mock-client'
+import { trackClientCalls } from './lib/rate-limit'
 import { initPerformanceMonitoring } from './lib/performance'
 
 // Collect load/Web Vitals metrics and log them to the console in dev mode.
@@ -17,7 +18,7 @@ if (import.meta.env.DEV) {
 
 const createClient = (): SorokitClient => {
   try {
-    return createMockClient() as SorokitClient
+    return trackClientCalls(createMockClient() as SorokitClient)
   } catch (err) {
     document.getElementById('root')!.innerHTML = '<div>Failed to initialize Sorokit: ' +(err instanceof Error ? err.message : String(err)) + '</div>'
     throw err
