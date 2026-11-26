@@ -7,6 +7,12 @@ import { getClient } from "@/lib/client";
 
 import { TransactionPanel } from "./TransactionPanel";
 
+const toastMock = vi.hoisted(() => ({ success: vi.fn() }));
+
+vi.mock("@/context/ToastContext", () => ({
+  useOptionalToast: () => toastMock,
+}));
+
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
@@ -137,6 +143,27 @@ describe("TransactionPanel", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mockSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Destination Address")).toHaveValue(VALID_DEST);
+  });
+
+  it("shows a success toast with the transaction hash after submit (#1060)", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({ data: { hash: "toasthash1", ledger: 7 }, error: null }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+    await reviewAndConfirm();
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith(
+        "Transaction sent",
+        expect.objectContaining({
+          message: expect.stringContaining("toasthash1"),
+          duration: 5000,
+        }),
+      );
+    });
   });
 
   it("handles loading, success, and error states", async () => {
