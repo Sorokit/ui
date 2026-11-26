@@ -659,3 +659,37 @@ describe("constants", () => {
     expect(DEFAULT_SWAP_FEE_PCT).toBe(0.3);
   });
 });
+
+// ─── computeAllocationDiffs — single asset portfolio (#1069) ─────────────────
+
+describe("computeAllocationDiffs — single asset portfolio (#1069)", () => {
+  it("returns one zero-change diff when the only asset already matches its target", () => {
+    const single = [makeAsset("XLM", "1000", 100)];
+    const diffs = computeAllocationDiffs(single, { XLM: 100 }, 1000);
+
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0]).toMatchObject({
+      assetCode: "XLM",
+      currentPct: 100,
+      targetPct: 100,
+      diffPct: 0,
+      diffUsd: 0,
+    });
+  });
+
+  it("produces no swap suggestions because nothing needs to move", () => {
+    const single = [makeAsset("XLM", "1000", 100)];
+    const diffs = computeAllocationDiffs(single, { XLM: 100 }, 1000);
+
+    expect(generateSwapSuggestions(diffs, PRICES)).toEqual([]);
+  });
+
+  it("reports the full target as a buy when the lone asset is not in the target mix", () => {
+    const single = [makeAsset("XLM", "1000", 100)];
+    const diffs = computeAllocationDiffs(single, { USDC: 100 }, 1000);
+    const usdc = diffs.find((d) => d.assetCode === "USDC");
+
+    expect(usdc).toBeDefined();
+    expect(usdc!.diffPct).toBe(100);
+  });
+});

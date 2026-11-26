@@ -42,13 +42,21 @@ export interface KeystoreFile {
   ciphertext: string;
 }
 
+export type KeystoreErrorCode =
+  | "invalid-file"
+  | "wrong-password"
+  | "unsupported"
+  | "no-crypto";
+
 export class KeystoreError extends Error {
-  constructor(
-    message: string,
-    readonly code: "invalid-file" | "wrong-password" | "unsupported" | "no-crypto",
-  ) {
+  // Assigned in the constructor body rather than declared as a parameter
+  // property: `erasableSyntaxOnly` rejects that non-erasable syntax.
+  readonly code: KeystoreErrorCode;
+
+  constructor(message: string, code: KeystoreErrorCode) {
     super(message);
     this.name = "KeystoreError";
+    this.code = code;
   }
 }
 

@@ -39,6 +39,17 @@ function formatTxDate(iso: string): string {
   }).format(d);
 }
 
+/** The slice of the Sorokit client this widget reads, so the effect stays typed. */
+interface HistoryClient {
+  transaction?: {
+    getHistory?: (
+      address: string,
+      page: number,
+      limit: number,
+    ) => Promise<{ data?: Transaction[] }>;
+  };
+}
+
 export interface RecentTransactionsWidgetProps {
   /** Optional transaction array to display; if omitted, fetched via useSorokit */
   transactions?: Transaction[];
@@ -76,9 +87,9 @@ export function RecentTransactionsWidget({
       return;
     }
 
-    let client: any;
+    let client: HistoryClient;
     try {
-      client = sorokit.client;
+      client = sorokit.client as unknown as HistoryClient;
     } catch {
       return;
     }
@@ -91,7 +102,7 @@ export function RecentTransactionsWidget({
 
     client.transaction
       .getHistory(address, 1, limit)
-      .then((res: any) => {
+      .then((res) => {
         if (!active) return;
         setInternalTxs(res.data ?? []);
       })

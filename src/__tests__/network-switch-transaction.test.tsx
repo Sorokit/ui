@@ -249,3 +249,4 @@ describe("Network switching mid-transaction integration tests (#1166)", () => {
       expect(screen.getByRole("button", { name: "Connect" })).toBeInTheDocument();
     });
   });
+});

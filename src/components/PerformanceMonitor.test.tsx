@@ -1,13 +1,25 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { PerformanceMonitor, Profiled } from './PerformanceMonitor';
 
-// Mock the performance module
+// The metrics snapshot must keep a stable identity: useSyncExternalStore
+// re-renders whenever getMetrics returns a new array, so a fresh `[]` per call
+// loops forever.
+const h = vi.hoisted(() => {
+  const metrics: unknown[] = [];
+  return {
+    metrics,
+    getMetrics: vi.fn(() => metrics),
+    recordRender: vi.fn(),
+    subscribeMetrics: vi.fn(() => () => {}),
+  };
+});
+
 vi.mock('../lib/performance', () => ({
-  getMetrics: vi.fn(() => []),
-  recordRender: vi.fn(),
-  subscribeMetrics: vi.fn(() => () => {}),
-  type MetricRating: 'good' | 'needs-improvement' | 'poor',
+  getMetrics: h.getMetrics,
+  recordRender: h.recordRender,
+  subscribeMetrics: h.subscribeMetrics,
 }));
 
 describe('PerformanceMonitor', () => {
@@ -117,8 +129,8 @@ describe('PerformanceMonitor', () => {
       const monitor = screen.getByTestId('performance-monitor');
 
       const style = window.getComputedStyle(monitor);
-      // z-index should be high (99999)
-      expect(monitor).toBeInTheDocument();
+      // z-index should be high (99999) so the panel stays above app surfaces.
+      expect(Number(style.zIndex)).toBeGreaterThanOrEqual(99999);
     });
 
     it('has monospace font', () => {
@@ -169,7 +181,6 @@ describe('PerformanceMonitor', () => {
 });
 
 describe('Profiled component', () => {
-  const { recordRender } = await import('../lib/performance');
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -220,7 +231,7 @@ describe('Profiled component', () => {
 
       // recordRender should be called with the component id
       // Note: This test assumes DEV mode is enabled
-      expect(recordRender).toBeDefined();
+      expect(h.recordRender).toBeDefined();
     });
 
     it('passes id to Profiler', () => {
@@ -327,7 +338,7 @@ describe('Profiled component', () => {
     });
 
     it('handles rapid component mounting and unmounting', () => {
-      const { unmount, rerender } = render(
+      const { unmount } = render(
         <Profiled id="rapid">
           <div>Test</div>
         </Profiled>,

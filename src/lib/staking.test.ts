@@ -512,3 +512,27 @@ describe("computeUptimePct (#689)", () => {
     ).toBeNull();
   });
 });
+
+// ─── filterValidators — empty source list (#1070) ────────────────────────────
+
+describe("filterValidators — empty source list (#1070)", () => {
+  it("returns an empty array when there are no validators to filter", () => {
+    expect(filterValidators([], createDefaultFilter())).toEqual([]);
+  });
+
+  it("returns an empty array for an empty list even when filters are active", () => {
+    const filtered = filterValidators([], {
+      ...createDefaultFilter(),
+      query: "alpha",
+      minApy: 5,
+      minUptime: 99,
+    });
+    expect(filtered).toEqual([]);
+  });
+
+  it("does not throw or mutate a frozen empty list", () => {
+    const frozen = Object.freeze([]) as unknown as Parameters<typeof filterValidators>[0];
+    expect(() => filterValidators(frozen, createDefaultFilter())).not.toThrow();
+    expect(frozen).toHaveLength(0);
+  });
+});

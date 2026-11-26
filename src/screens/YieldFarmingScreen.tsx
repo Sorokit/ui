@@ -57,8 +57,12 @@ export function YieldFarmingScreen() {
 
   // Modals state
   const [selectedFarm, setSelectedFarm] = useState<FarmPosition | null>(null);
-  const [modalType, setModalType] = useState<"claim" | "remove" | null>(null);
+  const [modalType, setModalType] = useState<"claim" | "remove" | "stake" | null>(
+    null,
+  );
   const [slippage, setSlippage] = useState(0.5); // remove liquidity slippage %
+  const [stakeAmount, setStakeAmount] = useState("");
+  const [stakeError, setStakeError] = useState<string | null>(null);
 
   // Real-time updates every 5 seconds
   useEffect(() => {
@@ -97,6 +101,44 @@ export function YieldFarmingScreen() {
   const handleRemoveClick = (pos: FarmPosition) => {
     setSelectedFarm(pos);
     setModalType("remove");
+  };
+
+  const handleStakeClick = (pos: FarmPosition) => {
+    setSelectedFarm(pos);
+    setStakeAmount("");
+    setStakeError(null);
+    setModalType("stake");
+  };
+
+  const closeStake = () => {
+    setStakeAmount("");
+    setStakeError(null);
+    setModalType(null);
+  };
+
+  const confirmStake = () => {
+    if (!selectedFarm) return;
+
+    const amount = Number(stakeAmount);
+    if (!stakeAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
+      setStakeError("Enter a deposit amount greater than zero.");
+      return;
+    }
+
+    setPositions((prev) =>
+      prev.map((p) =>
+        p.id === selectedFarm.id
+          ? {
+              ...p,
+              usdValue: Number((p.usdValue + amount).toFixed(2)),
+              initialUsdValue: Number((p.initialUsdValue + amount).toFixed(2)),
+            }
+          : p,
+      ),
+    );
+    setStakeAmount("");
+    setStakeError(null);
+    setModalType(null);
   };
 
   // Perform calculations
@@ -239,13 +281,22 @@ export function YieldFarmingScreen() {
                 >
                   Remove Liquidity
                 </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => handleClaimClick(pos)}
-                >
-                  Claim Rewards
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleStakeClick(pos)}
+                  >
+                    Stake More
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => handleClaimClick(pos)}
+                  >
+                    Claim Rewards
+                  </Button>
+                </div>
               </CardFooter>
             </Card>
           );
@@ -302,6 +353,78 @@ export function YieldFarmingScreen() {
                 }}
               >
                 Confirm Claim
+              </Button>
+            </CardFooter>
+          </Card>
+        </div>
+      )}
+
+      {/* Stake Modal */}
+      {modalType === "stake" && selectedFarm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          data-testid="stake-modal"
+        >
+          <Card className="max-w-[400px] w-full bg-surface">
+            <CardHeader>
+              <CardTitle>Stake Into Pool</CardTitle>
+              <CardDescription>
+                Add capital to {selectedFarm.pool}. Rewards start accruing right
+                away.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <label
+                  htmlFor="stake-amount"
+                  className="text-[12px] font-medium text-ink-2"
+                >
+                  Deposit amount (USD)
+                </label>
+                <input
+                  id="stake-amount"
+                  data-testid="stake-input"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={stakeAmount}
+                  onChange={(e) => {
+                    setStakeAmount(e.target.value);
+                    setStakeError(null);
+                  }}
+                  className="w-full rounded border border-line bg-surface-2 px-3 py-2 text-[13px] text-ink"
+                  aria-invalid={stakeError ? true : undefined}
+                  aria-describedby={stakeError ? "stake-error" : undefined}
+                />
+                {stakeError && (
+                  <p
+                    id="stake-error"
+                    role="alert"
+                    data-testid="stake-error"
+                    className="text-[11px] text-red"
+                  >
+                    {stakeError}
+                  </p>
+                )}
+              </div>
+              <div className="p-3 bg-surface-2 rounded border border-line text-[11px] text-ink-2">
+                <p>
+                  Current value: ${selectedFarm.usdValue.toFixed(2)}
+                </p>
+                <p className="text-ink-3">
+                  New value: $
+                  {(selectedFarm.usdValue + (Number(stakeAmount) || 0)).toFixed(
+                    2,
+                  )}
+                </p>
+              </div>
+            </CardContent>
+            <CardFooter className="flex justify-between">
+              <Button variant="secondary" size="sm" onClick={closeStake}>
+                Cancel
+              </Button>
+              <Button variant="primary" size="sm" onClick={confirmStake}>
+                Confirm Stake
               </Button>
             </CardFooter>
           </Card>

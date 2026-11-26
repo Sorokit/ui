@@ -177,6 +177,8 @@ export function WalletConnectModal({
     clearError();
   }, [open, clearError]);
 
+  // Extension detection runs when the modal opens (not during render), so a
+  // wallet that injects itself after the React tree mounted is still picked up.
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     let active = true;
@@ -200,7 +202,9 @@ export function WalletConnectModal({
       setIsMobile(isMobileEnvironment());
     };
 
-    refresh();
+    // Deferred so the effect body never sets state synchronously; extensions
+    // that inject shortly after open are caught by the events and the poll.
+    const initialId = window.setTimeout(refresh, 0);
     window.addEventListener("stellar#initialized", refresh);
     window.addEventListener("stellar:initialized", refresh);
     const pollId = window.setInterval(refresh, 200);
@@ -208,6 +212,7 @@ export function WalletConnectModal({
 
     return () => {
       active = false;
+      window.clearTimeout(initialId);
       window.removeEventListener("stellar#initialized", refresh);
       window.removeEventListener("stellar:initialized", refresh);
       window.clearInterval(pollId);

@@ -254,7 +254,7 @@ describe("WalletConnectModal", () => {
       }
     });
 
-    it("re-checks installed extensions every time the modal opens", () => {
+    it("re-checks installed extensions every time the modal opens", async () => {
       vi.mocked(useSorokit).mockReturnValue(mockUseSorokit());
       const { rerender } = render(
         <WalletConnectModal open={false} onClose={mockOnClose} />,
@@ -264,7 +264,10 @@ describe("WalletConnectModal", () => {
       (window as unknown as Record<string, unknown>).freighter = {};
       rerender(<WalletConnectModal open={true} onClose={mockOnClose} />);
 
-      expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
+      // Detection is deferred out of the effect body, so wait for the probe.
+      await waitFor(() => {
+        expect(screen.getAllByTestId("installed-badge").length).toBeGreaterThan(0);
+      });
     });
 
     it("detects late-injected extensions when modal is opened, closed, injected, and re-opened (#1098)", () => {
