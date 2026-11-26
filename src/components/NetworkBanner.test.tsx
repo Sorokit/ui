@@ -64,6 +64,18 @@ describe("NetworkBanner", () => {
     document.documentElement.style.removeProperty("--banner-height");
   });
 
+  it("keeps a subtle visible network label when the banner is minimized (#1062)", () => {
+    mockNetwork(TESTNET_NETWORK);
+    render(<NetworkBanner />);
+
+    fireEvent.click(screen.getByRole("button", { name: /minimize banner/i }));
+
+    const expand = screen.getByTestId("network-banner-expand");
+    expect(expand).toHaveTextContent("Testnet");
+    expect(expand.querySelector(".sr-only")).toBeNull();
+    expect(screen.getByText("Testnet")).toHaveClass("text-[10px]");
+  });
+
   it("renders nothing when network is null", () => {
     mockNetwork(null);
     const { container } = render(<NetworkBanner />);

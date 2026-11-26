@@ -467,7 +467,12 @@ export function NetworkBanner({
           className="inline-flex items-center gap-1.5 rounded p-1 hover:bg-black/10 dark:hover:bg-white/10 transition-colors focus:outline-none focus:ring-1 focus:ring-current"
         >
           {dotEl}
-          <span className={cn("sr-only", cfg.text)}>{label}</span>
+          <span
+            className={cn("text-[10px] font-medium opacity-80", cfg.text)}
+            style={textStyle}
+          >
+            {label}
+          </span>
           {healthIndicator}
         </button>
       ) : (

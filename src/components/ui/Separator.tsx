@@ -26,9 +26,18 @@ export function Separator({
   spacing = "md",
   decorative = false,
 }: SeparatorProps) {
+  // data-orientation mirrors Radix so styling can target either orientation
   const a11yProps = decorative
-    ? { role: "none" as const, "aria-hidden": true as const }
-    : { role: "separator" as const, "aria-orientation": orientation };
+    ? {
+        role: "none" as const,
+        "aria-hidden": true as const,
+        "data-orientation": orientation,
+      }
+    : {
+        role: "separator" as const,
+        "aria-orientation": orientation,
+        "data-orientation": orientation,
+      };
 
   if (orientation === "vertical") {
     return (

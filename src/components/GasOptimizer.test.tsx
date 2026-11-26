@@ -334,6 +334,23 @@ describe("GasOptimizer", () => {
     await waitFor(() => expect(screen.getAllByText("2.0x")[0]).toBeInTheDocument());
   });
 
+  it("exposes the multiplier range and current value to assistive tech (#1061)", async () => {
+    mockClient();
+    render(<GasOptimizer />);
+
+    await waitFor(() => expect(screen.getByText("0.5x")).toBeInTheDocument());
+
+    const slider = screen.getByRole("slider", { name: "Gas price multiplier" });
+    expect(slider).toHaveAttribute("aria-valuemin", "0.5");
+    expect(slider).toHaveAttribute("aria-valuemax", "2");
+    expect(slider).toHaveAttribute("aria-valuenow", "1");
+    expect(slider).toHaveAttribute("title", "Valid range: 0.5x to 2.0x");
+
+    fireEvent.change(slider, { target: { value: "1.5" } });
+    await waitFor(() => expect(slider).toHaveAttribute("aria-valuenow", "1.5"));
+    expect(slider).toHaveAttribute("aria-valuetext", "1.5x");
+  });
+
   it("supports custom operations prop", async () => {
     mockClient();
     render(<GasOptimizer operations={["payment"]} />);

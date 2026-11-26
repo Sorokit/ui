@@ -57,6 +57,19 @@ describe("Skeleton", () => {
     expect(container.firstElementChild).not.toHaveClass("motion-safe:skeleton-shimmer");
   });
 
+  it("drops the animation classes when loaded and restores them when loaded flips back (#1058)", () => {
+    const { container, rerender } = render(<Skeleton loaded />);
+    const el = container.firstElementChild as HTMLElement;
+    expect(el).not.toHaveClass("motion-safe:animate-pulse");
+    expect(el).not.toHaveClass("motion-reduce:opacity-60");
+
+    rerender(<Skeleton loaded={false} />);
+    expect(container.firstElementChild).toHaveClass("motion-safe:animate-pulse");
+
+    rerender(<Skeleton variant="shimmer" loaded />);
+    expect(container.firstElementChild).not.toHaveClass("motion-safe:skeleton-shimmer");
+  });
+
   // ── prefers-reduced-motion (issue #962) ──────────────────────────────────
 
   describe("reduced motion", () => {
