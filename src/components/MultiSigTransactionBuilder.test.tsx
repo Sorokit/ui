@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
 
+const mockWarningToast = vi.fn();
+
 vi.mock("@/context/ToastContext", () => ({
   useToast: () => ({
     success: vi.fn(),
     error: vi.fn(),
-    warning: vi.fn(),
+    warning: mockWarningToast,
     info: vi.fn(),
     addToast: vi.fn(),
     removeToast: vi.fn(),
@@ -19,6 +21,7 @@ vi.mock("@/context/ToastContext", () => ({
 
 describe("MultiSigTransactionBuilder", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     const storage = window.localStorage;
     if (storage && typeof storage.removeItem === "function") {
       storage.removeItem("sorokit-multisig-builder-state");
@@ -138,6 +141,9 @@ describe("MultiSigTransactionBuilder", () => {
     expect(
       screen.getByText(/Saved state was corrupt or invalid and has been reset/i),
     ).toBeInTheDocument();
+    expect(mockWarningToast).toHaveBeenCalledWith(
+      "Saved state was corrupt or invalid and has been reset",
+    );
     expect(storage?.getItem("sorokit-multisig-builder-state")).toBeNull();
   });
 
@@ -156,6 +162,9 @@ describe("MultiSigTransactionBuilder", () => {
     expect(
       screen.getByText(/Saved state was corrupt or invalid and has been reset/i),
     ).toBeInTheDocument();
+    expect(mockWarningToast).toHaveBeenCalledWith(
+      "Saved state was corrupt or invalid and has been reset",
+    );
     expect(storage?.getItem("sorokit-multisig-builder-state")).toBeNull();
   });
 

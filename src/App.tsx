@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { OnboardingTutorial } from './components/OnboardingTutorial';
 import type { NavSection } from './components/Sidebar';
 import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { useSorokit } from './context/useSorokit';
+import { useAuditLogging } from './hooks/useAuditLogging';
 import type { SorokitClient } from './lib/client';
 import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
+import { applyPreferences } from './lib/preferences';
 import { ConnectScreen } from './screens/ConnectScreen';
 import { Dashboard } from './screens/Dashboard';
 
@@ -21,6 +24,14 @@ function ToastRenderer() {
 
 function AppContent() {
   const { isConnected } = useSorokit();
+  useAuditLogging();
+
+  // Apply the saved font size and motion preferences on load, including on the
+  // connect screen.
+  useEffect(() => {
+    applyPreferences();
+  }, []);
+
   const [section, setSection] = useState<NavSection>(() =>
     sectionForPath(window.location.pathname),
   );
@@ -52,7 +63,12 @@ function AppContent() {
     return <ConnectScreen />;
   }
 
-  return <Dashboard activeSection={section} onSectionChange={handleSectionChange} />;
+  return (
+    <>
+      <Dashboard activeSection={section} onSectionChange={handleSectionChange} />
+      <OnboardingTutorial />
+    </>
+  );
 }
 
 function App({ client }: AppProps) {

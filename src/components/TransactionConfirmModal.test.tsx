@@ -116,6 +116,44 @@ describe("TransactionConfirmModal", () => {
     expect(screen.queryByText("Network fee")).not.toBeInTheDocument();
   });
 
+  it("renders visual separators between fee breakdown rows when network fee is present", () => {
+    render(
+      <TransactionConfirmModal
+        open={true}
+        transaction={makePreview({
+          fee: {
+            baseFeeStroops: "100",
+            networkFeeStroops: "5000",
+            totalStroops: "5100",
+          },
+        })}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const separators = screen.getAllByRole("separator");
+    expect(separators.length).toBeGreaterThanOrEqual(2);
+    separators.forEach((sep) => {
+      expect(sep).toHaveClass("border-b", "border-line");
+    });
+  });
+
+  it("renders a visual separator between base fee and total when network fee is omitted", () => {
+    render(
+      <TransactionConfirmModal
+        open={true}
+        transaction={makePreview({
+          fee: { baseFeeStroops: "100", totalStroops: "100" },
+        })}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const separators = screen.getAllByRole("separator");
+    expect(separators.length).toBe(1);
+    expect(separators[0]).toHaveClass("border-b", "border-line");
+  });
+
   it("shows the truncated source account address", () => {
     render(
       <TransactionConfirmModal

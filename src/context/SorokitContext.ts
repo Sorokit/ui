@@ -45,6 +45,10 @@ export interface SorokitState {
   /** Epoch ms of the last successful sync of the data on screen (#1163). */
   lastSyncedAt?: number | null;
   network: NetworkInfo | null;
+  /** Normalized status of the active network, checked on init and after switches (#1105). */
+  networkStatus?: "online" | "degraded" | "offline" | "unknown";
+  /** Human-readable warning for a non-online active network, or null when healthy (#1105). */
+  networkStatusWarning?: string | null;
   /**
    * The network the client was initialised with, captured on mount before any
    * persisted preference is applied. Compare against `network` to detect a

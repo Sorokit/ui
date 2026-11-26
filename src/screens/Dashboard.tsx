@@ -12,6 +12,7 @@ import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
 import { RateLimitIndicator } from "@/components/RateLimitIndicator";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
@@ -41,6 +42,11 @@ const PortfolioAnalyticsScreen = lazy(() =>
 const RecoveryScreen = lazy(() =>
   import("@/screens/RecoveryScreen").then((m) => ({ default: m.RecoveryScreen })),
 );
+const SettingsScreen = lazy(() =>
+  import("@/screens/SettingsScreen").then((m) => ({
+    default: m.SettingsScreen,
+  })),
+);
 const SorobanScreen = lazy(() =>
   import("@/screens/SorobanScreen").then((m) => ({ default: m.SorobanScreen })),
 );
@@ -68,6 +74,7 @@ const SCREENS: Record<NavSection, ComponentType> = {
   budget: BudgetScreen,
   nfts: NFTScreen,
   governance: GovernanceDashboard,
+  settings: SettingsScreen,
 };
 
 const SCREEN_LABELS: Record<NavSection, string> = {
@@ -83,6 +90,7 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   budget: "Budget",
   nfts: "NFTs",
   governance: "Governance",
+  settings: "Settings",
 };
 
 /**
@@ -217,6 +225,7 @@ export function Dashboard({
           onNavigate={handleNavigate}
         />
         <NetworkBanner active={active} />
+        <NetworkStatusBanner />
         <RateLimitIndicator />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div

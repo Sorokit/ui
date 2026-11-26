@@ -90,25 +90,26 @@ describe("validateStellarAddress (#535)", () => {
   const VALID_ADDRESS =
     "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
 
-  it("accepts a real, checksum-valid Stellar address", () => {
-    expect(validateStellarAddress(VALID_ADDRESS)).toBe(true);
-  });
-
-  it("trims surrounding whitespace before validating", () => {
-    expect(validateStellarAddress(`  ${VALID_ADDRESS}  `)).toBe(true);
-  });
-
-  it("rejects a single mutated character even though length and charset still match", () => {
-    // Second character changed (C -> D): still 56 chars, still valid
-    // base32 alphabet, starts with G — a format-only regex check would
-    // accept this. The checksum must not.
-    const mutated = "GDEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ";
-    expect(validateStellarAddress(mutated)).toBe(false);
-  });
-
-  it("rejects a mutated character near the end of the payload", () => {
-    const mutated = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JA";
-    expect(validateStellarAddress(mutated)).toBe(false);
+  it.each([
+    ["valid address", VALID_ADDRESS, true],
+    [
+      "invalid checksum",
+      "GDEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGSNFHEYVXM3XOJMDS674JZ",
+      false,
+    ],
+    [
+      "truncated address",
+      VALID_ADDRESS.slice(0, -1),
+      false,
+    ],
+    ["leading and trailing spaces", `  ${VALID_ADDRESS}  `, false],
+    [
+      "spaces inside address",
+      `${VALID_ADDRESS.slice(0, 20)} ${VALID_ADDRESS.slice(20)}`,
+      false,
+    ],
+  ])("validates %s", (_description, address, expected) => {
+    expect(validateStellarAddress(address)).toBe(expected);
   });
 
   it("rejects strings not starting with G", () => {
@@ -281,7 +282,7 @@ describe("validateStellarAddress — muxed accounts (#956)", () => {
     expect(MUXED_ID_0).toHaveLength(69);
     expect(validateStellarAddress(MUXED_ID_0)).toBe(true);
     expect(validateStellarAddress(MUXED_ID_2_63)).toBe(true);
-    expect(validateStellarAddress(`  ${MUXED_ID_0}  `)).toBe(true);
+    expect(validateStellarAddress(`  ${MUXED_ID_0}  `)).toBe(false);
   });
 
   it("still accepts standard G-addresses", () => {

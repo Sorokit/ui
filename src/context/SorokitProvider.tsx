@@ -9,6 +9,10 @@ import type {
 } from "@/lib/client";
 import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { initClient } from "@/lib/client";
+import {
+  getNetworkStatusWarning,
+  normalizeNetworkStatus,
+} from "@/lib/network-status";
 import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
 
 import { SorokitContext, type SorokitProviderProps } from "./SorokitContext";
@@ -273,6 +277,9 @@ export function SorokitProvider({
         if (clientNet) setInitialNetwork(clientNet);
         const resolved = restored ?? clientNet;
         if (resolved) setNetwork(resolved);
+
+        const statusWarning = getNetworkStatusWarning(resolved);
+        if (statusWarning) reportError(statusWarning, "network", "info");
 
         const nextError = restoreError ?? clientError;
         if (nextError) reportError(nextError, "network", "info");
@@ -563,6 +570,9 @@ export function SorokitProvider({
         setNetworkError(null);
         setNetwork(data);
 
+        const statusWarning = getNetworkStatusWarning(data);
+        if (statusWarning) reportError(statusWarning, "network", "info");
+
         // Re-point the `getClient()` singleton at the new network. Without
         // this, callers like `getClient().transaction.submit()` keep hitting
         // the previous network's endpoints after a switch.
@@ -676,12 +686,8 @@ export function SorokitProvider({
         address,
         { data: null, error: message },
         { data: null, error: message },
-      if (controller.signal.aborted || !isMountedRef.current) return;
-      reportError(
-        e instanceof Error ? e.message : "Failed to refresh account data",
-        "account",
-        "error",
       );
+      if (controller.signal.aborted || !isMountedRef.current) return;
       reportError(message, "account", usedCache ? "info" : "error");
     } finally {
       if (accountRequestRef.current === controller) {
@@ -724,6 +730,8 @@ export function SorokitProvider({
       isCached,
       lastSyncedAt,
       network,
+      networkStatus: normalizeNetworkStatus(network?.status),
+      networkStatusWarning: getNetworkStatusWarning(network),
       initialNetwork,
       switchNetwork,
       isSwitchingNetwork,
