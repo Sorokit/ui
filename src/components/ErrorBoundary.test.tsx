@@ -256,6 +256,44 @@ describe("ErrorBoundary", () => {
     );
   });
 
+  it("shows an error id in production without logging the stack (#1064)", () => {
+    vi.stubEnv("DEV", false);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByTestId("error-id").textContent).toMatch(/^Error #[0-9a-f]{6}$/);
+    expect(screen.getByText("Details are hidden in production.")).toBeInTheDocument();
+    expect(consoleSpy).not.toHaveBeenCalledWith(
+      "[sorokit-ui] Uncaught error:",
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("logs the full stack with the same error id shown in the UI in development (#1064)", () => {
+    vi.stubEnv("DEV", true);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    const shownId = screen.getByTestId("error-id").textContent;
+    const log = consoleSpy.mock.calls.find(
+      ([message]) => message === "[sorokit-ui] Uncaught error:",
+    );
+    expect(log?.[1]).toHaveProperty("stack");
+    expect(log?.[3]).toBe(shownId);
+  });
+
   it("reset key remounts children with fresh state to avoid an error loop", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 

@@ -36,6 +36,16 @@ interface State {
   copied: boolean;
 }
 
+/** Short id derived from the stack, so the UI and the logs show the same value. */
+function errorIdOf(error: Error): string {
+  const input = error.stack ?? `${error.name}: ${error.message}`;
+  let h = 5381;
+  for (let i = 0; i < input.length; i++) {
+    h = ((h * 33) ^ input.charCodeAt(i)) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0").slice(0, 6);
+}
+
 /** Catches descendant render errors and displays a recoverable fallback. */
 export class ErrorBoundary extends Component<Props, State> {
   state: State = {
@@ -64,7 +74,12 @@ export class ErrorBoundary extends Component<Props, State> {
     }
 
     if (import.meta.env.DEV) {
-      console.error("[sorokit-ui] Uncaught error:", error, info);
+      console.error(
+        "[sorokit-ui] Uncaught error:",
+        error,
+        info,
+        `Error #${errorIdOf(error)}`,
+      );
     }
   }
 
@@ -91,6 +106,7 @@ export class ErrorBoundary extends Component<Props, State> {
         typeof navigator !== "undefined" ? navigator.userAgent : "unknown"
       }`,
       "",
+      `Error ID: ${error ? `#${errorIdOf(error)}` : "unknown"}`,
       `Message: ${error?.message ?? "Unknown error"}`,
     ];
 
@@ -168,6 +184,12 @@ export class ErrorBoundary extends Component<Props, State> {
               {import.meta.env.DEV
                 ? error.message
                 : "Details are hidden in production."}
+            </p>
+            <p
+              data-testid="error-id"
+              className="text-[11px] font-mono text-ink-3 mt-2"
+            >
+              {`Error #${errorIdOf(error)}`}
             </p>
           </div>
           {supportUrl && (
