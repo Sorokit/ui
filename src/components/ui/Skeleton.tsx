@@ -15,12 +15,15 @@ export interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
    * - "shimmer" — a light sweep across the skeleton
    */
   variant?: "pulse" | "shimmer";
+  /** Stop animating once the content has loaded. */
+  loaded?: boolean;
 }
 
 export function Skeleton({
   circle,
   shape = "rounded",
   variant = "pulse",
+  loaded = false,
   className,
   ...props
 }: SkeletonProps) {
@@ -39,9 +42,11 @@ export function Skeleton({
         // motion-reduce fallback, rather than an unconditional
         // animate-pulse/skeleton-shimmer (issue #962): the bare utility
         // would keep animating even with prefers-reduced-motion set.
-        variant === "pulse"
-          ? "motion-safe:animate-pulse motion-reduce:opacity-60"
-          : "motion-safe:skeleton-shimmer motion-reduce:skeleton-shimmer-static",
+        loaded
+          ? null
+          : variant === "pulse"
+            ? "motion-safe:animate-pulse motion-reduce:opacity-60"
+            : "motion-safe:skeleton-shimmer motion-reduce:skeleton-shimmer-static",
         className,
       )}
       {...props}
