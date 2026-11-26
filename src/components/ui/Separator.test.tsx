@@ -72,6 +72,15 @@ describe("Separator", () => {
     expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });
 
+  it("exposes data-orientation for both orientations and defaults to horizontal (#1057)", () => {
+    const { container: h } = render(<Separator />);
+    expect(h.firstElementChild).toHaveAttribute("data-orientation", "horizontal");
+
+    const { container: v } = render(<Separator orientation="vertical" />);
+    expect(v.firstElementChild).toHaveAttribute("data-orientation", "vertical");
+    expect(v.firstElementChild).toHaveClass("w-px");
+  });
+
   // ── Flex-container height collapse (issue #963) ──────────────────────────
 
   it("applies self-stretch and min-h-full so a vertical separator keeps its height in a stretch flex container", () => {
