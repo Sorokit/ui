@@ -187,7 +187,16 @@ export function WalletConnectModal({
       for (const wallet of walletOptions) {
         next[wallet.id] = isWalletExtensionInstalled(wallet.id);
       }
-      setInstalledWallets(next);
+      setInstalledWallets((prev) => {
+        const keys = Object.keys(next);
+        if (
+          keys.length === Object.keys(prev).length &&
+          keys.every((key) => prev[key] === next[key])
+        ) {
+          return prev;
+        }
+        return next;
+      });
       setIsMobile(isMobileEnvironment());
     };
 
