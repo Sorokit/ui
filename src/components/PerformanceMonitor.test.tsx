@@ -1,5 +1,7 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { recordRender } from '../lib/performance';
 import { PerformanceMonitor, Profiled } from './PerformanceMonitor';
 
 // Mock the performance module
@@ -7,7 +9,6 @@ vi.mock('../lib/performance', () => ({
   getMetrics: vi.fn(() => []),
   recordRender: vi.fn(),
   subscribeMetrics: vi.fn(() => () => {}),
-  type MetricRating: 'good' | 'needs-improvement' | 'poor',
 }));
 
 describe('PerformanceMonitor', () => {
@@ -116,7 +117,6 @@ describe('PerformanceMonitor', () => {
       render(<PerformanceMonitor />);
       const monitor = screen.getByTestId('performance-monitor');
 
-      const style = window.getComputedStyle(monitor);
       // z-index should be high (99999)
       expect(monitor).toBeInTheDocument();
     });
@@ -169,8 +169,6 @@ describe('PerformanceMonitor', () => {
 });
 
 describe('Profiled component', () => {
-  const { recordRender } = await import('../lib/performance');
-
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -327,7 +325,7 @@ describe('Profiled component', () => {
     });
 
     it('handles rapid component mounting and unmounting', () => {
-      const { unmount, rerender } = render(
+      const { unmount } = render(
         <Profiled id="rapid">
           <div>Test</div>
         </Profiled>,

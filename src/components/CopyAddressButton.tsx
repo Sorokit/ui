@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { Cancel01Icon, Copy01Icon, Tick01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect, useRef, useState } from "react";
+
 import { Tooltip } from "@/components/ui/Tooltip";
-import { HugeiconsIcon } from "@/components/ui/HugeiconsIcon";
-import { Copy01Icon, Tick01Icon, Cancel01Icon } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 
 /** Reusable copy-to-clipboard button matching AddressDisplay UX */

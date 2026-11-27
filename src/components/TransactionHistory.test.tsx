@@ -1209,4 +1209,31 @@ describe("TransactionHistory", () => {
       });
     });
   });
+
+  it("refreshes page 1 when sorokit:transaction-submitted is dispatched", async () => {
+    const initialTx = makeTx(0);
+    const submittedTx = makeTx(99);
+    const getHistory = vi
+      .fn()
+      .mockResolvedValueOnce({ data: [initialTx], error: null, total: 1 })
+      .mockResolvedValueOnce({ data: [submittedTx, initialTx], error: null, total: 2 });
+    mockClient.transaction.getHistory = getHistory;
+
+    render(<TransactionHistory />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => {
+      expect(screen.getByText(/1 transaction/i)).toBeInTheDocument();
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("sorokit:transaction-submitted"));
+    });
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 transactions/i)).toBeInTheDocument();
+    });
+    expect(getHistory).toHaveBeenCalledTimes(2);
+    expect(getHistory).toHaveBeenLastCalledWith(ADDRESS, 1, PAGE_SIZE);
+  });
 });

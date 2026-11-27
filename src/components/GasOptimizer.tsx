@@ -305,13 +305,15 @@ export function GasOptimizer({
     }
   }, [client, operations, customMultiplier]);
 
+  const totalGasUnits = estimate?.totalGasUnits;
+
   const loadScenarios = useCallback(async () => {
-    if (!estimate || !client) return;
+    if (totalGasUnits === undefined || !client) return;
     setScenarioError(null);
     try {
       const { data, error: err } = await client.transaction.getFeeScenarios({
         operations,
-        baseGasUnits: estimate.totalGasUnits,
+        baseGasUnits: totalGasUnits,
       });
       if (err) {
         setScenarioError(err);
@@ -325,7 +327,7 @@ export function GasOptimizer({
         e instanceof Error ? e.message : "Failed to load scenarios",
       );
     }
-  }, [client, estimate, operations]);
+  }, [client, totalGasUnits, operations]);
 
   const gasIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -368,7 +370,7 @@ export function GasOptimizer({
   }, [registerWatcher]);
 
   useEffect(() => {
-    if (!estimate) return;
+    if (totalGasUnits === undefined) return;
     let active = true;
     const timerId = window.setTimeout(() => {
       if (active) void loadScenarios();
@@ -377,7 +379,7 @@ export function GasOptimizer({
       active = false;
       window.clearTimeout(timerId);
     };
-  }, [estimate, loadScenarios]);
+  }, [totalGasUnits, loadScenarios]);
 
   const handlePresetSelect = (newPreset: GasPresetName) => {
     setPreset(newPreset);

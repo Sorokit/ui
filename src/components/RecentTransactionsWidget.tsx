@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
-import type { Transaction } from "@/lib/client";
+import type { SorokitClient, Transaction } from "@/lib/client";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const STROOPS_PER_XLM = 10_000_000;
@@ -76,9 +76,9 @@ export function RecentTransactionsWidget({
       return;
     }
 
-    let client: any;
+    let client: SorokitClient | undefined;
     try {
-      client = sorokit.client;
+      client = sorokit.client ?? undefined;
     } catch {
       return;
     }
@@ -91,7 +91,7 @@ export function RecentTransactionsWidget({
 
     client.transaction
       .getHistory(address, 1, limit)
-      .then((res: any) => {
+      .then((res) => {
         if (!active) return;
         setInternalTxs(res.data ?? []);
       })

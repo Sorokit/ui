@@ -351,6 +351,7 @@ export function TransactionHistory({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
   // #1163 - offline mode: true while `txs` came from the local cache.
   const isOnline = useOnlineStatus();
   const [isCached, setIsCached] = useState(false);
@@ -370,6 +371,18 @@ export function TransactionHistory({
     setIsCached(false);
     setAllTxs(null);
   }
+
+  useEffect(() => {
+    const handleTxSubmitted = () => {
+      setPage(1);
+      setAllTxs(null);
+      setRefreshTick((tick) => tick + 1);
+    };
+    window.addEventListener("sorokit:transaction-submitted", handleTxSubmitted);
+    return () => {
+      window.removeEventListener("sorokit:transaction-submitted", handleTxSubmitted);
+    };
+  }, []);
 
   useEffect(() => {
     if (!address || !client) return;
@@ -436,7 +449,7 @@ export function TransactionHistory({
     // `isOnline` is a dependency so history refetches automatically when the
     // connection comes back (#1163).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, client, page, isOnline]);
+  }, [address, client, page, isOnline, refreshTick]);
 
   const searchActive =
     memoQuery.trim() !== "" || searchFrom !== "" || searchTo !== "";

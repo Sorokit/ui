@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type {
   AccountData,
   Balance,
@@ -7,7 +8,6 @@ import type {
   NetworkName,
   SorokitClient,
 } from "@/lib/client";
-import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import { initClient } from "@/lib/client";
 import {
   getNetworkStatusWarning,

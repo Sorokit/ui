@@ -1,9 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { DashboardOverview } from "./DashboardOverview";
+
 import { SorokitProvider } from "@/context/SorokitProvider";
 import { getClient, initClient } from "@/lib/client";
+
+import { DashboardOverview } from "./DashboardOverview";
 
 describe("DashboardOverview", () => {
   let mockClient: ReturnType<typeof getClient>;
