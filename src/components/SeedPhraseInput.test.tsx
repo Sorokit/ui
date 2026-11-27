@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+
 import { SeedPhraseInput, splitPhrase, validateSeedWords } from "./SeedPhraseInput";
 
 describe("SeedPhraseInput", () => {
@@ -101,32 +102,32 @@ describe("SeedPhraseInput", () => {
 
     it("renders with 12 word inputs by default", () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       expect(inputs).toHaveLength(12);
     });
 
     it("renders with 24 word inputs when specified", () => {
       render(<SeedPhraseInput wordCount={24} />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       expect(inputs).toHaveLength(24);
     });
 
     it("allows switching between 12 and 24 word modes", async () => {
       render(<SeedPhraseInput wordCount={12} />);
-      let inputs = screen.getAllByRole("textbox");
+      let inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       expect(inputs).toHaveLength(12);
 
       fireEvent.click(screen.getByRole("button", { name: "24 words" }));
 
       await waitFor(() => {
-        inputs = screen.getAllByRole("textbox");
+        inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
         expect(inputs).toHaveLength(24);
       });
     });
 
     it("shows seed phrase when show button is clicked", async () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       expect(inputs[0]).toHaveAttribute("type", "password");
 
       fireEvent.click(screen.getByRole("button", { name: /Show seed phrase/i }));
@@ -148,7 +149,7 @@ describe("SeedPhraseInput", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /Hide seed phrase/i }));
       await waitFor(() => {
-        const inputs = screen.getAllByRole("textbox");
+        const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
         expect(inputs[0]).toHaveAttribute("type", "password");
       });
     });
@@ -157,7 +158,7 @@ describe("SeedPhraseInput", () => {
       const onSubmit = vi.fn();
       render(<SeedPhraseInput onSubmit={onSubmit} />);
 
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       valid12Words.split(" ").forEach((word, i) => {
         fireEvent.change(inputs[i], { target: { value: word } });
       });
@@ -173,7 +174,7 @@ describe("SeedPhraseInput", () => {
       const onSubmit = vi.fn();
       render(<SeedPhraseInput wordCount={24} onSubmit={onSubmit} />);
 
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       valid24Words.split(" ").forEach((word, i) => {
         fireEvent.change(inputs[i], { target: { value: word } });
       });
@@ -187,7 +188,7 @@ describe("SeedPhraseInput", () => {
 
     it("displays error message for invalid phrase", async () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
 
       // Fill with valid words but wrong checksum
       "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about about"
@@ -207,7 +208,7 @@ describe("SeedPhraseInput", () => {
 
     it("shows success message for valid phrase", async () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
       valid12Words.split(" ").forEach((word, i) => {
         fireEvent.change(inputs[i], { target: { value: word } });
       });
@@ -221,19 +222,14 @@ describe("SeedPhraseInput", () => {
 
     it("handles pasting a full 12-word phrase", async () => {
       render(<SeedPhraseInput wordCount={12} />);
-      const firstInput = screen.getAllByRole("textbox")[0];
+      const firstInput = screen.getAllByLabelText(/^Seed word \d+$/i)[0];
 
-      const pasteEvent = new ClipboardEvent("paste", {
-        clipboardData: new DataTransfer(),
-        bubbles: true,
+      fireEvent.paste(firstInput, {
+        clipboardData: { getData: () => valid12Words },
       });
-      pasteEvent.clipboardData?.setData("text/plain", valid12Words);
-
-      fireEvent.change(firstInput, { target: { value: valid12Words } });
-      fireEvent.paste(firstInput, pasteEvent);
 
       await waitFor(() => {
-        const inputs = screen.getAllByRole("textbox");
+        const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
         expect(inputs[0]).toHaveValue("abandon");
         expect(inputs[1]).toHaveValue("abandon");
       });
@@ -241,29 +237,24 @@ describe("SeedPhraseInput", () => {
 
     it("auto-switches to 24 words when pasting 24-word phrase into 12-word mode", async () => {
       render(<SeedPhraseInput wordCount={12} />);
-      const firstInput = screen.getAllByRole("textbox")[0];
+      const firstInput = screen.getAllByLabelText(/^Seed word \d+$/i)[0];
 
-      const pasteEvent = new ClipboardEvent("paste", {
-        clipboardData: new DataTransfer(),
-        bubbles: true,
+      fireEvent.paste(firstInput, {
+        clipboardData: { getData: () => valid24Words },
       });
-      pasteEvent.clipboardData?.setData("text/plain", valid24Words);
-
-      fireEvent.change(firstInput, { target: { value: valid24Words } });
-      fireEvent.paste(firstInput, pasteEvent);
 
       await waitFor(() => {
-        const inputs = screen.getAllByRole("textbox");
+        const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
         expect(inputs.length).toBe(24);
       });
     });
 
     it("clears error when user modifies input", async () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
 
       // Create invalid phrase
-      inputs.forEach((input, i) => {
+      inputs.forEach((input) => {
         fireEvent.change(input, { target: { value: "abandon" } });
       });
 
@@ -289,9 +280,9 @@ describe("SeedPhraseInput", () => {
 
     it("sets aria-invalid on inputs when error exists", async () => {
       render(<SeedPhraseInput />);
-      const inputs = screen.getAllByRole("textbox");
+      const inputs = screen.getAllByLabelText(/^Seed word \d+$/i);
 
-      inputs.forEach((input, i) => {
+      inputs.forEach((input) => {
         fireEvent.change(input, { target: { value: "abandon" } });
       });
 
@@ -306,7 +297,7 @@ describe("SeedPhraseInput", () => {
 
     it("lowercases input automatically", () => {
       render(<SeedPhraseInput />);
-      const firstInput = screen.getAllByRole("textbox")[0];
+      const firstInput = screen.getAllByLabelText(/^Seed word \d+$/i)[0];
 
       fireEvent.change(firstInput, { target: { value: "ABANDON" } });
       expect(firstInput).toHaveValue("abandon");
@@ -314,7 +305,7 @@ describe("SeedPhraseInput", () => {
 
     it("trims whitespace from input", () => {
       render(<SeedPhraseInput />);
-      const firstInput = screen.getAllByRole("textbox")[0];
+      const firstInput = screen.getAllByLabelText(/^Seed word \d+$/i)[0];
 
       fireEvent.change(firstInput, { target: { value: "  abandon  " } });
       expect(firstInput).toHaveValue("abandon");

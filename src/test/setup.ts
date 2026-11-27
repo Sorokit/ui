@@ -8,11 +8,19 @@
 import "@testing-library/jest-dom";
 
 import { cleanup } from "@testing-library/react";
-import { afterEach, vi } from "vitest";
+import { afterAll, afterEach, vi } from "vitest";
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+});
+
+afterAll(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 // jsdom ships working Web Storage implementations, but Node's experimental

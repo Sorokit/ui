@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CopyAddressButton } from "@/components/CopyAddressButton";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { SkeletonCard } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { ClaimableBalance } from "@/lib/client";
 import { cn, safeFormat, truncateAddress } from "@/lib/utils";
-import { CopyAddressButton } from "@/components/CopyAddressButton";
 
 function isPredicateExpired(predicate: unknown, _currentTime: number): boolean {
   if (!predicate || typeof predicate !== "object") return false;

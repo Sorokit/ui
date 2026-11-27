@@ -515,6 +515,7 @@ export function SorobanPanel({
                         {mode === "simulate" ? "Simulation Result" : "Result"}
                       </Badge>
                       <Button
+                        type="button"
                         variant="secondary"
                         size="sm"
                         data-testid="soroban-copy-curl-success"
@@ -562,6 +563,7 @@ export function SorobanPanel({
                 {(state === "success" || state === "error") && (
                   <div className="mt-3">
                     <Button
+                      type="button"
                       variant="secondary"
                       size="sm"
                       data-testid="soroban-copy-curl-bottom"

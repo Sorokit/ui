@@ -174,7 +174,7 @@ describe("ActivityTimeline", () => {
       for (const group of groups) {
         expect(
           screen.getByText(
-            new Date(group.date).toLocaleDateString("en-US", {
+            new Date(`${group.date}T00:00:00`).toLocaleDateString("en-US", {
               weekday: "long",
               month: "long",
               day: "numeric",
@@ -197,7 +197,7 @@ describe("ActivityTimeline", () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          new Date(groups[0].date).toLocaleDateString("en-US", {
+          new Date(`${groups[0].date}T00:00:00`).toLocaleDateString("en-US", {
             weekday: "long",
             month: "long",
             day: "numeric",
@@ -633,7 +633,10 @@ describe("ActivityTimeline", () => {
     function isoDateDaysAgo(daysAgo: number): string {
       const d = new Date();
       d.setDate(d.getDate() - daysAgo);
-      return d.toISOString().slice(0, 10);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
     }
 
     it("labels today's group as 'Today' instead of the full date", async () => {
@@ -687,7 +690,7 @@ describe("ActivityTimeline", () => {
 
       render(<ActivityTimeline />);
       await waitFor(() => {
-        const expectedLabel = new Date(longAgo).toLocaleDateString("en-US", {
+        const expectedLabel = new Date(`${longAgo}T00:00:00`).toLocaleDateString("en-US", {
           weekday: "long",
           month: "long",
           day: "numeric",

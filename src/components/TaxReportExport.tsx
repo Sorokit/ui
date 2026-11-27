@@ -8,8 +8,8 @@ import type { Operation } from "@/lib/client";
 import { getClient } from "@/lib/client";
 import {
   buildTaxReport,
-  type PriceTable,
   priceKey,
+  type PriceTable,
   requiredPrices,
   taxReportToCsv,
   totalGainLoss,

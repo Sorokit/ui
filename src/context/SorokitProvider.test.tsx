@@ -1698,21 +1698,26 @@ describe("SorokitProvider", () => {
     it("stops polling once the detection window elapses", async () => {
       vi.useFakeTimers();
       const setSpy = vi.spyOn(window, "setInterval");
-      renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
+      try {
+        renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
 
-      expect(setSpy).toHaveBeenCalled();
+        expect(setSpy).toHaveBeenCalled();
 
-      await act(async () => {
-        vi.advanceTimersByTime(200 * 12);
-      });
+        await act(async () => {
+          vi.advanceTimersByTime(200 * 12);
+        });
 
-      // Injecting after the poll window is up is not detected without an event.
-      await act(async () => {
-        (window as unknown as Record<string, unknown>).xbull = {};
-        vi.advanceTimersByTime(200 * 12);
-      });
+        // Injecting after the poll window is up is not detected without an event.
+        await act(async () => {
+          (window as unknown as Record<string, unknown>).xbull = {};
+          vi.advanceTimersByTime(200 * 12);
+        });
 
-      expect(screen.getByTestId("detected-wallets")).toHaveTextContent("");
+        expect(screen.getByTestId("detected-wallets")).toHaveTextContent("");
+      } finally {
+        setSpy.mockRestore();
+        vi.useRealTimers();
+      }
     });
   });
 

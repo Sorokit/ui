@@ -8,8 +8,8 @@ import { ErrorBoundary } from './components/ErrorBoundary'
 import { PerformanceMonitor, Profiled } from './components/PerformanceMonitor'
 import type { SorokitClient } from './lib/client'
 import { createMockClient } from './lib/mock-client'
-import { trackClientCalls } from './lib/rate-limit'
 import { initPerformanceMonitoring } from './lib/performance'
+import { trackClientCalls } from './lib/rate-limit'
 
 // Collect load/Web Vitals metrics and log them to the console in dev mode.
 if (import.meta.env.DEV) {

@@ -220,7 +220,10 @@ export function validateStellarAddress(address: string): boolean {
   if (/^G[A-Z2-7]{55}$/.test(address)) {
     return decodeStrKey(address, STRKEY_VERSION_ED25519_PUBLIC_KEY, 32) !== null;
   }
-  return isMuxedAccount(address);
+  if (/^M[A-Z2-7]{68}$/.test(address)) {
+    return isMuxedAccount(address);
+  }
+  return false;
 }
 
 /** Decimal places of XLM and of most Stellar classic assets. */
