@@ -297,6 +297,68 @@ describe("NetworkBanner", () => {
 
       expect(screen.getByText("Futurenet")).toBeInTheDocument();
     });
+
+    it("persists dismissal in sessionStorage and stays dismissed across remount (#1099)", () => {
+      const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
+      const getItemSpy = vi.spyOn(window.sessionStorage, "getItem");
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        const { unmount } = render(<NetworkBanner />);
+
+        expect(screen.getByTestId("network-banner")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: /dismiss banner/i }));
+
+        expect(screen.queryByTestId("network-banner")).not.toBeInTheDocument();
+        expect(setItemSpy).toHaveBeenCalledWith(
+          "sorokit-banner-dismissed-testnet",
+          "true",
+        );
+
+        unmount();
+
+        const { container } = render(<NetworkBanner />);
+
+        expect(getItemSpy).toHaveBeenCalledWith("sorokit-banner-dismissed-testnet");
+        expect(container).toBeEmptyDOMElement();
+        expect(screen.queryByTestId("network-banner")).not.toBeInTheDocument();
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("0px");
+      } finally {
+        setItemSpy.mockRestore();
+        getItemSpy.mockRestore();
+      }
+    });
+
+    it("persists dismissal with custom storageKey across remount (#1099)", () => {
+      const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
+      const getItemSpy = vi.spyOn(window.sessionStorage, "getItem");
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        const { unmount } = render(
+          <NetworkBanner storageKey="custom-persist-key" />,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: /dismiss banner/i }));
+
+        expect(setItemSpy).toHaveBeenCalledWith("custom-persist-key", "true");
+
+        unmount();
+
+        const { container } = render(
+          <NetworkBanner storageKey="custom-persist-key" />,
+        );
+
+        expect(getItemSpy).toHaveBeenCalledWith("custom-persist-key");
+        expect(container).toBeEmptyDOMElement();
+      } finally {
+        setItemSpy.mockRestore();
+        getItemSpy.mockRestore();
+      }
+    });
   });
 
   describe("Standalone mode and configurable colors", () => {
