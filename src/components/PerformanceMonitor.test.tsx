@@ -5,8 +5,9 @@ import { recordRender } from '../lib/performance';
 import { PerformanceMonitor, Profiled } from './PerformanceMonitor';
 
 // Mock the performance module
+const EMPTY_METRICS = vi.hoisted(() => [] as never[]);
 vi.mock('../lib/performance', () => ({
-  getMetrics: vi.fn(() => []),
+  getMetrics: vi.fn(() => EMPTY_METRICS),
   recordRender: vi.fn(),
   subscribeMetrics: vi.fn(() => () => {}),
 }));

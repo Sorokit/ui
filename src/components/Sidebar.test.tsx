@@ -331,7 +331,9 @@ describe("Sidebar", () => {
     });
 
     describe("arrow key navigation", () => {
-    vi.stubGlobal("innerWidth", 375);
+    beforeEach(() => {
+      vi.stubGlobal("innerWidth", 375);
+    });
 
     it("arrow down moves focus forward", async () => {
       render(
@@ -347,7 +349,7 @@ describe("Sidebar", () => {
       const firstFocusable = focusableElements[0];
       const lastFocusable = focusableElements[focusableElements.length - 1];
 
-      fireEvent.focus(firstFocusable);
+      firstFocusable.focus();
       expect(document.activeElement).toBe(firstFocusable);
 
       fireEvent.keyDown(window, { key: "ArrowDown" });
@@ -368,7 +370,7 @@ describe("Sidebar", () => {
       const firstFocusable = focusableElements[0];
       const lastFocusable = focusableElements[focusableElements.length - 1];
 
-      fireEvent.focus(lastFocusable);
+      lastFocusable.focus();
       expect(document.activeElement).toBe(lastFocusable);
 
       fireEvent.keyDown(window, { key: "ArrowUp" });

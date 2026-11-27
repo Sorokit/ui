@@ -76,11 +76,24 @@ describe("Wallet Connect Flow Integration", () => {
       await act(async () => {
         fireEvent.click(connectBtn);
       });
+      await waitFor(() =>
+        screen.getByRole("dialog", { name: /connect a wallet/i }),
+      );
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
+      });
 
       await waitFor(() => {
-        // Verify that the button remains in a state allowing retry
-        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+        expect(failingClient.wallet.connect).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "User rejected connection request",
+        );
       });
+
+      await act(async () => {
+        fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+      });
+      expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
     it("allows wallet reconnection after a failed connection attempt", async () => {
@@ -110,19 +123,34 @@ describe("Wallet Connect Flow Integration", () => {
       );
 
       const connectBtn = screen.getByRole("button", { name: /connect/i });
-      
+
       // First attempt fails
       await act(async () => {
         fireEvent.click(connectBtn);
       });
+      await waitFor(() =>
+        screen.getByRole("dialog", { name: /connect a wallet/i }),
+      );
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
+      });
 
       await waitFor(() => {
         expect(flakeyClient.wallet.connect).toHaveBeenCalledTimes(1);
+        expect(screen.getByRole("alert")).toHaveTextContent(
+          "Temporary connection failure",
+        );
       });
 
-      // Second attempt succeeds
+      // Second attempt via "Try again" returns to wallet selection and succeeds
       await act(async () => {
-        fireEvent.click(connectBtn);
+        fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      });
+      await waitFor(() =>
+        screen.getByRole("radiogroup", { name: /available wallets/i }),
+      );
+      await act(async () => {
+        fireEvent.click(getWalletButton(/Freighter/i));
       });
 
       await waitFor(() => {

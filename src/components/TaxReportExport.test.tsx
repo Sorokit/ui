@@ -1,10 +1,22 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SorokitProvider } from '@/context/SorokitProvider';
+import { useSorokit } from '@/context/useSorokit';
 import { getClient, initClient } from '@/lib/client';
 
 import { TaxReportExport } from './TaxReportExport';
+
+function ConnectTrigger() {
+  const { connectWallet } = useSorokit();
+  return (
+    <button type="button" onClick={() => void connectWallet()}>
+      Connect Wallet
+    </button>
+  );
+}
+
+const TEST_ADDRESS = 'GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA';
 
 describe('TaxReportExport', () => {
   let mockClient: ReturnType<typeof getClient>;
@@ -38,17 +50,60 @@ describe('TaxReportExport', () => {
           error: null,
         }),
       },
+      transaction: {
+        getHistory: vi.fn().mockResolvedValue({
+          data: [{ hash: 'tx-1', successful: true }],
+          error: null,
+          total: 1,
+        }),
+      },
+      operation: {
+        getOperations: vi.fn().mockResolvedValue({
+          data: [
+            {
+              id: 'op-1',
+              type: 'payment',
+              source: 'GOTHER',
+              destination: TEST_ADDRESS,
+              asset: 'XLM',
+              amount: '10',
+              success: true,
+              createdAt: '2024-06-01T12:00:00Z',
+            },
+          ],
+          error: null,
+        }),
+      },
     } as unknown as ReturnType<typeof getClient>;
 
     initClient(mockClient);
   });
 
-  const renderWithProvider = (element: React.ReactElement) => {
+  const renderWithProvider = (
+    element: React.ReactElement,
+    client: ReturnType<typeof getClient> = mockClient,
+  ) => {
     return render(
-      <SorokitProvider client={mockClient}>
+      <SorokitProvider client={client}>
         {element}
       </SorokitProvider>,
     );
+  };
+
+  const renderConnected = async (
+    element: React.ReactElement,
+    client: ReturnType<typeof getClient> = mockClient,
+  ) => {
+    const utils = render(
+      <SorokitProvider client={client}>
+        <ConnectTrigger />
+        {element}
+      </SorokitProvider>,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect Wallet' }));
+    });
+    return utils;
   };
 
   describe('rendering', () => {
@@ -124,7 +179,7 @@ describe('TaxReportExport', () => {
     });
 
     it('allows load transactions button when date range is valid', async () => {
-      renderWithProvider(<TaxReportExport />);
+      await renderConnected(<TaxReportExport />);
 
       const fromInput = screen.getByLabelText('Tax report from date');
       const toInput = screen.getByLabelText('Tax report to date');
@@ -172,7 +227,20 @@ describe('TaxReportExport', () => {
     });
 
     it('shows loading state while transactions are loading', async () => {
-      renderWithProvider(<TaxReportExport />);
+      let resolveHistory: ((val: unknown) => void) | undefined;
+      const pendingClient = {
+        ...mockClient,
+        transaction: {
+          getHistory: vi.fn().mockReturnValue(
+            new Promise((resolve) => {
+              resolveHistory = resolve;
+            }),
+          ),
+        },
+      } as unknown as ReturnType<typeof getClient>;
+
+      initClient(pendingClient);
+      await renderConnected(<TaxReportExport />, pendingClient);
 
       const loadBtn = screen.getByRole('button', { name: /Load transactions/i });
       expect(loadBtn).not.toBeDisabled();
@@ -180,51 +248,56 @@ describe('TaxReportExport', () => {
       fireEvent.click(loadBtn);
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /Loading/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Loading/i })).toBeDisabled();
+      });
+
+      await act(async () => {
+        resolveHistory?.({ data: [], error: null, total: 0 });
       });
     });
 
     it('displays error message when transaction load fails', async () => {
       const errorClient = {
         ...mockClient,
-        account: {
-          ...mockClient.account,
-          getOperations: vi.fn().mockRejectedValue(new Error('Network error')),
+        transaction: {
+          getHistory: vi.fn().mockRejectedValue(new Error('Network error')),
         },
       } as unknown as ReturnType<typeof getClient>;
 
       initClient(errorClient);
-      renderWithProvider(<TaxReportExport />);
+      await renderConnected(<TaxReportExport />, errorClient);
 
       const loadBtn = screen.getByRole('button', { name: /Load transactions/i });
       fireEvent.click(loadBtn);
 
       await waitFor(() => {
-        expect(screen.getByRole('alert')).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('Network error');
       });
     });
   });
 
   describe('price inputs', () => {
     it('shows price input fields when operations are loaded', async () => {
-      renderWithProvider(<TaxReportExport />);
+      await renderConnected(<TaxReportExport />);
 
       const loadBtn = screen.getByRole('button', { name: /Load transactions/i });
       fireEvent.click(loadBtn);
 
       await waitFor(() => {
-        // After operations load, price inputs should appear
-        // This is a simplified test; actual implementation depends on operations data
-        expect(loadBtn).toBeInTheDocument();
+        expect(screen.getByRole('spinbutton', { name: /XLM price on 2024-06-01/i })).toBeInTheDocument();
       });
     });
 
-    it('accepts numeric price values', () => {
-      renderWithProvider(<TaxReportExport />);
+    it('accepts numeric price values', async () => {
+      await renderConnected(<TaxReportExport />);
 
-      // Test that price inputs accept numbers
-      const inputs = screen.getAllByRole('textbox');
-      expect(inputs).toBeDefined();
+      fireEvent.click(screen.getByRole('button', { name: /Load transactions/i }));
+
+      const priceInput = await screen.findByRole('spinbutton', {
+        name: /XLM price on 2024-06-01/i,
+      });
+      fireEvent.change(priceInput, { target: { value: '0.25' } });
+      expect(priceInput).toHaveValue(0.25);
     });
 
     it('rejects negative price values', () => {

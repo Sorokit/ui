@@ -1,11 +1,21 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SorokitProvider } from "@/context/SorokitProvider";
+import { useSorokit } from "@/context/useSorokit";
 import { getClient, initClient } from "@/lib/client";
 
 import { DashboardOverview } from "./DashboardOverview";
+
+function ConnectTrigger() {
+  const { connectWallet } = useSorokit();
+  return (
+    <button type="button" onClick={() => void connectWallet()}>
+      Connect Wallet
+    </button>
+  );
+}
 
 describe("DashboardOverview", () => {
   let mockClient: ReturnType<typeof getClient>;
@@ -46,12 +56,31 @@ describe("DashboardOverview", () => {
     initClient(mockClient);
   });
 
-  const renderWithProvider = (element: React.ReactElement) => {
+  const renderWithProvider = (
+    element: React.ReactElement,
+    client: ReturnType<typeof getClient> = mockClient,
+  ) => {
     return render(
-      <SorokitProvider client={mockClient}>
+      <SorokitProvider client={client}>
         {element}
       </SorokitProvider>,
     );
+  };
+
+  const renderConnected = async (
+    element: React.ReactElement,
+    client: ReturnType<typeof getClient> = mockClient,
+  ) => {
+    const utils = render(
+      <SorokitProvider client={client}>
+        <ConnectTrigger />
+        {element}
+      </SorokitProvider>,
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+    });
+    return utils;
   };
 
   describe("rendering without connection", () => {
@@ -110,7 +139,7 @@ describe("DashboardOverview", () => {
   describe("rendering with connection", () => {
     it("displays balance summary after wallet connects", async () => {
       const onNavigate = vi.fn();
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(<DashboardOverview onNavigate={onNavigate} />);
 
       await waitFor(() => {
         expect(screen.getByTestId("balance-summary")).toBeInTheDocument();
@@ -119,17 +148,17 @@ describe("DashboardOverview", () => {
 
     it("displays XLM balance correctly", async () => {
       const onNavigate = vi.fn();
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(<DashboardOverview onNavigate={onNavigate} />);
 
       await waitFor(() => {
         expect(screen.getByText("XLM Balance")).toBeInTheDocument();
-        expect(screen.getByText("1500.5")).toBeInTheDocument();
+        expect(screen.getByText("1,500.50")).toBeInTheDocument();
       });
     });
 
     it("displays asset count correctly", async () => {
       const onNavigate = vi.fn();
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(<DashboardOverview onNavigate={onNavigate} />);
 
       await waitFor(() => {
         expect(screen.getByText("Assets")).toBeInTheDocument();
@@ -175,21 +204,24 @@ describe("DashboardOverview", () => {
       initClient(mockLoadingClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockLoadingClient,
+      );
 
-      // Check for skeleton while loading
-      expect(screen.getByTestId("balance-summary-skeleton")).toBeInTheDocument();
+      // Check for skeletons while loading (one per summary card)
+      expect(screen.getAllByTestId("balance-summary-skeleton").length).toBeGreaterThan(0);
 
       // Wait for data to load
       await waitFor(() => {
         expect(screen.queryByTestId("balance-summary-skeleton")).not.toBeInTheDocument();
-        expect(screen.getByText("1500.5")).toBeInTheDocument();
+        expect(screen.getByText("1,500.50")).toBeInTheDocument();
       });
     });
 
     it("displays recent transactions widget when connected", async () => {
       const onNavigate = vi.fn();
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(<DashboardOverview onNavigate={onNavigate} />);
 
       await waitFor(() => {
         // RecentTransactionsWidget should be rendered within DashboardOverview
@@ -260,11 +292,14 @@ describe("DashboardOverview", () => {
       initClient(mockZeroBalanceClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockZeroBalanceClient,
+      );
 
       await waitFor(() => {
         expect(screen.getByText("XLM Balance")).toBeInTheDocument();
-        expect(screen.getByText("0")).toBeInTheDocument();
+        expect(screen.getByText("0.00")).toBeInTheDocument();
       });
     });
 
@@ -286,7 +321,10 @@ describe("DashboardOverview", () => {
       initClient(mockSingleAssetClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockSingleAssetClient,
+      );
 
       await waitFor(() => {
         expect(screen.getByText("Assets")).toBeInTheDocument();
@@ -312,7 +350,10 @@ describe("DashboardOverview", () => {
       initClient(mockErrorClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockErrorClient,
+      );
 
       // Dashboard should still render quick actions
       await waitFor(() => {
@@ -340,10 +381,13 @@ describe("DashboardOverview", () => {
       initClient(mockLargeBalanceClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockLargeBalanceClient,
+      );
 
       await waitFor(() => {
-        expect(screen.getByText(/999999999/)).toBeInTheDocument();
+        expect(screen.getByText("1,000,000,000.00")).toBeInTheDocument();
       });
     });
   });
@@ -395,7 +439,10 @@ describe("DashboardOverview", () => {
       initClient(mockLoadingClient);
       const onNavigate = vi.fn();
 
-      renderWithProvider(<DashboardOverview onNavigate={onNavigate} />);
+      await renderConnected(
+        <DashboardOverview onNavigate={onNavigate} />,
+        mockLoadingClient,
+      );
 
       await waitFor(() => {
         const summary = screen.getByTestId("balance-summary");

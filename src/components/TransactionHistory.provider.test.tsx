@@ -81,6 +81,8 @@ describe("TransactionHistory inside a mock SorokitProvider (#554)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
+    window.localStorage.clear();
+    window.sessionStorage.clear();
     getHistory = vi.fn().mockResolvedValue({
       data: Array.from({ length: PAGE_SIZE }, (_, i) => makeTx(i)),
       error: null,

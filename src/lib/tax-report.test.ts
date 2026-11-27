@@ -58,8 +58,10 @@ describe("buildTaxReport", () => {
   });
 
   it("leaves gain empty when a price is missing", () => {
-    const partial = { ...PRICES };
-    delete partial[priceKey("XLM", "2026-01-01")];
+    const omittedKey = priceKey("XLM", "2026-01-01");
+    const partial = Object.fromEntries(
+      Object.entries(PRICES).filter(([key]) => key !== omittedKey),
+    );
     const disposal = buildTaxReport(OPS, ME, partial)[2];
     expect(disposal.gainLoss).toBeNull();
     expect(disposal.note).toContain("Missing acquisition price");

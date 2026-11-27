@@ -230,7 +230,7 @@ describe("TransactionConfirmModal", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Signing…/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Loading" })).toHaveTextContent(/Signing…/i);
   });
 
   it("preserves precision for stroop amounts beyond Number.MAX_SAFE_INTEGER", () => {

@@ -76,9 +76,9 @@ export function RecentTransactionsWidget({
       return;
     }
 
-    let client: SorokitClient | undefined;
+    let client: SorokitClient;
     try {
-      client = sorokit.client ?? undefined;
+      client = sorokit.client;
     } catch {
       return;
     }
