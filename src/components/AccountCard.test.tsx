@@ -491,4 +491,35 @@ describe("AccountCard — Avatar Hashing & Clipboard Fallback", () => {
       document.execCommand = originalExec;
     });
   });
+
+  describe("QR Code Modal (#1129)", () => {
+    it("renders QR Code button on address card and opens modal", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        address: "GABC1234567890",
+        account: {
+          sequence: "123",
+          subentryCount: 2,
+        },
+        isLoadingAccount: false,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<AccountCard />);
+
+      const qrBtn = screen.getByRole("button", { name: /Export as QR Code|QR Code/i });
+      expect(qrBtn).toBeInTheDocument();
+
+      // Click to open modal
+      fireEvent.click(qrBtn);
+
+      const modal = screen.getByRole("dialog");
+      expect(modal).toBeInTheDocument();
+      expect(screen.getByText("Account QR Code")).toBeInTheDocument();
+      expect(screen.getByText("GABC1234567890")).toBeInTheDocument();
+
+      // Close modal
+      const closeBtn = screen.getByRole("button", { name: "Close" });
+      fireEvent.click(closeBtn);
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
 });
