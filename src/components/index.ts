@@ -358,3 +358,34 @@ export type {
 export { ToastContainer } from "./ui/Toast";
 export type { TooltipProps } from "./ui/Tooltip";
 export { Tooltip } from "./ui/Tooltip";
+
+// Hardware wallet support (#1153)
+export type { HardwareWalletBadgeProps } from "./HardwareWalletBadge";
+export { HardwareWalletBadge } from "./HardwareWalletBadge";
+export { HARDWARE_HIGH_VALUE_THRESHOLD_STROOPS } from "./TransactionConfirmModal";
+
+// Localization (#1157)
+export type { I18nProviderProps, I18nValue } from "../i18n";
+export type { Locale, TranslationKey, Translations } from "../i18n";
+export { I18nContext, I18nProvider, useI18n } from "../i18n";
+export {
+  DEFAULT_LOCALE,
+  isLocale,
+  LOCALE_LABELS,
+  LOCALE_STORAGE_KEY,
+  SUPPORTED_LOCALES,
+  translations,
+} from "../i18n";
+
+// Biometric quick unlock (#1152)
+export type { BiometricState } from "../hooks/useBiometric";
+export { useBiometric } from "../hooks/useBiometric";
+export {
+  authenticateBiometric,
+  BIOMETRIC_CREDENTIAL_KEY,
+  BIOMETRIC_ENABLED_KEY,
+  disableBiometric,
+  isBiometricEnabled,
+  isBiometricSupported,
+  registerBiometric,
+} from "../lib/biometric";

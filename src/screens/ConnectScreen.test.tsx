@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 
@@ -305,6 +305,101 @@ describe("ConnectScreen", () => {
 
       expect(screen.queryByRole("link", { name: /open lobstr app/i })).not.toBeInTheDocument();
       expect(screen.queryByRole("link", { name: /open albedo app/i })).not.toBeInTheDocument();
+    });
+  });
+
+  // ── Biometric quick unlock (#1152) ──────────────────────────────────────
+  describe("biometric quick unlock (#1152)", () => {
+    const win = window as unknown as { PublicKeyCredential?: unknown };
+    let originalPublicKeyCredential: unknown;
+
+    function enableBiometricInStorage() {
+      localStorage.setItem("sorokit_biometric_enabled", "true");
+      localStorage.setItem("sorokit_biometric_credential", btoa("credential-id"));
+    }
+
+    function mockSorokit(connectWallet = vi.fn()) {
+      vi.mocked(useSorokit).mockReturnValue({
+        connectWallet,
+        isConnecting: false,
+        error: null,
+        clearError: vi.fn(),
+      } as unknown as ReturnType<typeof useSorokit>);
+      return connectWallet;
+    }
+
+    beforeEach(() => {
+      localStorage.clear();
+      originalPublicKeyCredential = win.PublicKeyCredential;
+      win.PublicKeyCredential = class {};
+      Object.defineProperty(navigator, "credentials", {
+        configurable: true,
+        value: { create: vi.fn(), get: vi.fn().mockResolvedValue({ id: "credential-id" }) },
+      });
+      if (!globalThis.crypto?.getRandomValues) {
+        Object.defineProperty(globalThis, "crypto", {
+          configurable: true,
+          value: {
+            getRandomValues: (arr: Uint8Array) => {
+              for (let i = 0; i < arr.length; i += 1) arr[i] = i;
+              return arr;
+            },
+          },
+        });
+      }
+    });
+
+    afterEach(() => {
+      if (originalPublicKeyCredential === undefined) {
+        delete win.PublicKeyCredential;
+      } else {
+        win.PublicKeyCredential = originalPublicKeyCredential;
+      }
+    });
+
+    it("shows the unlock button only when biometrics were enabled in settings", () => {
+      mockSorokit();
+      const { unmount } = render(<ConnectScreen />);
+      expect(screen.queryByTestId("biometric-unlock-button")).toBeNull();
+
+      enableBiometricInStorage();
+      unmount();
+      render(<ConnectScreen />);
+      expect(screen.getByTestId("biometric-unlock-button")).toBeInTheDocument();
+    });
+
+    it("connects the wallet after a verified biometric assertion", async () => {
+      const connectWallet = mockSorokit();
+      enableBiometricInStorage();
+      render(<ConnectScreen />);
+
+      await waitFor(() => {
+        fireEvent.click(screen.getByTestId("biometric-unlock-button"));
+        expect(connectWallet).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("falls back to the standard wallet button when verification fails", async () => {
+      const connectWallet = mockSorokit();
+      enableBiometricInStorage();
+      Object.defineProperty(navigator, "credentials", {
+        configurable: true,
+        value: {
+          create: vi.fn(),
+          get: vi.fn().mockRejectedValue(new Error("NotAllowedError")),
+        },
+      });
+      render(<ConnectScreen />);
+
+      fireEvent.click(screen.getByTestId("biometric-unlock-button"));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Biometric unlock was not verified. Connect your wallet instead."),
+        ).toBeInTheDocument();
+      });
+      expect(connectWallet).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /Connect Wallet/i })).toBeInTheDocument();
     });
   });
 });

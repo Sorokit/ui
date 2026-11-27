@@ -7,6 +7,7 @@ import { SorokitProvider } from './context/SorokitProvider';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { useSorokit } from './context/useSorokit';
 import { useAuditLogging } from './hooks/useAuditLogging';
+import { I18nProvider } from './i18n';
 import type { SorokitClient } from './lib/client';
 import { SECTION_PATHS,sectionForPath } from './lib/nav-routes';
 import { applyPreferences } from './lib/preferences';
@@ -73,12 +74,14 @@ function AppContent() {
 
 function App({ client }: AppProps) {
   return (
-    <SorokitProvider client={client}>
-      <ToastProvider>
-        <AppContent />
-        <ToastRenderer />
-      </ToastProvider>
-    </SorokitProvider>
+    <I18nProvider>
+      <SorokitProvider client={client}>
+        <ToastProvider>
+          <AppContent />
+          <ToastRenderer />
+        </ToastProvider>
+      </SorokitProvider>
+    </I18nProvider>
   );
 }
 
