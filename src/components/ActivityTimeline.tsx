@@ -51,8 +51,16 @@ const STATUS_FILTER_CHIPS = [
  * often. Compares local calendar days, matching how `group.date` is
  * produced from local-time buckets server-side.
  */
+function parseLocalDate(dateStr: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  return new Date(dateStr);
+}
+
 function formatDateLabel(dateStr: string, now: Date = new Date()): string {
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   const startOfDay = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const daysAgo = Math.round(

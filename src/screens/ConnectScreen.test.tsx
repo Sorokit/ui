@@ -37,8 +37,9 @@ describe("ConnectScreen", () => {
 
     render(<ConnectScreen />);
 
-    const btn = screen.getByRole("button", { name: /Connecting/i });
+    const btn = screen.getByRole("button", { name: "Loading" });
     expect(btn).toBeDisabled();
+    expect(btn).toHaveTextContent(/Connecting/i);
     expect(screen.getByText("Connecting to your wallet…")).toBeInTheDocument();
   });
 

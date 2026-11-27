@@ -39,10 +39,13 @@ vi.mock("../lib/client", () => ({
 describe("SorobanPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockInvokeContract.mockReset();
+    mockSimulateContract.mockReset();
     // The component persists its invocation-debugger history to
-    // sessionStorage; without clearing it, entries written by one test leak
-    // into the next and make history-dependent assertions order-dependent.
+    // sessionStorage and contract IDs to localStorage; without clearing both,
+    // entries written by one test leak into the next.
     sessionStorage.clear();
+    localStorage.clear();
     vi.mocked(useSorokit).mockReturnValue({
       isConnected: true,
       address: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWNA",
@@ -195,7 +198,6 @@ describe("SorobanPanel", () => {
 
     expect(textarea.rows).toBe(6);
   });
-});
 
   // Issue #543 — the Arguments textarea must be programmatically associated
   // with its label, and its validation error with the field itself.
@@ -411,7 +413,8 @@ describe("SorobanPanel", () => {
     });
 
     it("keeps the 20-entry cap after a remount", async () => {
-      const existing = Array.from({ length: 20 }, (_, i) => fakeContractId(i + 1));
+      // Newest-first order: fakeContractId(20) is newest, fakeContractId(1) is oldest at index 19.
+      const existing = Array.from({ length: 20 }, (_, i) => fakeContractId(20 - i));
       localStorage.setItem(
         "sorokit-soroban-contract-history",
         JSON.stringify(existing),
@@ -799,12 +802,15 @@ describe("SorobanPanel", () => {
 
   // ── Issue #912: missing contracts, ABI method switching ──────────────────
   describe("missing contract error banner (#912)", () => {
+    const MISSING_CONTRACT_ID =
+      "CMISSINGAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
     it("renders an error banner when invokeContract reports the contract is not found", async () => {
       mockInvokeContract.mockResolvedValueOnce({
         data: null,
         error: "Contract not found: CMISSING (404)",
       });
-      render(<SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />);
+      render(<SorobanPanel contractId={MISSING_CONTRACT_ID} onContractIdChange={() => {}} />);
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
       fireEvent.click(screen.getByTestId("soroban-submit"));
 
@@ -818,7 +824,7 @@ describe("SorobanPanel", () => {
       mockInvokeContract.mockRejectedValueOnce(
         new Error("Request failed with status 404: contract code not found"),
       );
-      render(<SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />);
+      render(<SorobanPanel contractId={MISSING_CONTRACT_ID} onContractIdChange={() => {}} />);
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
       fireEvent.click(screen.getByTestId("soroban-submit"));
 
@@ -833,7 +839,7 @@ describe("SorobanPanel", () => {
         error: "Contract not found: CMISSING (404)",
       });
       render(
-        <SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} mode="simulate" />,
+        <SorobanPanel contractId={MISSING_CONTRACT_ID} onContractIdChange={() => {}} mode="simulate" />,
       );
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
       fireEvent.click(screen.getByTestId("soroban-submit"));
@@ -850,13 +856,13 @@ describe("SorobanPanel", () => {
         error: "Contract not found: CMISSING (404)",
       });
       const { rerender } = render(
-        <SorobanPanel contractId="CMISSING" onContractIdChange={() => {}} />,
+        <SorobanPanel contractId={MISSING_CONTRACT_ID} onContractIdChange={() => {}} />,
       );
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "balance" } });
       fireEvent.click(screen.getByTestId("soroban-submit"));
       await screen.findByTestId("soroban-error");
 
-      rerender(<SorobanPanel contractId="CFOUND" onContractIdChange={() => {}} />);
+      rerender(<SorobanPanel contractId="CFOUNDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" onContractIdChange={() => {}} />);
       await waitFor(() =>
         expect(screen.queryByTestId("soroban-error")).not.toBeInTheDocument(),
       );
@@ -891,7 +897,7 @@ describe("SorobanPanel", () => {
 
     it("invokes the new method without the previous method's arguments", async () => {
       mockInvokeContract.mockResolvedValueOnce({ data: { ok: true }, error: null });
-      render(<SorobanPanel contractId="C123" onContractIdChange={() => {}} />);
+      render(<SorobanPanel contractId="CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" onContractIdChange={() => {}} />);
       await loadAbi(["transfer", "balance"]);
 
       fireEvent.change(screen.getByLabelText("Method"), { target: { value: "transfer" } });
@@ -1072,3 +1078,4 @@ describe("SorobanPanel", () => {
       );
     });
   });
+});

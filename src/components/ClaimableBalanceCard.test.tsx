@@ -483,10 +483,16 @@ describe("ClaimableBalanceCard", () => {
 
       fireEvent.click(screen.getAllByRole("button", { name: "Claim" })[0]);
 
-      const buttons = screen.getAllByRole("button", { name: /Claim/ });
-      expect(buttons[1]).not.toBeDisabled();
+      // The in-flight card's button switches to aria-label="Loading" and is disabled,
+      // while the second card's Claim button remains enabled.
+      expect(screen.getByRole("button", { name: "Loading" })).toBeDisabled();
+      const buttons = screen.getAllByRole("button", { name: "Claim" });
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).not.toBeDisabled();
 
-      resolveClaim?.({ data: { hash: "x" }, error: null });
+      await act(async () => {
+        resolveClaim?.({ data: { hash: "x" }, error: null });
+      });
     });
   });
 

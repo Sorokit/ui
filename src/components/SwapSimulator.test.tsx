@@ -717,7 +717,7 @@ describe("SwapSimulator", () => {
       const input = screen.getByPlaceholderText("0.0");
       fireEvent.change(input, { target: { value: "10000" } });
       // Verify high price impact badge is shown with "High" status
-      expect(screen.getByText(/high/i)).toBeInTheDocument();
+      expect(screen.getByText("High")).toBeInTheDocument();
     });
 
     it("shows correct color coding for low price impact (< 1%)", () => {
@@ -732,7 +732,7 @@ describe("SwapSimulator", () => {
       const input = screen.getByPlaceholderText("0.0");
       fireEvent.change(input, { target: { value: "10" } });
       // Should show "Low" badge for small price impact
-      expect(screen.getByText(/low/i)).toBeInTheDocument();
+      expect(screen.getByText("Low")).toBeInTheDocument();
     });
 
     it("shows correct color coding for medium price impact (1-5%)", () => {
@@ -743,11 +743,11 @@ describe("SwapSimulator", () => {
           }}
         />,
       );
-      // Medium input on moderate liquidity creates medium impact
+      // Medium input on moderate liquidity creates medium impact (1% - 5%)
       const input = screen.getByPlaceholderText("0.0");
-      fireEvent.change(input, { target: { value: "1000" } });
+      fireEvent.change(input, { target: { value: "250" } });
       // Should show "Medium" badge
-      expect(screen.getByText(/medium/i)).toBeInTheDocument();
+      expect(screen.getByText("Medium")).toBeInTheDocument();
     });
 
     it("shows critical red banner when slippage is exceeded with extreme impact", () => {
@@ -769,7 +769,7 @@ describe("SwapSimulator", () => {
 
       // Should show "High Slippage Warning" banner in red
       expect(screen.getByText(/high slippage warning/i)).toBeInTheDocument();
-      const banner = screen.getByText(/high slippage warning/i).closest("div");
+      const banner = screen.getByText(/high slippage warning/i).closest("div.bg-error-dim");
       expect(banner).toHaveClass("bg-error-dim");
     });
   });
@@ -813,13 +813,13 @@ describe("SwapSimulator", () => {
       // Get initial price impact
       const input = screen.getByPlaceholderText("0.0");
       fireEvent.change(input, { target: { value: "100" } });
-      expect(screen.getByText(/price impact/i)).toBeInTheDocument();
+      expect(screen.getByText("Price Impact:")).toBeInTheDocument();
 
       // Switch to high liquidity
       const highBtn = screen.getByText(/high liq/i);
       fireEvent.click(highBtn);
       // Price impact should decrease with higher liquidity multiplier
-      expect(screen.getByText(/price impact/i)).toBeInTheDocument();
+      expect(screen.getByText("Price Impact:")).toBeInTheDocument();
     });
 
     it("handles empty or missing custom poolReserves gracefully", () => {
@@ -838,8 +838,7 @@ describe("SwapSimulator", () => {
       // Click on impact chart tab (should be default)
       expect(screen.getByText("Price Impact Curve")).toBeInTheDocument();
       // SVG should be rendered
-      const svgs = screen.getAllByRole("img", { hidden: true });
-      expect(svgs.length).toBeGreaterThan(0);
+      expect(screen.getByTestId("price-impact-chart")).toBeInTheDocument();
     });
 
     it("respects asset pair mapping in custom poolReserves", () => {
@@ -1030,7 +1029,7 @@ describe("SwapSimulator", () => {
       render(<SwapSimulator />);
 
       const input = screen.getByPlaceholderText("0.0");
-      fireEvent.change(input, { target: { value: "200" } });
+      fireEvent.change(input, { target: { value: "400" } });
 
       // At 299ms, should not have updated
       act(() => {
@@ -1042,7 +1041,7 @@ describe("SwapSimulator", () => {
       act(() => {
         vi.advanceTimersByTime(1);
       });
-      expect(screen.getByText("Max Size: 400 XLM")).toBeInTheDocument();
+      expect(screen.getByText("Max Size: 800 XLM")).toBeInTheDocument();
 
       vi.useRealTimers();
     });

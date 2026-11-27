@@ -91,7 +91,7 @@ describe("Payment Flow Integration", () => {
     // Verify the transient signing state appears on the confirm modal (the
     // underlying page's own "Submitting…" button is aria-hidden by the
     // modal while it's open, so this is what's actually reachable/visible).
-    expect(screen.getByRole("button", { name: /signing/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Loading" })).toHaveTextContent(/signing/i);
 
     // Verify success state renders
     await waitFor(() => {

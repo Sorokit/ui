@@ -65,15 +65,9 @@ const config = {
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: ["./src/test/setup.ts"],
     testTimeout: 10000,
-    // The suite drives a lot of DOM-heavy components; running file-by-file in
-    // a single fork keeps it deterministic on CI runners.
-    fileParallelism: false,
+    // Isolate each test file in its own fork so global stubs/timers never leak
+    // across files.
     pool: "forks",
-    poolOptions: {
-      forks: {
-        singleFork: true,
-      },
-    },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
