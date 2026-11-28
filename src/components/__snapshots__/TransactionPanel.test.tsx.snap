@@ -1,0 +1,218 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`TransactionPanel > matches snapshot 1`] = `
+<div>
+  <div
+    class="rounded-xl border border-line bg-surface overflow-hidden"
+  >
+    <div
+      class="px-5 py-4 border-b border-line"
+    >
+      <h3
+        class="text-[14px] font-semibold text-ink"
+      >
+        Send Payment
+      </h3>
+      <p
+        class="text-[12px] text-ink-3 mt-0.5"
+      >
+        Submit a payment on the Stellar network
+      </p>
+    </div>
+    <div
+      class="px-6 py-6"
+    >
+      <form
+        class="flex flex-col gap-5"
+        id="_r_0_"
+      >
+        <div
+          class="flex flex-col gap-1.5"
+        >
+          <label
+            class="text-[12px] font-medium text-ink-2"
+            for="_r_1_"
+          >
+            Destination Address
+          </label>
+          <div
+            class="relative flex items-center"
+          >
+            <input
+              aria-invalid="false"
+              class="h-9 w-full rounded-lg border bg-surface-2 text-[13px] text-ink placeholder:text-ink-4 outline-none transition-colors border-line focus:border-line-2 focus:ring-1 focus:ring-brand-dim disabled:opacity-40 disabled:cursor-not-allowed px-3.5"
+              id="_r_1_"
+              placeholder="G..."
+              value=""
+            />
+          </div>
+          <div
+            class="min-h-[18px] relative"
+          >
+            <p
+              class="absolute inset-x-0 top-0 text-[11px] text-red transition-opacity duration-150 opacity-0 pointer-events-none"
+              id="_r_1_-error"
+            />
+            <p
+              class="absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150 opacity-0 pointer-events-none"
+              data-testid="input-hint"
+              id="_r_1_-hint"
+            />
+          </div>
+        </div>
+        <div
+          class="flex flex-col gap-1.5"
+        >
+          <label
+            class="text-[12px] font-medium text-ink-2"
+            for="asset"
+          >
+            Asset
+          </label>
+          <select
+            class="h-9 w-full rounded-lg border border-line bg-surface-2 px-3.5 text-[13px] text-ink outline-none transition-colors focus:border-line-2 focus:ring-1 focus:ring-brand-dim disabled:opacity-40 disabled:cursor-not-allowed"
+            id="asset"
+          >
+            <option
+              value="XLM"
+            >
+              XLM
+               — 
+              100
+            </option>
+          </select>
+        </div>
+        <div
+          class="flex flex-col gap-1.5"
+        >
+          <label
+            class="text-[12px] font-medium text-ink-2"
+            for="_r_3_"
+          >
+            Amount (XLM)
+          </label>
+          <div
+            class="relative flex items-center"
+          >
+            <input
+              aria-describedby="_r_3_-hint"
+              aria-invalid="false"
+              class="h-9 w-full rounded-lg border bg-surface-2 text-[13px] text-ink placeholder:text-ink-4 outline-none transition-colors border-line focus:border-line-2 focus:ring-1 focus:ring-brand-dim disabled:opacity-40 disabled:cursor-not-allowed px-3.5"
+              id="_r_3_"
+              max="100"
+              min="0.0000001"
+              placeholder="0.00"
+              step="0.0000001"
+              type="number"
+              value=""
+            />
+          </div>
+          <div
+            class="min-h-[18px] relative"
+          >
+            <p
+              class="absolute inset-x-0 top-0 text-[11px] text-red transition-opacity duration-150 opacity-0 pointer-events-none"
+              id="_r_3_-error"
+            />
+            <p
+              class="absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150 opacity-100"
+              data-testid="input-hint"
+              id="_r_3_-hint"
+            >
+              Balance: 100 XLM
+            </p>
+          </div>
+        </div>
+        <div
+          class="flex flex-col gap-1.5"
+        >
+          <label
+            class="text-[12px] font-medium text-ink-2"
+            for="memo-type"
+          >
+            Memo type
+          </label>
+          <select
+            class="h-9 w-full rounded-lg border border-line bg-surface-2 px-3.5 text-[13px] text-ink outline-none transition-colors focus:border-line-2 focus:ring-1 focus:ring-brand-dim disabled:opacity-40 disabled:cursor-not-allowed"
+            id="memo-type"
+          >
+            <option
+              value="none"
+            >
+              No memo
+            </option>
+            <option
+              value="text"
+            >
+              Text memo
+            </option>
+            <option
+              value="id"
+            >
+              Memo ID
+            </option>
+          </select>
+        </div>
+        <div
+          class="flex flex-col gap-1.5"
+        >
+          <div
+            class="flex flex-col gap-1.5"
+          >
+            <label
+              class="text-[12px] font-medium text-ink-2"
+              for="_r_5_"
+            >
+              Memo (optional)
+            </label>
+            <div
+              class="relative flex items-center"
+            >
+              <input
+                aria-invalid="false"
+                class="h-9 w-full rounded-lg border bg-surface-2 text-[13px] text-ink placeholder:text-ink-4 outline-none transition-colors border-line focus:border-line-2 focus:ring-1 focus:ring-brand-dim disabled:opacity-40 disabled:cursor-not-allowed px-3.5"
+                id="_r_5_"
+                placeholder="Text memo"
+                value=""
+              />
+            </div>
+            <div
+              class="min-h-[18px] relative"
+            >
+              <p
+                class="absolute inset-x-0 top-0 text-[11px] text-red transition-opacity duration-150 opacity-0 pointer-events-none"
+                id="_r_5_-error"
+              />
+              <p
+                class="absolute inset-x-0 top-0 text-[11px] text-ink-3 transition-opacity duration-150 opacity-0 pointer-events-none"
+                data-testid="input-hint"
+                id="_r_5_-hint"
+              />
+            </div>
+          </div>
+          <span
+            class="text-[10px] text-right text-ink-3"
+          >
+            0
+            /
+            28
+             bytes
+          </span>
+        </div>
+      </form>
+    </div>
+    <div
+      class="px-5 py-4 border-t border-line flex items-center gap-3"
+    >
+      <button
+        class="inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:opacity-40 disabled:cursor-not-allowed bg-brand text-white hover:bg-brand-hover h-9 px-4 text-[13px] gap-2 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+        disabled=""
+        form="_r_0_"
+        type="submit"
+      >
+        Send XLM
+      </button>
+    </div>
+  </div>
+</div>
+`;

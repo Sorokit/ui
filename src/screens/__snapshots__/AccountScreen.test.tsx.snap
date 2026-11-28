@@ -1,0 +1,145 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`AccountScreen > matches snapshot when connected 1`] = `
+<div>
+  <div
+    class="flex flex-col gap-5"
+  >
+    <h2
+      class="text-[18px] font-semibold text-ink"
+    >
+      Account
+    </h2>
+    <p
+      class="text-[13px] text-ink-3 -mt-3"
+    >
+      Balances and account details
+    </p>
+    <div
+      class="flex flex-col items-end gap-1"
+    >
+      <div
+        class="flex items-center gap-2"
+      >
+        <button
+          aria-label="Refresh account data"
+          class="inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:opacity-40 disabled:cursor-not-allowed bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink h-8 px-3.5 text-[12px] gap-1.5 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+        >
+          <svg
+            class=""
+            color="currentColor"
+            fill="none"
+            height="14"
+            stroke="currentColor"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
+            width="14"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M20.4879 15C19.2524 18.4956 15.9187 21 12 21C7.02943 21 3 16.9706 3 12C3 7.02943 7.02943 3 12 3C15.7292 3 18.9286 5.26806 20.2941 8.5"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+            />
+            <path
+              d="M15 9H18C19.4142 9 20.1213 9 20.5607 8.56066C21 8.12132 21 7.41421 21 6V3"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+            />
+          </svg>
+          Refresh
+        </button>
+        <button
+          aria-label="Export account data"
+          class="inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:opacity-40 disabled:cursor-not-allowed bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink h-8 px-3.5 text-[12px] gap-1.5 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+          data-testid="account-export-button"
+        >
+          <svg
+            class=""
+            color="currentColor"
+            fill="none"
+            height="14"
+            stroke="currentColor"
+            stroke-width="1.5"
+            viewBox="0 0 24 24"
+            width="14"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M2.99969 17.0002C2.99969 17.9302 2.99969 18.3952 3.10192 18.7767C3.37932 19.8119 4.18796 20.6206 5.22324 20.898C5.60474 21.0002 6.06972 21.0002 6.99969 21.0002L16.9997 21.0002C17.9297 21.0002 18.3947 21.0002 18.7762 20.898C19.8114 20.6206 20.6201 19.8119 20.8975 18.7767C20.9997 18.3952 20.9997 17.9302 20.9997 17.0002"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+            />
+            <path
+              d="M16.4998 11.5002C16.4998 11.5002 13.1856 16.0002 11.9997 16.0002C10.8139 16.0002 7.49976 11.5002 7.49976 11.5002M11.9997 15.0002V3.00016"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.5"
+            />
+          </svg>
+          Export
+        </button>
+        <a
+          aria-label="View GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA on Stellar Expert"
+          class="inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12px] font-medium text-ink-2 hover:text-ink hover:bg-surface-2 transition-colors"
+          data-testid="account-explorer-link"
+          href="https://stellar.expert/explorer/testnet/account/GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA"
+          rel="noreferrer"
+          target="_blank"
+        >
+          Explorer
+          <span
+            aria-hidden="true"
+          >
+            ↗
+          </span>
+        </a>
+      </div>
+    </div>
+    <div>
+      Account Card
+    </div>
+    <div>
+      Balance List
+    </div>
+    <div>
+      Claimable Balances
+    </div>
+  </div>
+</div>
+`;
+
+exports[`AccountScreen > matches snapshot when disconnected 1`] = `
+<div>
+  <div
+    class="flex flex-col gap-5"
+  >
+    <h2
+      class="text-[18px] font-semibold text-ink"
+    >
+      Account
+    </h2>
+    <p
+      class="text-[13px] text-ink-3 -mt-3"
+    >
+      Balances and account details
+    </p>
+    <div>
+      Account Card
+    </div>
+    <div>
+      Balance List
+    </div>
+    <div>
+      Claimable Balances
+    </div>
+  </div>
+</div>
+`;

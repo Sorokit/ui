@@ -48,6 +48,23 @@ function createMockState(overrides?: Partial<SorokitState>): SorokitState {
 }
 
 describe("WalletScreen", () => {
+  it("matches snapshot when disconnected", () => {
+    vi.mocked(useSorokit).mockReturnValue(createMockState());
+    const { container } = render(<WalletScreen />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("matches snapshot when connected", () => {
+    vi.mocked(useSorokit).mockReturnValue(
+      createMockState({
+        address: "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA",
+        isConnected: true,
+        balances: [{ asset: "XLM", balance: "500" }],
+      }),
+    );
+    const { container } = render(<WalletScreen />);
+    expect(container).toMatchSnapshot();
+  });
   const mockDisconnect = vi.fn();
   let getContextSpy: ReturnType<typeof vi.spyOn>;
 

@@ -1,3 +1,5 @@
+/* eslint-disable react-hooks/set-state-in-effect */
+import { useEffect, useState } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { AssetPill } from "@/components/AssetBadge";

@@ -51,6 +51,10 @@ function loadCategorySettings(): CategorySettings {
   }
 }
 
+export interface TxBreakdown {
+  type: string;
+  amount: number;
+  count: number;
 /** Spending at or above this share of the limit is flagged as critical. */
 const CRITICAL_THRESHOLD = 90;
 

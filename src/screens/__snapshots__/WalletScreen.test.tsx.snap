@@ -1,0 +1,276 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`WalletScreen > matches snapshot when connected 1`] = `
+<div>
+  <div
+    class="flex flex-col gap-6"
+  >
+    <div
+      class="rounded-xl border border-line bg-surface overflow-hidden"
+    >
+      <div
+        class="flex items-center justify-between px-6 py-5 border-b border-line"
+      >
+        <div
+          class="flex items-center gap-4"
+        >
+          <div
+            class="w-11 h-11 rounded-full bg-brand-dim border-2 border-[rgba(86,69,212,0.25)] flex items-center justify-center text-[13px] font-bold text-brand shrink-0"
+          >
+            GB
+          </div>
+          <div
+            class="flex flex-col gap-1"
+          >
+            <div
+              class="flex items-center gap-2.5"
+            >
+              <span
+                class="text-[15px] font-semibold text-ink"
+              >
+                Connected
+              </span>
+              <span
+                class="inline-flex items-center gap-1 rounded-full font-semibold tracking-wide px-2 py-1 text-[11px] bg-success-dim text-green border border-success-dim-strong"
+              >
+                <span
+                  aria-hidden="true"
+                  class="w-1 h-1 rounded-full shrink-0 bg-green"
+                />
+                Active
+              </span>
+            </div>
+            <div
+              class="flex flex-col gap-1"
+            >
+              <div
+                class="flex items-center gap-2 group"
+              >
+                <span
+                  class="break-all text-[11px]"
+                  data-address="true"
+                  data-state="closed"
+                >
+                  GBRPYHIL...ONXHPA
+                </span>
+                <span
+                  class="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red"
+                  data-testid="invalid-address-badge"
+                >
+                  Invalid address
+                </span>
+                <button
+                  aria-label="Copy address to clipboard"
+                  class="shrink-0 p-1 rounded-md transition-all text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100"
+                  data-state="closed"
+                >
+                  <svg
+                    class=""
+                    color="currentColor"
+                    fill="none"
+                    height="12"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="12"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M9 15C9 12.1716 9 10.7574 9.87868 9.87868C10.7574 9 12.1716 9 15 9L16 9C18.8284 9 20.2426 9 21.1213 9.87868C22 10.7574 22 12.1716 22 15V16C22 18.8284 22 20.2426 21.1213 21.1213C20.2426 22 18.8284 22 16 22H15C12.1716 22 10.7574 22 9.87868 21.1213C9 20.2426 9 18.8284 9 16L9 15Z"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                    <path
+                      d="M16.9999 9C16.9975 6.04291 16.9528 4.51121 16.092 3.46243C15.9258 3.25989 15.7401 3.07418 15.5376 2.90796C14.4312 2 12.7875 2 9.5 2C6.21252 2 4.56878 2 3.46243 2.90796C3.25989 3.07417 3.07418 3.25989 2.90796 3.46243C2 4.56878 2 6.21252 2 9.5C2 12.7875 2 14.4312 2.90796 15.5376C3.07417 15.7401 3.25989 15.9258 3.46243 16.092C4.51121 16.9528 6.04291 16.9975 9 16.9999"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                  </svg>
+                </button>
+                <span
+                  aria-live="polite"
+                  class="sr-only"
+                  role="status"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <button
+          class="inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:opacity-40 disabled:cursor-not-allowed bg-transparent text-ink border border-line-2 hover:bg-surface-2 h-8 px-3.5 text-[12px] gap-1.5 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+        >
+          Disconnect
+        </button>
+      </div>
+    </div>
+    <div
+      class="rounded-xl border border-line bg-surface overflow-hidden"
+    >
+      <div
+        class="px-6 py-5 border-b border-line"
+      >
+        <h3
+          class="text-[14px] font-semibold text-ink"
+        >
+          Receive Funds
+        </h3>
+        <p
+          class="text-[12px] text-ink-3 mt-0.5"
+        >
+          Scan the QR code or copy the address to receive payments
+        </p>
+      </div>
+      <div
+        class="px-6 py-6 flex flex-col sm:flex-row items-center sm:items-start gap-6"
+      >
+        <div
+          class="flex flex-col items-center gap-2"
+        >
+          <figure
+            class="flex flex-col items-center gap-3 shrink-0"
+          >
+            <div
+              class="rounded-xl border border-line p-3 bg-[var(--color-qr-canvas-bg)] shadow-[0_4px_16px_rgba(0,0,0,0.3)] flex items-center justify-center"
+              style="width: 164px; height: 164px;"
+            >
+              <canvas
+                aria-label="QR code to receive funds at address GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA"
+                role="img"
+                style="display: block; border-radius: 4px;"
+              />
+            </div>
+          </figure>
+          <button
+            class="inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand disabled:opacity-40 disabled:cursor-not-allowed bg-transparent text-ink border border-line-2 hover:bg-surface-2 h-8 px-3.5 text-[12px] gap-1.5 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed"
+          >
+            Show QR
+          </button>
+        </div>
+        <div
+          class="flex-1 min-w-0 w-full flex flex-col justify-center gap-1 sm:h-[164px]"
+        >
+          <dl
+            class="flex flex-col gap-1"
+          >
+            <dt
+              class="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4"
+            >
+              Address
+            </dt>
+            <dd
+              class="m-0"
+            >
+              <div
+                class="flex items-center gap-2 group"
+              >
+                <span
+                  class="break-all text-[11px] select-all"
+                  data-address="true"
+                  data-state="closed"
+                >
+                  GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA
+                </span>
+                <span
+                  class="rounded bg-error-dim px-1.5 py-0.5 text-[10px] font-medium text-red"
+                  data-testid="invalid-address-badge"
+                >
+                  Invalid address
+                </span>
+                <button
+                  aria-label="Copy address to clipboard"
+                  class="shrink-0 p-1 rounded-md transition-all text-ink-3 hover:text-ink-2 hover:bg-surface-2 opacity-50 hover:opacity-100"
+                  data-state="closed"
+                >
+                  <svg
+                    class=""
+                    color="currentColor"
+                    fill="none"
+                    height="12"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                    width="12"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      d="M9 15C9 12.1716 9 10.7574 9.87868 9.87868C10.7574 9 12.1716 9 15 9L16 9C18.8284 9 20.2426 9 21.1213 9.87868C22 10.7574 22 12.1716 22 15V16C22 18.8284 22 20.2426 21.1213 21.1213C20.2426 22 18.8284 22 16 22H15C12.1716 22 10.7574 22 9.87868 21.1213C9 20.2426 9 18.8284 9 16L9 15Z"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                    <path
+                      d="M16.9999 9C16.9975 6.04291 16.9528 4.51121 16.092 3.46243C15.9258 3.25989 15.7401 3.07418 15.5376 2.90796C14.4312 2 12.7875 2 9.5 2C6.21252 2 4.56878 2 3.46243 2.90796C3.25989 3.07417 3.07418 3.25989 2.90796 3.46243C2 4.56878 2 6.21252 2 9.5C2 12.7875 2 14.4312 2.90796 15.5376C3.07417 15.7401 3.25989 15.9258 3.46243 16.092C4.51121 16.9528 6.04291 16.9975 9 16.9999"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                    />
+                  </svg>
+                </button>
+                <span
+                  aria-live="polite"
+                  class="sr-only"
+                  role="status"
+                />
+              </div>
+            </dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`WalletScreen > matches snapshot when disconnected 1`] = `
+<div>
+  <div
+    class="flex flex-col gap-6"
+  >
+    <div
+      class="rounded-xl border border-line bg-surface overflow-hidden"
+    >
+      <div
+        class="flex items-center justify-between px-6 py-5 border-b border-line"
+      >
+        <div
+          class="flex items-center gap-4"
+        >
+          <div
+            class="w-11 h-11 rounded-full bg-brand-dim border-2 border-[rgba(86,69,212,0.25)] flex items-center justify-center text-[13px] font-bold text-brand shrink-0"
+          >
+            —
+          </div>
+          <div
+            class="flex flex-col gap-1"
+          >
+            <div
+              class="flex items-center gap-2.5"
+            >
+              <span
+                class="text-[15px] font-semibold text-ink"
+              >
+                Not connected
+              </span>
+              <span
+                class="inline-flex items-center gap-1 rounded-full font-semibold tracking-wide px-2 py-1 text-[11px] bg-surface-2 text-ink-2 border border-line-2"
+              >
+                <span
+                  aria-hidden="true"
+                  class="w-1 h-1 rounded-full shrink-0 bg-ink-3"
+                />
+                Inactive
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+`;

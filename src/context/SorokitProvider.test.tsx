@@ -2005,5 +2005,155 @@ describe("SorokitProvider", () => {
       });
     });
   });
+
+  describe("concurrent wallet/account/network state updates", () => {
+    it("handles concurrent connectWallet and switchNetwork calls without corrupting state", async () => {
+      let resolveConnect: (val: unknown) => void;
+      const connectPromise = new Promise((res) => {
+        resolveConnect = res;
+      });
+      mockClient.wallet.connect = vi.fn().mockImplementation(() => connectPromise);
+      mockClient.network.switchNetwork = vi.fn().mockResolvedValue({
+        data: { name: "testnet" },
+        error: null,
+      });
+
+      let capturedFns!: {
+        connectWallet: () => Promise<void>;
+        switchNetwork: (net: string) => Promise<void>;
+        refreshAccount: () => Promise<void>;
+      };
+
+      const ConcurrencyConsumer = () => {
+        const { connectWallet, switchNetwork, refreshAccount, address, network } = useSorokit();
+        useEffect(() => {
+          capturedFns = { connectWallet, switchNetwork, refreshAccount };
+        }, [connectWallet, switchNetwork, refreshAccount]);
+        return (
+          <div>
+            <div data-testid="address">{address || "none"}</div>
+            <div data-testid="network">{network ? network.name : "none"}</div>
+          </div>
+        );
+      };
+
+      await act(async () => {
+        renderWithProvider(<ConcurrencyConsumer />, { client: mockClient });
+      });
+
+      let connectDone = false;
+      let switchDone = false;
+      await act(async () => {
+        void capturedFns.connectWallet().then(() => { connectDone = true; });
+        void capturedFns.switchNetwork("testnet").then(() => { switchDone = true; });
+      });
+
+      expect(switchDone).toBe(true);
+      expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+
+      await act(async () => {
+        resolveConnect!({ data: { address: "GCONCURRENT" }, error: null });
+      });
+
+      await waitFor(() => {
+        expect(connectDone).toBe(true);
+        expect(screen.getByTestId("address")).toHaveTextContent("GCONCURRENT");
+        expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+      });
+    });
+
+    it("handles concurrent connect and disconnect calls without leaking stale connection", async () => {
+      let resolveConnect: (val: unknown) => void;
+      const connectPromise = new Promise((res) => {
+        resolveConnect = res;
+      });
+      mockClient.wallet.connect = vi.fn().mockImplementation(() => connectPromise);
+      mockClient.wallet.disconnect = vi.fn().mockResolvedValue(undefined);
+
+      let capturedFns!: {
+        connectWallet: () => Promise<void>;
+        disconnectWallet: () => Promise<void>;
+      };
+
+      const DisconnectConsumer = () => {
+        const { connectWallet, disconnectWallet, address } = useSorokit();
+        useEffect(() => {
+          capturedFns = { connectWallet, disconnectWallet };
+        }, [connectWallet, disconnectWallet]);
+        return <div data-testid="address">{address || "none"}</div>;
+      };
+
+      await act(async () => {
+        renderWithProvider(<DisconnectConsumer />, { client: mockClient });
+      });
+
+      await act(async () => {
+        void capturedFns.connectWallet();
+      });
+
+      await act(async () => {
+        void capturedFns.disconnectWallet();
+      });
+
+      await act(async () => {
+        resolveConnect!({ data: { address: "GLATE" }, error: null });
+      });
+
+      await act(async () => {
+        await capturedFns.disconnectWallet();
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("none");
+      });
+    });
+
+    it("handles concurrent refreshAccount and switchNetwork updates safely", async () => {
+      let capturedFns!: {
+        refreshAccount: () => Promise<void>;
+        switchNetwork: (net: string) => Promise<void>;
+        connectWallet: () => Promise<void>;
+      };
+
+      const MultiActionConsumer = () => {
+        const sorokit = useSorokit();
+        useEffect(() => {
+          capturedFns = {
+            refreshAccount: sorokit.refreshAccount,
+            switchNetwork: sorokit.switchNetwork,
+            connectWallet: sorokit.connectWallet,
+          };
+        }, [sorokit]);
+        return (
+          <div>
+            <div data-testid="address">{sorokit.address || "none"}</div>
+            <div data-testid="network">{sorokit.network ? sorokit.network.name : "none"}</div>
+            <div data-testid="error">{sorokit.error || "none"}</div>
+          </div>
+        );
+      };
+
+      await act(async () => {
+        renderWithProvider(<MultiActionConsumer />, { client: mockClient });
+      });
+
+      await act(async () => {
+        await capturedFns.connectWallet();
+      });
+
+      await act(async () => {
+        await Promise.allSettled([
+          capturedFns.refreshAccount(),
+          capturedFns.switchNetwork("testnet"),
+        ]);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("none");
+        expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+        expect(screen.getByTestId("error")).toHaveTextContent("none");
+      });
+    });
+  });
 });
 

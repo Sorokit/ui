@@ -39,6 +39,27 @@ URL.createObjectURL = mockCreateObjectURL;
 URL.revokeObjectURL = mockRevokeObjectURL;
 
 describe("AccountScreen", () => {
+  it("matches snapshot when disconnected", () => {
+    const { container } = render(<AccountScreen />);
+    expect(container).toMatchSnapshot();
+  });
+
+  it("matches snapshot when connected", () => {
+    mockContext({
+      isConnected: true,
+      address: "GBRPYHIL2CI3WHGSUJGY6O7SROQOMJG7QBCACN4QPKUOQNXJDGONXHPA",
+      network: {
+        name: "testnet",
+        passphrase: "Test SDF Network ; September 2015",
+        rpcUrl: "https://soroban-testnet.stellar.org",
+        horizonUrl: "https://horizon-testnet.stellar.org",
+      },
+      account: { sequence: "12345" } as ReturnType<typeof useSorokit>["account"],
+      balances: [{ asset: "XLM", balance: "100" }],
+    });
+    const { container } = render(<AccountScreen />);
+    expect(container).toMatchSnapshot();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mockContext();
