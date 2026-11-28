@@ -533,6 +533,11 @@ export function TransactionPanel({
         message: data?.hash ? `Hash: ${data.hash}` : undefined,
         duration: 5000,
       });
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("sorokit:transaction-submitted", { detail: data }),
+        );
+      }
       logAuditEvent(
         "send",
         `${amount.trim()} ${selectedAsset} to ${dest.trim()}`,
