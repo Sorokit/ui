@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { OnboardingTutorial } from './components/OnboardingTutorial';
 import type { NavSection } from './components/Sidebar';
+import { KeyboardShortcutsHelp } from './components/KeyboardShortcutsHelp';
 import { ToastContainer } from './components/ui/Toast';
 import { SorokitProvider } from './context/SorokitProvider';
 import { ToastProvider, useToast } from './context/ToastContext';
@@ -67,7 +68,7 @@ function AppContent() {
   return (
     <>
       <Dashboard activeSection={section} onSectionChange={handleSectionChange} />
-      <OnboardingTutorial />
+      <KeyboardShortcutsHelp />
     </>
   );
 }
