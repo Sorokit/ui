@@ -64,6 +64,18 @@ describe("NetworkBanner", () => {
     document.documentElement.style.removeProperty("--banner-height");
   });
 
+  it("keeps a subtle visible network label when the banner is minimized (#1062)", () => {
+    mockNetwork(TESTNET_NETWORK);
+    render(<NetworkBanner />);
+
+    fireEvent.click(screen.getByRole("button", { name: /minimize banner/i }));
+
+    const expand = screen.getByTestId("network-banner-expand");
+    expect(expand).toHaveTextContent("Testnet");
+    expect(expand.querySelector(".sr-only")).toBeNull();
+    expect(screen.getByText("Testnet")).toHaveClass("text-[10px]");
+  });
+
   it("renders nothing when network is null", () => {
     mockNetwork(null);
     const { container } = render(<NetworkBanner />);
@@ -210,6 +222,22 @@ describe("NetworkBanner", () => {
       unmount();
       expect(document.documentElement.style.getPropertyValue("--banner-height")).toBe("0px");
     });
+
+    it("sets --banner-height via fallback when ResizeObserver is unavailable", () => {
+      const originalResizeObserver = global.ResizeObserver;
+      // @ts-expect-error - ResizeObserver is being set to undefined to test fallback behaviour
+      global.ResizeObserver = undefined;
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        render(<NetworkBanner />);
+        const height = document.documentElement.style.getPropertyValue("--banner-height");
+        expect(height).toBeTruthy();
+        expect(height).toMatch(/^\d+px$/);
+      } finally {
+        global.ResizeObserver = originalResizeObserver;
+      }
+    });
   });
 
   describe("Session dismiss behavior", () => {
@@ -269,6 +297,68 @@ describe("NetworkBanner", () => {
 
       expect(screen.getByText("Futurenet")).toBeInTheDocument();
     });
+
+    it("persists dismissal in sessionStorage and stays dismissed across remount (#1099)", () => {
+      const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
+      const getItemSpy = vi.spyOn(window.sessionStorage, "getItem");
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        const { unmount } = render(<NetworkBanner />);
+
+        expect(screen.getByTestId("network-banner")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: /dismiss banner/i }));
+
+        expect(screen.queryByTestId("network-banner")).not.toBeInTheDocument();
+        expect(setItemSpy).toHaveBeenCalledWith(
+          "sorokit-banner-dismissed-testnet",
+          "true",
+        );
+
+        unmount();
+
+        const { container } = render(<NetworkBanner />);
+
+        expect(getItemSpy).toHaveBeenCalledWith("sorokit-banner-dismissed-testnet");
+        expect(container).toBeEmptyDOMElement();
+        expect(screen.queryByTestId("network-banner")).not.toBeInTheDocument();
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("0px");
+      } finally {
+        setItemSpy.mockRestore();
+        getItemSpy.mockRestore();
+      }
+    });
+
+    it("persists dismissal with custom storageKey across remount (#1099)", () => {
+      const setItemSpy = vi.spyOn(window.sessionStorage, "setItem");
+      const getItemSpy = vi.spyOn(window.sessionStorage, "getItem");
+
+      try {
+        mockNetwork(TESTNET_NETWORK);
+        const { unmount } = render(
+          <NetworkBanner storageKey="custom-persist-key" />,
+        );
+
+        fireEvent.click(screen.getByRole("button", { name: /dismiss banner/i }));
+
+        expect(setItemSpy).toHaveBeenCalledWith("custom-persist-key", "true");
+
+        unmount();
+
+        const { container } = render(
+          <NetworkBanner storageKey="custom-persist-key" />,
+        );
+
+        expect(getItemSpy).toHaveBeenCalledWith("custom-persist-key");
+        expect(container).toBeEmptyDOMElement();
+      } finally {
+        setItemSpy.mockRestore();
+        getItemSpy.mockRestore();
+      }
+    });
   });
 
   describe("Standalone mode and configurable colors", () => {
@@ -319,6 +409,92 @@ describe("NetworkBanner", () => {
       const banner = container.firstChild as HTMLElement;
       expect(banner.style.backgroundColor).toBe("rgb(15, 23, 42)");
       expect(banner.style.borderColor).toBe("rgb(30, 41, 59)");
+    });
+  });
+
+  describe("ResizeObserver teardown (#768)", () => {
+    it("disconnects the ResizeObserver on unmount", () => {
+      const disconnectSpy = vi.fn();
+      const observeSpy = vi.fn();
+      const unobserveSpy = vi.fn();
+
+      const MockResizeObserver = vi.fn().mockImplementation(() => ({
+        observe: observeSpy,
+        unobserve: unobserveSpy,
+        disconnect: disconnectSpy,
+      }));
+
+      vi.stubGlobal("ResizeObserver", MockResizeObserver);
+
+      mockNetwork(TESTNET_NETWORK);
+      const { unmount } = render(<NetworkBanner />);
+
+      expect(MockResizeObserver).toHaveBeenCalled();
+
+      unmount();
+
+      expect(disconnectSpy).toHaveBeenCalledTimes(1);
+
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("no-ResizeObserver fallback (#876)", () => {
+    it("sets --banner-height using getBoundingClientRect fallback when ResizeObserver is undefined", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      const spyGetBoundingClientRect = vi
+        .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+        .mockReturnValue({
+          height: 44,
+          width: 800,
+          top: 0,
+          left: 0,
+          bottom: 44,
+          right: 800,
+          x: 0,
+          y: 0,
+          toJSON: () => {},
+        });
+
+      try {
+        render(<NetworkBanner />);
+
+        // --banner-height should be set to 44px even without ResizeObserver
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("44px");
+      } finally {
+        spyGetBoundingClientRect.mockRestore();
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
+    });
+
+    it("resets --banner-height to 0px when banner is hidden without ResizeObserver", () => {
+      const originalResizeObserver = globalThis.ResizeObserver;
+      // @ts-expect-error simulating environment where ResizeObserver is undefined
+      delete globalThis.ResizeObserver;
+
+      mockNetwork(TESTNET_NETWORK);
+
+      try {
+        const { rerender } = render(<NetworkBanner />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBeTruthy();
+
+        // Navigate to active="network" which hides the banner
+        rerender(<NetworkBanner active="network" />);
+        expect(
+          document.documentElement.style.getPropertyValue("--banner-height"),
+        ).toBe("0px");
+      } finally {
+        globalThis.ResizeObserver = originalResizeObserver;
+      }
     });
   });
 });

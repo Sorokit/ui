@@ -3,10 +3,12 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CheckmarkCircle01Icon,
+  Copy01Icon,
   Download01Icon,
   FilterIcon,
   SortByDown01Icon,
   SortByUp01Icon,
+  Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -39,6 +41,8 @@ export interface TransactionFilters {
 export interface TransactionHistoryTableProps {
   className?: string;
   pageSize?: number;
+  /** Optional callback for CSV export. If provided, called instead of DOM download. */
+  onExport?: (csv: string) => void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,7 +132,7 @@ function escapeCsv(value: string): string {
   return value;
 }
 
-function generateCsv(rows: Transaction[]): Blob {
+function generateCsvString(rows: Transaction[]): string {
   const headers = [
     "Hash",
     "Ledger",
@@ -157,11 +161,20 @@ function generateCsv(rows: Transaction[]): Blob {
     );
   }
 
-  return new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  return lines.join("\n");
 }
 
-function downloadCsv(rows: Transaction[]): void {
-  const blob = generateCsv(rows);
+function downloadCsv(rows: Transaction[], onExport?: (csv: string) => void): void {
+  const csv = generateCsvString(rows);
+
+  // If onExport callback is provided, use it (for testing)
+  if (onExport) {
+    onExport(csv);
+    return;
+  }
+
+  // Default DOM-based download
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -280,6 +293,50 @@ function FilterBar({ filters, onChange, show, onToggle }: FilterBarProps) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Copy Hash Button                                                   */
+/* ------------------------------------------------------------------ */
+
+const COPY_HASH_RESET_MS = 2000;
+
+function CopyHashButton({ hash }: { hash: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(hash);
+      setCopied(true);
+      setTimeout(() => setCopied(false), COPY_HASH_RESET_MS);
+    } catch {
+      // Clipboard access can fail (e.g. non-secure context or denied
+      // permission); silently no-op rather than throw in the UI.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label="Copy transaction hash"
+      className={cn(
+        "shrink-0 p-1 rounded-md transition-colors",
+        copied
+          ? "text-green bg-success-dim"
+          : "text-ink-3 hover:text-ink-2 hover:bg-surface-2",
+      )}
+    >
+      <HugeiconsIcon
+        icon={copied ? Tick01Icon : Copy01Icon}
+        size={10}
+        color="currentColor"
+        strokeWidth={2}
+      />
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Sortable Header                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -336,6 +393,7 @@ function SortHeader({
 export function TransactionHistoryTable({
   className,
   pageSize = PAGE_SIZE,
+  onExport,
 }: TransactionHistoryTableProps) {
   const { address, isConnected, network, client } = useSorokit();
   const [allTxs, setAllTxs] = useState<Transaction[]>([]);
@@ -439,7 +497,7 @@ export function TransactionHistoryTable({
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => downloadCsv(allTxs)}
+              onClick={() => downloadCsv(allTxs, onExport)}
             >
               <HugeiconsIcon
                 icon={Download01Icon}
@@ -561,30 +619,33 @@ export function TransactionHistoryTable({
                           <StatusIcon successful={tx.successful} />
                         </td>
                         <td className="px-4 py-3">
-                          {(() => {
-                            const url = explorerTxUrl(network, tx.hash);
-                            return url ? (
-                              <a
-                                data-txhash
-                                href={url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
-                              >
-                                {truncateAddress(tx.hash, 8, 6)}
-                                <span aria-hidden="true" className="opacity-60">
-                                  ↗
+                          <div className="flex items-center gap-1">
+                            {(() => {
+                              const url = explorerTxUrl(network, tx.hash);
+                              return url ? (
+                                <a
+                                  data-txhash
+                                  href={url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[13px] text-ink font-mono hover:underline hover:text-brand inline-flex items-center gap-1"
+                                >
+                                  {truncateAddress(tx.hash, 8, 6)}
+                                  <span aria-hidden="true" className="opacity-60">
+                                    ↗
+                                  </span>
+                                </a>
+                              ) : (
+                                <span
+                                  data-txhash
+                                  className="text-[13px] text-ink font-mono"
+                                >
+                                  {truncateAddress(tx.hash, 8, 6)}
                                 </span>
-                              </a>
-                            ) : (
-                              <span
-                                data-txhash
-                                className="text-[13px] text-ink font-mono"
-                              >
-                                {truncateAddress(tx.hash, 8, 6)}
-                              </span>
-                            );
-                          })()}
+                              );
+                            })()}
+                            <CopyHashButton hash={tx.hash} />
+                          </div>
                           {tx.memo && (
                             <span
                               className="block text-[10px] text-ink-3 mt-0.5"
@@ -679,6 +740,7 @@ export function TransactionHistoryTable({
                       >
                         {tx.successful ? "Success" : "Failed"}
                       </Badge>
+                      <CopyHashButton hash={tx.hash} />
                     </div>
                     <div className="flex items-center gap-2 mt-0.5 text-[11px] text-ink-3">
                       <span>Ledger {tx.ledger}</span>

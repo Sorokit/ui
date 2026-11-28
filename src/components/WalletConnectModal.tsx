@@ -35,12 +35,12 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
 import { Separator } from "@/components/ui/Separator";
 import { useSorokit } from "@/context/useSorokit";
-import { truncateAddress } from "@/lib/utils";
+import { cn, truncateAddress } from "@/lib/utils";
 
 export interface WalletOption {
   id: string;
@@ -109,11 +109,28 @@ export function isWalletExtensionInstalled(walletId: string): boolean {
   return Boolean(win[id] || win[walletId]);
 }
 
-/** Check whether user is browsing on a mobile device. */
+/**
+ * Check whether user is browsing on a mobile device.
+ *
+ * iPadOS 13+ Safari reports a desktop (Macintosh) user agent, so a UA check
+ * alone misses it. `navigator.maxTouchPoints > 1` is the primary heuristic;
+ * desktop-class UAs that are commonly touch-enabled (Windows/ChromeOS/X11
+ * laptops) are excluded so they aren't misclassified. The UA string remains
+ * the fallback for everything else.
+ */
 export function isMobileEnvironment(): boolean {
   if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  if (
+    typeof navigator.maxTouchPoints === "number" &&
+    navigator.maxTouchPoints > 1 &&
+    !/Windows NT|CrOS|X11/i.test(ua)
+  ) {
+    return true;
+  }
+  if (navigator.maxTouchPoints > 1) return true;
   return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-    navigator.userAgent,
+    ua,
   );
 }
 
@@ -132,14 +149,71 @@ export function WalletConnectModal({
   onClose,
   walletOptions = DEFAULT_WALLET_OPTIONS,
 }: WalletConnectModalProps) {
-  const { connectWallet, isConnecting, address, error, clearError } =
-    useSorokit();
+  const {
+    connectWallet,
+    isConnecting,
+    address,
+    error,
+    errorSeverity = "error",
+    clearError,
+  } = useSorokit();
   const [step, setStep] = useState<Step>("select");
   const [selectedWallet, setSelectedWallet] = useState<WalletOption | null>(
     null,
   );
+  const [focusedIndex, setFocusedIndex] = useState<number>(0);
+  const [installedWallets, setInstalledWallets] = useState<
+    Record<string, boolean>
+  >({});
+  const walletButtonsRef = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const isMobile = isMobileEnvironment();
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    isMobileEnvironment(),
+  );
+  const isInfo = errorSeverity === "info";
+
+  useEffect(() => {
+    if (!open) return;
+    clearError();
+  }, [open, clearError]);
+
+  useEffect(() => {
+    if (!open || typeof window === "undefined") return;
+    let active = true;
+
+    const refresh = () => {
+      if (!active) return;
+      const next: Record<string, boolean> = {};
+      for (const wallet of walletOptions) {
+        next[wallet.id] = isWalletExtensionInstalled(wallet.id);
+      }
+      setInstalledWallets((prev) => {
+        const keys = Object.keys(next);
+        if (
+          keys.length === Object.keys(prev).length &&
+          keys.every((key) => prev[key] === next[key])
+        ) {
+          return prev;
+        }
+        return next;
+      });
+      setIsMobile(isMobileEnvironment());
+    };
+
+    refresh();
+    window.addEventListener("stellar#initialized", refresh);
+    window.addEventListener("stellar:initialized", refresh);
+    const pollId = window.setInterval(refresh, 200);
+    const stopId = window.setTimeout(() => window.clearInterval(pollId), 2000);
+
+    return () => {
+      active = false;
+      window.removeEventListener("stellar#initialized", refresh);
+      window.removeEventListener("stellar:initialized", refresh);
+      window.clearInterval(pollId);
+      window.clearTimeout(stopId);
+    };
+  }, [open, walletOptions]);
 
   // Advance out of "connecting" once useSorokit settles. Deferred via
   // setTimeout(0), same pattern SorokitProvider uses for its own effects —
@@ -163,22 +237,48 @@ export function WalletConnectModal({
     onClose();
   }
 
-  function handleSelectWallet(wallet: WalletOption) {
+  const handleSelectWallet = useCallback((wallet: WalletOption) => {
     setSelectedWallet(wallet);
     if (isMobile && wallet.deepLink) {
       if (typeof window !== "undefined") {
-        // eslint-disable-next-line react-hooks/immutability
+
         window.location.href = wallet.deepLink;
       }
     }
     setStep("connecting");
-    void connectWallet();
-  }
+    // Defense in depth: connectWallet() already catches a rejecting/throwing
+    // extension and turns it into context `error` state, but if it ever
+    // doesn't, falling through to "error" here (instead of leaving the
+    // spinner running forever) keeps this modal self-recovering regardless.
+    void Promise.resolve(connectWallet()).catch(() => setStep("error"));
+  }, [isMobile, connectWallet]);
 
   function handleRetry() {
     clearError();
     setStep("select");
   }
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (step !== "select") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev + 1) % walletOptions.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev - 1 + walletOptions.length) % walletOptions.length);
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      handleSelectWallet(walletOptions[focusedIndex]);
+    }
+  }, [step, walletOptions, focusedIndex, handleSelectWallet]);
+
+  // Focus the button when focusedIndex changes
+  useEffect(() => {
+    if (step === "select" && walletButtonsRef.current[focusedIndex]) {
+      walletButtonsRef.current[focusedIndex]?.focus();
+    }
+  }, [focusedIndex, step]);
 
   const handleExternalLinkClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
     e.stopPropagation();
@@ -211,7 +311,7 @@ export function WalletConnectModal({
               {step === "select" && "Connect a wallet"}
               {step === "connecting" && "Connecting…"}
               {step === "success" && "Connected"}
-              {step === "error" && "Connection failed"}
+              {step === "error" && (isInfo ? "No wallet selected" : "Connection failed")}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -235,24 +335,35 @@ export function WalletConnectModal({
               `Approve the connection request in ${selectedWallet?.name ?? "your wallet"}.`}
             {step === "success" &&
               "Your wallet is connected and ready to use."}
-            {step === "error" && "We couldn't complete the connection."}
+            {step === "error" &&
+              (isInfo ? error : "We couldn't complete the connection.")}
           </p>
           <Separator spacing="sm" />
 
           {step === "select" && (
             <div
               className="grid grid-cols-2 gap-3"
-              role="group"
+              role="radiogroup"
               aria-label="Available wallets"
+              onKeyDown={handleKeyDown}
             >
-              {walletOptions.map((wallet) => {
-                const installed = isWalletExtensionInstalled(wallet.id);
+              {walletOptions.map((wallet, index) => {
+                const installed = installedWallets[wallet.id] === true;
+                const isFocused = focusedIndex === index;
                 return (
                   <button
                     key={wallet.id}
                     type="button"
+                    role="radio"
+                    aria-checked={isFocused}
+                    tabIndex={isFocused ? 0 : -1}
+                    ref={(el) => {
+                      walletButtonsRef.current[index] = el;
+                    }}
                     onClick={() => handleSelectWallet(wallet)}
-                    className="relative flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors"
+                    onKeyDown={handleKeyDown}
+                    aria-label={wallet.name}
+                    className="relative flex flex-col items-center gap-2 rounded-lg border border-line px-3 py-4 hover:border-line-2 hover:bg-surface-2 transition-colors focus:outline-none focus:ring-2 focus:ring-brand"
                   >
                     {installed && (
                       <span
@@ -284,6 +395,22 @@ export function WalletConnectModal({
                 );
               })}
             </div>
+          )}
+
+          {step === "select" && error && (
+            <p
+              data-testid="wallet-connect-inline-error"
+              data-severity={errorSeverity}
+              role="alert"
+              className={cn(
+                "mt-3 rounded-lg border px-3 py-2 text-[12px] leading-relaxed",
+                isInfo
+                  ? "bg-warning-dim border-warning-dim text-warning"
+                  : "bg-error-dim-muted border-error-dim text-red",
+              )}
+            >
+              {error}
+            </p>
           )}
 
           {step === "connecting" && (
@@ -329,21 +456,32 @@ export function WalletConnectModal({
           {step === "error" && (
             <div className="flex flex-col gap-4">
               <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-full bg-error-dim flex items-center justify-center shrink-0">
+                <div
+                  className={cn(
+                    "w-9 h-9 rounded-full flex items-center justify-center shrink-0",
+                    isInfo ? "bg-warning-dim" : "bg-error-dim",
+                  )}
+                >
                   <HugeiconsIcon
                     icon={AlertCircleIcon}
                     size={18}
                     color="currentColor"
                     strokeWidth={1.5}
-                    className="text-red"
+                    className={isInfo ? "text-warning" : "text-red"}
                   />
                 </div>
                 <div>
-                  <p role="alert" className="text-[13px] text-red">
+                  <p
+                    role="alert"
+                    data-severity={errorSeverity}
+                    className={cn("text-[13px]", isInfo ? "text-warning" : "text-red")}
+                  >
                     {error}
                   </p>
                   <p className="text-[12px] text-ink-3 mt-2 leading-relaxed">
-                    {notInstalled ? (
+                    {isInfo ? (
+                      "You can select a wallet and try again whenever you're ready."
+                    ) : notInstalled ? (
                       <>
                         Install the {selectedWallet?.name ?? "wallet"} browser extension{" "}
                         {selectedWallet?.installUrl && (

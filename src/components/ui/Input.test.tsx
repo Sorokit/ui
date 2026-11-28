@@ -69,10 +69,64 @@ describe("Input", () => {
   it("renders hint message when error is not present", () => {
     render(<Input placeholder="Test Input" hint="Must be 8 characters long" />);
     const hintText = screen.getByText("Must be 8 characters long");
+    const input = screen.getByPlaceholderText("Test Input");
     
     expect(hintText).toBeInTheDocument();
     expect(hintText.className).toContain("text-ink-3");
     expect(hintText.className).toContain("opacity-100");
+    expect(input).toHaveAttribute(
+      "aria-describedby",
+      `${input.id}-hint`,
+    );
+    expect(input).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("associates the visible error with the input and marks it invalid", () => {
+    render(
+      <Input
+        id="email"
+        placeholder="Email"
+        hint="We will not share your email"
+        error="Enter a valid email address"
+      />,
+    );
+    const input = screen.getByPlaceholderText("Email");
+
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", "email-error");
+    expect(screen.getByText("Enter a valid email address")).toHaveAttribute(
+      "id",
+      "email-error",
+    );
+  });
+
+  it("preserves caller descriptions alongside helper or error text IDs", () => {
+    const { rerender } = render(
+      <Input
+        id="name"
+        aria-describedby="name-description"
+        hint="Choose a display name"
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveAttribute(
+      "aria-describedby",
+      "name-description name-hint",
+    );
+
+    rerender(
+      <Input
+        id="name"
+        aria-describedby="name-description"
+        hint="Choose a display name"
+        error="Name is unavailable"
+      />,
+    );
+    expect(input).toHaveAttribute(
+      "aria-describedby",
+      "name-description name-error",
+    );
+    expect(input).toHaveAttribute("aria-invalid", "true");
   });
 
   it("hides the hint message and shows the error message when error is present", () => {

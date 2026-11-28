@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { type ReactNode,useEffect } from "react";
 import { beforeEach,describe, expect, it, vi } from "vitest";
 
+import { ToastProvider, useToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 
 import { TopBar } from "./TopBar";
@@ -25,12 +27,23 @@ const defaultSorokit = {
   resetTransactionWatchers: vi.fn(),
 };
 
+function SeedNotifications({ children }: { children: ReactNode }) {
+  const { info } = useToast();
+  useEffect(() => {
+    info("Account updated");
+    info("Network connected");
+  }, [info]);
+  return children;
+}
+
 describe("TopBar", () => {
   const onMenuToggle = vi.fn();
   const clearError = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem("sorokit-theme");
+    document.documentElement.removeAttribute("data-theme");
     vi.mocked(useSorokit).mockReturnValue({
       ...defaultSorokit,
       clearError,
@@ -46,6 +59,50 @@ describe("TopBar", () => {
     expect(screen.getByRole("heading", { name: /wallet/i })).toBeInTheDocument();
   });
 
+  it("truncates the title and exposes its full text in a tooltip", async () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    const heading = screen.getByRole("heading", { name: "Wallet" });
+    const tooltipTrigger = heading.parentElement!;
+
+    expect(heading).toHaveClass("truncate");
+    expect(tooltipTrigger).toHaveAttribute("title", "Wallet");
+    fireEvent.pointerMove(tooltipTrigger, { pointerType: "mouse" });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Wallet");
+  });
+
+  it("labels the theme toggle with its destination theme and switches themes", () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+
+    const toggle = screen.getByRole("button", { name: "Switch to light theme" });
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch to dark theme" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+
+  it("clears the unread badge when notifications open without dismissing them", () => {
+    render(
+      <ToastProvider>
+        <SeedNotifications>
+          <TopBar active="wallet" onMenuToggle={onMenuToggle} />
+        </SeedNotifications>
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Notifications, 2 unread" }));
+
+    expect(screen.getByRole("dialog", { name: "Notifications" })).toBeInTheDocument();
+    const notificationButton = document.querySelector<HTMLButtonElement>(
+      'button[title="Notifications"]',
+    );
+    expect(notificationButton).toHaveAttribute("aria-label", "Notifications");
+    expect(notificationButton?.querySelector(".bg-red")).not.toBeInTheDocument();
+    expect(screen.getByText("Account updated")).toBeInTheDocument();
+    expect(screen.getByText("Network connected")).toBeInTheDocument();
+  });
+
   it("renders the correct title for different active sections", () => {
     vi.mocked(useSorokit).mockReturnValue({
       error: null,
@@ -53,6 +110,19 @@ describe("TopBar", () => {
     } as ReturnType<typeof useSorokit>);
     render(<TopBar active="network" onMenuToggle={onMenuToggle} />);
     expect(screen.getByRole("heading", { name: /network/i })).toBeInTheDocument();
+  });
+
+  it("does not steal focus on first render", () => {
+    render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    expect(screen.getByRole("heading", { level: 1 })).not.toHaveFocus();
+  });
+
+  it("moves focus to the heading when the active section changes", () => {
+    const { rerender } = render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
+    rerender(<TopBar active="network" onMenuToggle={onMenuToggle} />);
+    const heading = screen.getByRole("heading", { level: 1, name: /network/i });
+    expect(heading).toHaveFocus();
+    expect(heading).toHaveAttribute("tabindex", "-1");
   });
 
   it("does not render the error banner when error is null", () => {
@@ -276,6 +346,93 @@ describe("TopBar — issue #679", () => {
       render(<TopBar active="wallet" onMenuToggle={onMenuToggle} />);
       expect(screen.getByTestId("network-status-icon")).toBeInTheDocument();
       expect(screen.getByTestId("network-status-label")).toHaveTextContent("Active");
+    });
+  });
+
+  describe("Pending Actions notification center (#1144)", () => {
+    it("displays badge count on bell icon when pending actions exist", () => {
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          pendingActions={[
+            {
+              id: "claim-1",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "2 claimable balances ready",
+              count: 2,
+              targetScreen: "account",
+            },
+            {
+              id: "sched-1",
+              type: "scheduled_tx",
+              title: "Scheduled Payments",
+              description: "1 payment queued",
+              count: 1,
+              targetScreen: "transactions",
+            },
+          ]}
+        />,
+      );
+
+      const badge = screen.getByTestId("notifications-badge");
+      expect(badge).toHaveTextContent("2");
+    });
+
+    it("dropdown shows pending items when opened", async () => {
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          pendingActions={[
+            {
+              id: "claim-test",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "3 balances to claim",
+              count: 3,
+              targetScreen: "account",
+            },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("notifications-bell"));
+
+      expect(await screen.findByTestId("pending-actions-list")).toBeInTheDocument();
+      expect(screen.getByText("Claimable Balances")).toBeInTheDocument();
+      expect(screen.getByText("3 balances to claim")).toBeInTheDocument();
+    });
+
+    it("clicking pending action item navigates to relevant screen and closes dialog", async () => {
+      const onNavigate = vi.fn();
+      render(
+        <TopBar
+          active="wallet"
+          onMenuToggle={onMenuToggle}
+          onNavigate={onNavigate}
+          pendingActions={[
+            {
+              id: "claim-nav",
+              type: "claimable_balance",
+              title: "Claimable Balances",
+              description: "Navigate to claim",
+              targetScreen: "account",
+            },
+          ]}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("notifications-bell"));
+
+      const itemButton = await screen.findByTestId("pending-action-item-claim-nav");
+      fireEvent.click(itemButton);
+
+      expect(onNavigate).toHaveBeenCalledWith("account");
+      await waitFor(() => {
+        expect(screen.queryByTestId("pending-actions-list")).not.toBeInTheDocument();
+      });
     });
   });
 });

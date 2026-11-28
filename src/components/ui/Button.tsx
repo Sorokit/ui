@@ -3,7 +3,7 @@ import { forwardRef, type ReactNode, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-type Variant = "primary" | "secondary" | "ghost" | "destructive";
+type Variant = "primary" | "secondary" | "outline" | "ghost" | "destructive";
 type Size = "sm" | "md" | "lg";
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -36,6 +36,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 const variants: Record<Variant, string> = {
   primary: "bg-brand text-white hover:bg-brand-hover",
   secondary: "bg-transparent text-ink border border-line-2 hover:bg-surface-2",
+  outline: "bg-transparent text-ink border border-line-2 hover:bg-surface-2",
   ghost: "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink",
   destructive:
     "bg-error-dim text-red border border-error-dim-strong hover:bg-error-dim-hover",
@@ -79,6 +80,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       onClick,
       onClickCapture,
       onBlur,
+      onKeyDown,
+      onKeyDownCapture,
+      "aria-disabled": ariaDisabled,
+      "aria-label": ariaLabel,
+      "aria-busy": ariaBusyProp,
       ...props
     },
     ref,
@@ -88,8 +94,9 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     const [armed, setArmed] = useState(false);
     const isInert = !!disabled || !!loading;
-    const ariaDisabled = props["aria-disabled"];
     const isAriaDisabled = ariaDisabled === true || ariaDisabled === "true";
+    const computedAriaBusy = loading !== undefined ? loading : ariaBusyProp;
+    const computedAriaLabel = ariaLabel ?? (loading ? "Loading" : undefined);
 
     // Runs in the capture phase, before any onClick — including one that a
     // slotted `asChild` child carries itself, which Slot would otherwise invoke
@@ -132,6 +139,24 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       // Reset the confirmation prompt when focus leaves the button.
       if (armed) setArmed(false);
       onBlur?.(e);
+    };
+
+    const handleKeyDownCapture = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onKeyDownCapture?.(e as React.KeyboardEvent<HTMLButtonElement>);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+      if (loading) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      onKeyDown?.(e as React.KeyboardEvent<HTMLButtonElement>);
     };
 
     const spinner = (
@@ -197,12 +222,15 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
           href={isInert ? undefined : href}
           target="_blank"
           rel="noopener noreferrer"
-          aria-disabled={isInert || undefined}
-          aria-busy={loading || undefined}
+          aria-disabled={isInert || ariaDisabled || undefined}
+          aria-busy={computedAriaBusy}
+          aria-label={computedAriaLabel}
           className={classes}
           onClickCapture={handleClickCapture as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onClick={handleClick as unknown as React.MouseEventHandler<HTMLAnchorElement>}
           onBlur={handleBlur as unknown as React.FocusEventHandler<HTMLAnchorElement>}
+          onKeyDownCapture={handleKeyDownCapture}
+          onKeyDown={handleKeyDown}
           {...(props as unknown as React.AnchorHTMLAttributes<HTMLAnchorElement>)}
         >
           {content}
@@ -215,12 +243,17 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         disabled={disabled || loading}
         // A slotted <a>/<div> has no native disabled state, so announce it.
-        aria-disabled={asChild && isInert ? true : undefined}
-        aria-busy={loading || undefined}
+        aria-disabled={
+          loading || (asChild && isInert) || ariaDisabled || undefined
+        }
+        aria-busy={computedAriaBusy}
+        aria-label={computedAriaLabel}
         className={classes}
         onClickCapture={handleClickCapture}
         onClick={handleClick}
         onBlur={handleBlur}
+        onKeyDownCapture={handleKeyDownCapture}
+        onKeyDown={handleKeyDown}
         {...props}
       >
         {content}

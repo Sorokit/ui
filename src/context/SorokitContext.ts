@@ -12,7 +12,22 @@ export interface SorokitState {
   client: SorokitClient;
   address: string | null;
   walletName: string | null;
-  isHardware?: boolean;
+  /**
+   * Ids of supported wallet extensions currently detected on `window`. Seeded
+   * on mount and refreshed when an extension injects late (`stellar#initialized`
+   * plus a short poll), so the connect UI can pick up a wallet that wasn't
+   * present when the page first rendered.
+   */
+  detectedWallets?: string[];
+  /**
+   * Whether the connected wallet is a hardware wallet.
+   *
+   * Owned by the provider so detection lives in exactly one place (#845). It was
+   * previously declared optional here but never assigned, so it was always
+   * `undefined` and `WalletConnectButton` had to re-derive the answer from
+   * `walletName` string-matching — the duplication this field now removes.
+   */
+  isHardware: boolean;
   isConnected: boolean;
   isConnecting: boolean;
   isLoading: boolean;
@@ -23,7 +38,17 @@ export interface SorokitState {
   balances: Balance[];
   isLoadingAccount: boolean;
   refreshAccount: () => Promise<void>;
+  /** True while the browser has no connectivity (#1163). */
+  isOffline?: boolean;
+  /** True when `account` / `balances` came from the offline cache (#1163). */
+  isCached?: boolean;
+  /** Epoch ms of the last successful sync of the data on screen (#1163). */
+  lastSyncedAt?: number | null;
   network: NetworkInfo | null;
+  /** Normalized status of the active network, checked on init and after switches (#1105). */
+  networkStatus?: "online" | "degraded" | "offline" | "unknown";
+  /** Human-readable warning for a non-online active network, or null when healthy (#1105). */
+  networkStatusWarning?: string | null;
   /**
    * The network the client was initialised with, captured on mount before any
    * persisted preference is applied. Compare against `network` to detect a
@@ -31,12 +56,28 @@ export interface SorokitState {
    */
   initialNetwork?: NetworkInfo | null;
   switchNetwork: (network: NetworkName | NetworkInfo) => Promise<void>;
+  /**
+   * True while a `switchNetwork` call is in flight (#537). Components with
+   * network-selection controls read this to disable their options, so two
+   * surfaces (e.g. `NetworkScreen` and `NetworkSwitcher`) can never fire
+   * overlapping switches — the provider also enforces this with an
+   * in-flight guard, making the last call win deterministically.
+   */
+  isSwitchingNetwork?: boolean;
   customNetworks?: NetworkInfo[];
   addCustomNetwork?: (config: NetworkInfo) => Promise<void>;
+  clearCustomNetworks?: () => void;
   /**
    * Resets any pending transaction watchers/polling timers across the client context.
    */
   resetTransactionWatchers?: () => void;
+  /**
+   * Register a cancel callback for a polling timer. Returns an unregister
+   * function to call on unmount. Used by FeeEstimator, ContractEventFeed,
+   * TransactionStatusTracker, and GasOptimizer so that `resetTransactionWatchers`
+   * can stop all of them on network switch.
+   */
+  registerWatcher?: (cancel: () => void) => () => void;
   error: string | null;
   accountError?: string | null;
   networkError?: string | null;
@@ -44,6 +85,11 @@ export interface SorokitState {
   errorSeverity?: "info" | "error";
   errorHistory: string[];
   clearError: () => void;
+  reportError?: (
+    error: string,
+    source: string,
+    severity?: "info" | "error",
+  ) => void;
 }
 
 export interface SorokitProviderProps {

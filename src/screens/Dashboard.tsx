@@ -1,10 +1,22 @@
-import { type ComponentType, lazy, Suspense, useCallback, useEffect, useState } from "react";
+import {
+  type ComponentType,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
+import { DashboardOverview } from "@/components/DashboardOverview";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { GovernanceDashboard } from "@/components/GovernanceDashboard";
 import { NetworkBanner } from "@/components/NetworkBanner";
+import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
+import { RateLimitIndicator } from "@/components/RateLimitIndicator";
 import { type NavSection, Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
+import { PAGE_TITLES } from "@/lib/nav-labels";
 import { AccountScreen } from "@/screens/AccountScreen";
 import { WalletScreen } from "@/screens/WalletScreen";
 
@@ -22,8 +34,18 @@ const NetworkScreen = lazy(() =>
 const NFTScreen = lazy(() =>
   import("@/screens/NFTScreen").then((m) => ({ default: m.NFTScreen })),
 );
+const PortfolioAnalyticsScreen = lazy(() =>
+  import("@/screens/PortfolioAnalyticsScreen").then((m) => ({
+    default: m.PortfolioAnalyticsScreen,
+  })),
+);
 const RecoveryScreen = lazy(() =>
   import("@/screens/RecoveryScreen").then((m) => ({ default: m.RecoveryScreen })),
+);
+const SettingsScreen = lazy(() =>
+  import("@/screens/SettingsScreen").then((m) => ({
+    default: m.SettingsScreen,
+  })),
 );
 const SorobanScreen = lazy(() =>
   import("@/screens/SorobanScreen").then((m) => ({ default: m.SorobanScreen })),
@@ -39,20 +61,6 @@ const YieldFarmingScreen = lazy(() =>
   })),
 );
 
-const PAGE_TITLES: Record<NavSection, string> = {
-  wallet: "Wallet — Sorokit",
-  account: "Account — Sorokit",
-  transactions: "Transactions — Sorokit",
-  soroban: "Soroban — Sorokit",
-  network: "Network — Sorokit",
-  recovery: "Recovery — Sorokit",
-  charts: "Charts — Sorokit",
-  farming: "Yield Farming — Sorokit",
-  budget: "Budget — Sorokit",
-  nfts: "NFTs — Sorokit",
-  governance: "Governance — Sorokit",
-};
-
 const SCREENS: Record<NavSection, ComponentType> = {
   wallet: WalletScreen,
   account: AccountScreen,
@@ -61,10 +69,12 @@ const SCREENS: Record<NavSection, ComponentType> = {
   network: NetworkScreen,
   recovery: RecoveryScreen,
   charts: ChartingScreen,
+  portfolio: PortfolioAnalyticsScreen,
   farming: YieldFarmingScreen,
   budget: BudgetScreen,
   nfts: NFTScreen,
   governance: GovernanceDashboard,
+  settings: SettingsScreen,
 };
 
 const SCREEN_LABELS: Record<NavSection, string> = {
@@ -75,10 +85,12 @@ const SCREEN_LABELS: Record<NavSection, string> = {
   network: "Network",
   recovery: "Recovery",
   charts: "Charts",
+  portfolio: "Portfolio Analytics",
   farming: "Yield Farming",
   budget: "Budget",
   nfts: "NFTs",
   governance: "Governance",
+  settings: "Settings",
 };
 
 /**
@@ -141,6 +153,9 @@ export function Dashboard({
 
   const active = isControlled ? activeSection : internalActive;
 
+  // Keep the browser tab title in sync with the active screen (#551) — screen
+  // readers, multi-tab users and history entries all rely on it. Runs on mount
+  // as well, so the Wallet default is applied without waiting for a nav click.
   useEffect(() => {
     document.title = PAGE_TITLES[active];
   }, [active]);
@@ -156,13 +171,42 @@ export function Dashboard({
     setVisited((prev) => new Set(prev).add(active));
   }
 
+  // Move focus to the active section heading on navigation (#879).
+  const focusSectionHeading = useCallback((section: NavSection) => {
+    const wrapper = document.querySelector<HTMLElement>(
+      `[data-testid="screen-wrapper-${section}"]`,
+    );
+    if (!wrapper) return;
+    const heading = wrapper.querySelector<HTMLElement>(
+      "h1, h2, h3, h4, h5, h6, [role='heading']",
+    );
+    if (heading) {
+      if (!heading.hasAttribute("tabindex")) {
+        heading.setAttribute("tabindex", "-1");
+      }
+      heading.focus();
+    }
+  }, []);
+
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      return;
+    }
+    focusSectionHeading(active);
+  }, [active, focusSectionHeading]);
+
   const handleNavigate = useCallback(
     (section: NavSection) => {
       // In controlled mode the parent decides what renders next; only report.
       if (!isControlled) setInternalActive(section);
       onSectionChange?.(section);
+      if (section === active) {
+        focusSectionHeading(section);
+      }
     },
-    [isControlled, onSectionChange],
+    [isControlled, onSectionChange, active, focusSectionHeading],
   );
 
   return (
@@ -178,19 +222,24 @@ export function Dashboard({
           active={active}
           onMenuToggle={() => setSidebarOpen((o) => !o)}
           sidebarOpen={sidebarOpen}
+          onNavigate={handleNavigate}
         />
         <NetworkBanner active={active} />
+        <NetworkStatusBanner />
+        <RateLimitIndicator />
         <main className="flex-1 min-h-0 overflow-y-auto">
           <div
             className="mx-auto px-6 py-8 sm:px-10 sm:py-10 min-h-[300px]"
             style={{ maxWidth: maxContentWidth }}
           >
+            <DashboardOverview onNavigate={handleNavigate} />
             {[...visited].map((section) => {
               const Screen = SCREENS[section];
               return (
                 <div
                   key={section}
                   hidden={section !== active}
+                  aria-hidden={section !== active}
                   data-testid={`screen-wrapper-${section}`}
                 >
                   <ErrorBoundary

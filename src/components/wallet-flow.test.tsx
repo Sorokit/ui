@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { ToastProvider } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
 
 import { AccountCard } from "./AccountCard";
@@ -9,6 +10,16 @@ import { WalletConnectButton } from "./WalletConnectButton";
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
+
+function getWalletButton(name: RegExp | string) {
+  const container =
+    screen.queryByRole("radiogroup", { name: /available wallets/i }) ??
+    screen.getByRole("grid", { name: /available wallets/i });
+  return (
+    within(container).queryByRole("radio", { name }) ??
+    within(container).getByRole("button", { name })
+  );
+}
 
 describe("Wallet flow integration", () => {
   const mockConnect = vi.fn();
@@ -34,10 +45,10 @@ describe("Wallet flow integration", () => {
     });
 
     render(
-      <>
+      <ToastProvider>
         <WalletConnectButton />
         <AccountCard />
-      </>,
+      </ToastProvider>,
     );
 
     expect(screen.getByText("Connect Wallet")).toBeInTheDocument();
@@ -46,7 +57,7 @@ describe("Wallet flow integration", () => {
     await waitFor(() =>
       screen.getByRole("dialog", { name: /connect a wallet/i }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+    fireEvent.click(getWalletButton(/Freighter/i));
     expect(mockConnect).toHaveBeenCalledTimes(1);
 
     (
@@ -63,10 +74,10 @@ describe("Wallet flow integration", () => {
     });
 
     render(
-      <>
+      <ToastProvider>
         <WalletConnectButton />
         <AccountCard />
-      </>,
+      </ToastProvider>,
     );
 
     expect(screen.getByText("GABC12...WXYZ")).toBeInTheDocument();

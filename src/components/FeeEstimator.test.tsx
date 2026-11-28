@@ -1,7 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { FeeCell, FeeEstimator, MIN_NETWORK_BASE_FEE } from "./FeeEstimator";
+import {
+  applyFeeMultiplier,
+  FeeCell,
+  FeeEstimator,
+  MIN_NETWORK_BASE_FEE,
+  SURGE_FEE_THRESHOLD,
+} from "./FeeEstimator";
 
 vi.mock("@/lib/client", () => ({
   getClient: vi.fn(),
@@ -10,6 +16,11 @@ vi.mock("@/lib/client", () => ({
 // Issue #442 / context refactor: the components read their client from
 // SorokitContext, so the hook is routed at the same `getClient` mock every test
 // below configures. Without this the mocked client never reaches the component.
+// `network` is mutable so the #958 tests can simulate a network switch.
+const sorokitState = vi.hoisted(() => ({
+  network: null as { name: string; passphrase: string } | null,
+}));
+
 vi.mock("@/context/useSorokit", async () => {
   const { getClient } = await import("@/lib/client");
   return {
@@ -17,6 +28,7 @@ vi.mock("@/context/useSorokit", async () => {
       client: getClient(),
       isConnected: true,
       address: "GTEST",
+      network: sorokitState.network,
     }),
   };
 });
@@ -254,7 +266,44 @@ describe("FeeEstimator", { timeout: 15000 }, () => {
       vi.useRealTimers();
     });
 
-    it("pauses polling while hidden and resumes when visible again (#533)", async () => {
+    it("handles changing fee values on successive polling ticks", async () => {
+    vi.useFakeTimers();
+    const estimateFee = vi.fn()
+      .mockResolvedValueOnce({ data: { baseFee: "100", recommended: "500" }, error: null })
+      .mockResolvedValueOnce({ data: { baseFee: "200", recommended: "600" }, error: null })
+      .mockResolvedValueOnce({ data: { baseFee: "300", recommended: "900" }, error: null });
+    vi.mocked(getClient).mockReturnValue({
+      transaction: { estimateFee },
+    } as unknown as SorokitClient);
+
+    render(<FeeEstimator refreshInterval={1000} />);
+
+    // Let initial mount fetch trigger and resolve
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(1);
+
+    // First interval tick - fee changes
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("200")).toBeInTheDocument();
+    expect(screen.queryByText("500")).not.toBeInTheDocument();
+
+    // Second interval tick - fee changes again
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(estimateFee).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("300")).toBeInTheDocument();
+    expect(screen.queryByText("600")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it("pauses polling while hidden and resumes when visible again (#533)", async () => {
       vi.useFakeTimers();
       const estimateFee = vi.fn().mockResolvedValue({
         data: { baseFee: "100", recommended: "500" },
@@ -532,6 +581,230 @@ describe("FeeEstimator — issue #670", () => {
         expect(screen.getByText(/Base: 100 stroops/)).toBeInTheDocument();
       });
     });
+
+    it("clears polling interval on unmount even when useIsVisible reported false at unmount time (#861)", async () => {
+      vi.useFakeTimers();
+
+      let observerCallback: IntersectionObserverCallback | null = null;
+      vi.stubGlobal(
+        "IntersectionObserver",
+        class {
+          constructor(callback: IntersectionObserverCallback) {
+            observerCallback = callback;
+          }
+          observe = vi.fn();
+          disconnect = vi.fn();
+          unobserve = vi.fn();
+        },
+      );
+
+      const estimateFee = vi.fn().mockResolvedValue({
+        data: { baseFee: "100", recommended: "500" },
+        error: null,
+      });
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      const { unmount } = render(
+        <FeeEstimator refreshInterval={1000} />,
+      );
+
+      // Initial load executes
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(1);
+
+      // First interval tick
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(2);
+
+      // Component becomes invisible
+      act(() => {
+        observerCallback?.([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
+      });
+
+      // Unmount while invisible
+      unmount();
+
+      // Advance time by 5000ms -> assert no further polling calls occur
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(estimateFee).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    });
   });
 });
 
+
+// ── Issue #958: network switch, surge pricing, speed multipliers ─────────────
+describe("FeeEstimator — issue #958", () => {
+  const TESTNET = { name: "testnet", passphrase: "Test SDF Network ; September 2015" };
+  const MAINNET = { name: "mainnet", passphrase: "Public Global Stellar Network ; September 2015" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sorokitState.network = TESTNET;
+  });
+
+  afterEach(() => {
+    sorokitState.network = null;
+  });
+
+  describe("network switch", () => {
+    it("clears the previous network's fees immediately and fetches fresh ones", async () => {
+      let resolveMainnet: (v: unknown) => void = () => {};
+      const estimateFee = vi
+        .fn()
+        .mockResolvedValueOnce({ data: { baseFee: "111", recommended: "222" }, error: null })
+        .mockReturnValueOnce(new Promise((r) => { resolveMainnet = r; }));
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      const { rerender, container } = render(<FeeEstimator refreshInterval={30_000} />);
+      await waitFor(() => expect(screen.getByText("111")).toBeInTheDocument());
+
+      sorokitState.network = MAINNET;
+      rerender(<FeeEstimator refreshInterval={30_000} />);
+
+      // Stale testnet values are gone at once — no waiting for the 30s poll.
+      await waitFor(() => expect(screen.queryByText("111")).not.toBeInTheDocument());
+      expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+      expect(estimateFee).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        resolveMainnet({ data: { baseFee: "150", recommended: "450" }, error: null });
+      });
+      expect(await screen.findByText("150")).toBeInTheDocument();
+      expect(screen.getByText("450")).toBeInTheDocument();
+    });
+
+    it("discards a response from the old network that resolves after the switch", async () => {
+      let resolveTestnet: (v: unknown) => void = () => {};
+      const estimateFee = vi
+        .fn()
+        .mockReturnValueOnce(new Promise((r) => { resolveTestnet = r; }))
+        .mockResolvedValueOnce({ data: { baseFee: "150", recommended: "450" }, error: null });
+      vi.mocked(getClient).mockReturnValue({
+        transaction: { estimateFee },
+      } as unknown as SorokitClient);
+
+      const { rerender } = render(<FeeEstimator />);
+      await waitFor(() => expect(estimateFee).toHaveBeenCalledTimes(1));
+
+      sorokitState.network = MAINNET;
+      rerender(<FeeEstimator />);
+      expect(await screen.findByText("150")).toBeInTheDocument();
+
+      // The testnet request finally answers — it must not overwrite mainnet.
+      await act(async () => {
+        resolveTestnet({ data: { baseFee: "999", recommended: "9999" }, error: null });
+      });
+      expect(screen.queryByText("999")).not.toBeInTheDocument();
+      expect(screen.getByText("150")).toBeInTheDocument();
+    });
+
+    it("does not refetch when the network object is re-created with the same values", async () => {
+      mockEstimateFee({ data: { baseFee: "100", recommended: "200" }, error: null });
+      const { rerender } = render(<FeeEstimator />);
+      await waitFor(() => expect(screen.getByText("200")).toBeInTheDocument());
+
+      sorokitState.network = { ...TESTNET };
+      rerender(<FeeEstimator />);
+      const estimateFee = vi.mocked(getClient)().transaction.estimateFee;
+      expect(estimateFee).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("surge pricing warning", () => {
+    it("treats more than 3x the minimum base fee as surge pricing", () => {
+      expect(SURGE_FEE_THRESHOLD).toBe(300);
+    });
+
+    it("shows a prominent alert when the base fee exceeds 300 stroops", async () => {
+      mockEstimateFee({ data: { baseFee: "450", recommended: "900" }, error: null });
+      render(<FeeEstimator />);
+
+      const banner = await screen.findByTestId("surge-warning");
+      expect(banner).toHaveAttribute("role", "alert");
+      expect(banner).toHaveTextContent("Surge pricing");
+      expect(banner).toHaveTextContent("4.5x the minimum");
+      expect(banner).toHaveTextContent(/competing on fee/);
+    });
+
+    it("does not warn at exactly 300 stroops", async () => {
+      mockEstimateFee({ data: { baseFee: "300", recommended: "600" }, error: null });
+      render(<FeeEstimator />);
+
+      await screen.findByText("600");
+      expect(screen.queryByTestId("surge-warning")).not.toBeInTheDocument();
+    });
+
+    it("shows a surge badge in the compact variant", async () => {
+      mockEstimateFee({ data: { baseFee: "301", recommended: "700" }, error: null });
+      render(<FeeEstimator compact />);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Surge pricing");
+    });
+  });
+
+  describe("speed multipliers", () => {
+    it("renders 1.2x, 1.5x and 2.0x toggle buttons, none selected by default", async () => {
+      mockEstimateFee({ data: { baseFee: "100", recommended: "500" }, error: null });
+      render(<FeeEstimator />);
+
+      for (const label of ["1.2x", "1.5x", "2.0x"]) {
+        expect(await screen.findByRole("button", { name: label })).toHaveAttribute(
+          "aria-pressed",
+          "false",
+        );
+      }
+      expect(screen.queryByTestId("multiplied-fee")).not.toBeInTheDocument();
+    });
+
+    it("applies the selected multiplier to the recommended fee", async () => {
+      const onMultiplierChange = vi.fn();
+      mockEstimateFee({ data: { baseFee: "100", recommended: "500" }, error: null });
+      render(<FeeEstimator onMultiplierChange={onMultiplierChange} />);
+
+      fireEvent.click(await screen.findByRole("button", { name: "1.2x" }));
+      expect(screen.getByRole("button", { name: "1.2x" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("multiplied-fee")).toHaveTextContent("600 stroops");
+      expect(onMultiplierChange).toHaveBeenLastCalledWith(1.2, "600");
+
+      fireEvent.click(screen.getByRole("button", { name: "2.0x" }));
+      expect(screen.getByRole("button", { name: "1.2x" })).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("multiplied-fee")).toHaveTextContent("1000 stroops");
+      expect(onMultiplierChange).toHaveBeenLastCalledWith(2, "1000");
+    });
+
+    it("clears the multiplier when the active button is clicked again", async () => {
+      const onMultiplierChange = vi.fn();
+      mockEstimateFee({ data: { baseFee: "100", recommended: "500" }, error: null });
+      render(<FeeEstimator onMultiplierChange={onMultiplierChange} />);
+
+      const button = await screen.findByRole("button", { name: "1.5x" });
+      fireEvent.click(button);
+      expect(screen.getByTestId("multiplied-fee")).toHaveTextContent("750 stroops");
+      fireEvent.click(button);
+      expect(button).toHaveAttribute("aria-pressed", "false");
+      expect(screen.queryByTestId("multiplied-fee")).not.toBeInTheDocument();
+      expect(onMultiplierChange).toHaveBeenLastCalledWith(null, null);
+    });
+
+    it("applyFeeMultiplier rounds up without floating-point artifacts", () => {
+      // 500 * 1.2 is 600.0000000000001 as a float — must not become 601.
+      expect(applyFeeMultiplier("500", 1.2)).toBe("600");
+      expect(applyFeeMultiplier("101", 1.5)).toBe("152");
+      expect(applyFeeMultiplier("100", 2)).toBe("200");
+      expect(applyFeeMultiplier("abc", 2)).toBe("abc");
+    });
+  });
+});

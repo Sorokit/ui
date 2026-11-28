@@ -54,4 +54,55 @@ describe("RecoveryScreen", () => {
 
     vi.useRealTimers();
   });
+
+  describe("Threshold validation (Issue #1142)", () => {
+    it("validates that threshold cannot exceed total signer count", () => {
+      render(<RecoveryScreen />);
+      
+      const thresholdInput = screen.getByTestId("threshold-input");
+      const saveBtn = screen.getByRole("button", { name: "Save Recovery Config" });
+      
+      // Default: 3 signers, threshold 2 -> valid
+      expect(saveBtn).not.toBeDisabled();
+      expect(screen.queryByTestId("threshold-error")).not.toBeInTheDocument();
+
+      // Set threshold to 10 with only 3 signers
+      fireEvent.change(thresholdInput, { target: { value: "10" } });
+
+      // Error shown and submit disabled
+      expect(screen.getByTestId("threshold-error")).toBeInTheDocument();
+      expect(screen.getByTestId("threshold-error")).toHaveTextContent(
+        /Threshold cannot exceed total signer count \(3\)/i,
+      );
+      expect(saveBtn).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Initiate Dry-run" })).toBeDisabled();
+
+      // Lower threshold back to 2 -> valid again
+      fireEvent.change(thresholdInput, { target: { value: "2" } });
+      expect(screen.queryByTestId("threshold-error")).not.toBeInTheDocument();
+      expect(saveBtn).not.toBeDisabled();
+    });
+
+    it("disables submit and shows error if revoking signers causes threshold > signers.length", () => {
+      render(<RecoveryScreen />);
+
+      const thresholdInput = screen.getByTestId("threshold-input");
+      const saveBtn = screen.getByRole("button", { name: "Save Recovery Config" });
+
+      // Set threshold to 3 (equal to 3 initial signers) -> valid
+      fireEvent.change(thresholdInput, { target: { value: "3" } });
+      expect(saveBtn).not.toBeDisabled();
+
+      // Revoke one signer so count drops to 2
+      const revokeBtn = screen.getByLabelText("Revoke Personal Backup Key");
+      fireEvent.click(revokeBtn);
+
+      // Now threshold 3 > 2 signers -> error & disabled
+      expect(screen.getByTestId("threshold-error")).toBeInTheDocument();
+      expect(screen.getByTestId("threshold-error")).toHaveTextContent(
+        /Threshold cannot exceed total signer count \(2\)/i,
+      );
+      expect(saveBtn).toBeDisabled();
+    });
+  });
 });

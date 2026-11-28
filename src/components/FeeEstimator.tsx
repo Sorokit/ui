@@ -5,10 +5,34 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Tooltip } from "@/components/ui/Tooltip";
 import { useSorokit } from "@/context/useSorokit";
+import { useFeeData } from "@/hooks/useFeeData";
 import { useIsVisible } from "@/hooks/useIsVisible";
 import { cn, toXLM } from "@/lib/utils";
 
 export const MIN_NETWORK_BASE_FEE = 100;
+
+/**
+ * Base fee (stroops) above which the network is treated as surge pricing:
+ * more than 3x the 100-stroop minimum means ledgers are full and
+ * transactions are bidding against each other for inclusion.
+ */
+export const SURGE_FEE_THRESHOLD = MIN_NETWORK_BASE_FEE * 3;
+
+/** Speed multipliers a user can apply on top of the recommended fee. */
+export const FEE_MULTIPLIERS = [1.2, 1.5, 2] as const;
+export type FeeMultiplier = (typeof FEE_MULTIPLIERS)[number];
+
+/**
+ * Recommended fee scaled by `multiplier`, rounded up to a whole stroop.
+ * Computed in tenths to avoid float artifacts (500 * 1.2 is
+ * 600.0000000000001 in floating point, which would round up to 601).
+ */
+export function applyFeeMultiplier(fee: string, multiplier: number): string {
+  const stroops = parseInt(fee, 10);
+  if (Number.isNaN(stroops)) return fee;
+  const tenths = Math.round(multiplier * 10);
+  return String(Math.ceil((stroops * tenths) / 10));
+}
 
 export interface FeeData {
   baseFee: string;
@@ -27,6 +51,11 @@ interface FeeEstimatorProps {
   customFee?: string;
   /** Callback fired when custom fee input changes. */
   onCustomFeeChange?: (customFee: string) => void;
+  /**
+   * Callback fired when the user toggles a speed multiplier. Receives the
+   * multiplier (null when cleared) and the resulting fee in stroops.
+   */
+  onMultiplierChange?: (multiplier: FeeMultiplier | null, fee: string | null) => void;
 }
 
 export function FeeEstimator({
@@ -36,13 +65,13 @@ export function FeeEstimator({
   onFeeLoad,
   customFee: customFeeProp,
   onCustomFeeChange,
+  onMultiplierChange,
 }: FeeEstimatorProps) {
-  const { client } = useSorokit();
+  const { registerWatcher } = useSorokit();
   const [containerRef, isVisible] = useIsVisible<HTMLDivElement>();
-  const [fee, setFee] = useState<FeeData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [internalCustomFee, setInternalCustomFee] = useState(customFeeProp ?? "");
+  const [internalCustomFee, setInternalCustomFee] = useState(
+    customFeeProp ?? "",
+  );
   const [prevCustomFeeProp, setPrevCustomFeeProp] = useState(customFeeProp);
   const [customFeeError, setCustomFeeError] = useState<string | null>(null);
 
@@ -53,7 +82,8 @@ export function FeeEstimator({
     }
   }
 
-  const customFee = customFeeProp !== undefined ? customFeeProp : internalCustomFee;
+  const customFee =
+    customFeeProp !== undefined ? customFeeProp : internalCustomFee;
 
   const handleCustomFeeChange = (val: string) => {
     setInternalCustomFee(val);
@@ -82,68 +112,58 @@ export function FeeEstimator({
   useEffect(() => {
     onFeeLoadRef.current = onFeeLoad;
   }, [onFeeLoad]);
+
+  const intervalIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Issue #442: generation counter - an estimate that resolves after a newer
-  // one started is discarded rather than overwriting fresher data.
-  const requestIdRef = useRef(0);
+  const {
+    fee,
+    loading,
+    error,
+    load: hookLoad,
+  } = useFeeData(refreshInterval, isVisible);
+
+  useEffect(() => {
+    if (fee) {
+      onFeeLoadRef.current?.(fee);
+    }
+  }, [fee]);
 
   const load = useCallback(async () => {
-    if (!client) return;
-    const requestId = ++requestIdRef.current;
-    const isStale = () => requestId !== requestIdRef.current;
-    setLoading(true);
-    try {
-      const { data, error: err } = await client.transaction.estimateFee();
-      if (isStale()) return;
-      if (err) {
-        setError(err);
-        return;
-      }
-      if (data) {
-        const clampedData: FeeData = {
-          baseFee: Math.max(MIN_NETWORK_BASE_FEE, parseInt(data.baseFee || "0", 10) || 0).toString(),
-          recommended: Math.max(MIN_NETWORK_BASE_FEE, parseInt(data.recommended || "0", 10) || 0).toString(),
-        };
-        setFee(clampedData);
-        setError(null);
-        onFeeLoadRef.current?.(clampedData);
-      }
-    } catch (e) {
-      if (isStale()) return;
-      setError(e instanceof Error ? e.message : "Request timed out");
-    } finally {
-      // Issue #442: a stale call must not clear the spinner owned by the
-      // request that superseded it.
-      if (!isStale()) setLoading(false);
-    }
-  }, [client]);
+    await hookLoad();
+  }, [hookLoad]);
 
-  // Issue #442: one effect owns both the initial fetch and the poll timer, so
-  // mount makes exactly one request and a changed `refreshInterval` re-arms the
-  // timer at the new period.
+  // Register a cancel callback so `resetTransactionWatchers` can stop polling
+  // on network switch (#715) and unmount (#861).
   useEffect(() => {
-    // Dashboard keeps a visited screen mounted (rather than unmounting it)
-    // to preserve in-progress state — see the comment in Dashboard.tsx.
-    // That means a screen navigated away from is still mounted, just
-    // hidden; without this check, a refreshInterval keeps firing network
-    // requests for a screen the user can no longer see (#533).
-    if (!isVisible) return;
-
-    const timerId = window.setTimeout(() => {
-      void load();
-    }, 0);
-    if (refreshInterval > 0) {
-      const id = setInterval(() => {
-        void load();
-      }, refreshInterval);
-      return () => {
-        window.clearTimeout(timerId);
-        clearInterval(id);
-      };
-    }
-    return () => {
-      window.clearTimeout(timerId);
+    const cancel = () => {
+      if (intervalIdRef.current !== null) {
+        clearInterval(intervalIdRef.current);
+        intervalIdRef.current = null;
+      }
     };
-  }, [load, refreshInterval, isVisible]);
+    const deregister = registerWatcher?.(cancel) ?? (() => {});
+    return () => {
+      deregister();
+      cancel();
+    };
+  }, [registerWatcher]);
+
+  const [multiplier, setMultiplier] = useState<FeeMultiplier | null>(null);
+  const multipliedFee =
+    fee && multiplier !== null ? applyFeeMultiplier(fee.recommended, multiplier) : null;
+
+  const handleMultiplierToggle = (value: FeeMultiplier) => {
+    const next = multiplier === value ? null : value;
+    setMultiplier(next);
+    onMultiplierChange?.(
+      next,
+      fee && next !== null ? applyFeeMultiplier(fee.recommended, next) : null,
+    );
+  };
+
+  const baseFeeStroops = fee ? parseInt(fee.baseFee, 10) : NaN;
+  const isSurge = !Number.isNaN(baseFeeStroops) && baseFeeStroops > SURGE_FEE_THRESHOLD;
 
   const compactContent = fee
     ? `Base: ${fee.baseFee} stroops · Recommended: ${fee.recommended} stroops`
@@ -177,14 +197,23 @@ export function FeeEstimator({
               </button>
             </span>
           ) : fee ? (
-            <span className="text-[11px] text-ink">{compactContent}</span>
+            <span className="inline-flex items-center gap-2 text-[11px] text-ink">
+              {compactContent}
+              {isSurge && (
+                <span role="alert">
+                  <Badge variant="warning">Surge pricing</Badge>
+                </span>
+              )}
+            </span>
           ) : null}
         </div>
       ) : (
         <>
           <div className="flex items-center justify-between px-5 py-4 border-b border-line">
             <div>
-              <h3 className="text-[13px] font-semibold text-ink">Network Fee</h3>
+              <h3 className="text-[13px] font-semibold text-ink">
+                Network Fee
+              </h3>
               <p className="text-[11px] text-ink-3 mt-0.5">
                 Current Stellar base fee estimate
               </p>
@@ -215,7 +244,9 @@ export function FeeEstimator({
               </div>
             ) : error ? (
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <p className="text-[12px] text-red" role="alert">{error}</p>
+                <p className="text-[12px] text-red" role="alert">
+                  {error}
+                </p>
                 <button
                   type="button"
                   onClick={() => void load()}
@@ -227,8 +258,13 @@ export function FeeEstimator({
               </div>
             ) : fee ? (
               <>
+                {isSurge && <SurgeWarning baseFee={baseFeeStroops} />}
                 <div className="flex items-center gap-4">
-                  <FeeCell label="Base Fee" value={fee.baseFee} unit="stroops" />
+                  <FeeCell
+                    label="Base Fee"
+                    value={fee.baseFee}
+                    unit="stroops"
+                  />
                   <div className="w-px h-8 bg-line" />
                   <FeeCell
                     label="Recommended"
@@ -236,9 +272,51 @@ export function FeeEstimator({
                     unit="stroops"
                     highlight
                     highFee={
-                      parseInt(fee.recommended, 10) > parseInt(fee.baseFee, 10) * 2
+                      parseInt(fee.recommended, 10) >
+                      parseInt(fee.baseFee, 10) * 2
                     }
                   />
+                </div>
+                <div className="mt-4 pt-4 border-t border-line">
+                  <div className="flex items-center justify-between gap-3">
+                    <span
+                      id="fee-multiplier-label"
+                      className="text-[11px] font-medium text-ink-2"
+                    >
+                      Speed Multiplier
+                    </span>
+                    <div
+                      role="group"
+                      aria-labelledby="fee-multiplier-label"
+                      className="flex items-center gap-1.5"
+                    >
+                      {FEE_MULTIPLIERS.map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          aria-pressed={multiplier === m}
+                          onClick={() => handleMultiplierToggle(m)}
+                          className={cn(
+                            "px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors",
+                            multiplier === m
+                              ? "border-brand bg-brand-dim text-brand"
+                              : "border-line bg-surface-2 text-ink-2 hover:text-ink",
+                          )}
+                        >
+                          {m.toFixed(1)}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {multipliedFee !== null && (
+                    <p
+                      data-testid="multiplied-fee"
+                      className="text-[11px] text-ink-3 mt-1.5"
+                    >
+                      Priority fee: <span className="text-ink font-semibold">{multipliedFee}</span>{" "}
+                      stroops (≈ {toXLM(multipliedFee)} XLM) for faster inclusion
+                    </p>
+                  )}
                 </div>
                 <div className="mt-4 pt-4 border-t border-line">
                   <label
@@ -258,7 +336,9 @@ export function FeeEstimator({
                       className="px-3 py-1.5 text-[12px] bg-surface-2 border border-line rounded-lg text-ink focus:outline-none focus:border-brand w-36"
                       aria-label="Custom fee in stroops"
                       aria-invalid={!!customFeeError}
-                      aria-describedby={customFeeError ? "custom-fee-error" : undefined}
+                      aria-describedby={
+                        customFeeError ? "custom-fee-error" : undefined
+                      }
                     />
                     {customFee && !customFeeError && (
                       <span className="text-[11px] text-ink-3">
@@ -267,7 +347,11 @@ export function FeeEstimator({
                     )}
                   </div>
                   {customFeeError && (
-                    <p id="custom-fee-error" role="alert" className="text-[11px] text-red mt-1">
+                    <p
+                      id="custom-fee-error"
+                      role="alert"
+                      className="text-[11px] text-red mt-1"
+                    >
                       {customFeeError}
                     </p>
                   )}
@@ -277,6 +361,29 @@ export function FeeEstimator({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function SurgeWarning({ baseFee }: { baseFee: number }) {
+  const ratio = (baseFee / MIN_NETWORK_BASE_FEE).toFixed(1);
+  return (
+    <div
+      role="alert"
+      data-testid="surge-warning"
+      className="mb-4 rounded-lg border border-warning-dim bg-warning-dim px-3 py-2"
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant="warning">Surge pricing</Badge>
+        <span className="text-[12px] font-semibold text-ink">
+          Network fees are elevated ({ratio}x the minimum)
+        </span>
+      </div>
+      <p className="text-[11px] text-ink-2 mt-1">
+        The base fee is {baseFee} stroops. Ledgers are at capacity, so
+        transactions are competing on fee for inclusion. Pay at least the
+        recommended fee, or wait for congestion to ease.
+      </p>
     </div>
   );
 }
@@ -314,7 +421,9 @@ export function FeeCell({
         <span className="text-[10px] text-ink-3">{unit}</span>
       </div>
       <span className="text-[10px] text-ink-3">
-        {Number.isNaN(parseInt(value, 10)) ? "(≈ — XLM)" : `(≈ ${toXLM(value)} XLM)`}
+        {Number.isNaN(parseInt(value, 10))
+          ? "(≈ — XLM)"
+          : `(≈ ${toXLM(value)} XLM)`}
       </span>
     </div>
   );

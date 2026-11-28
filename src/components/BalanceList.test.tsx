@@ -1,7 +1,8 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
+import { reloadPreferences, setPreferences } from "@/lib/preferences";
 
 import { balanceKey, BalanceList } from "./BalanceList";
 
@@ -9,22 +10,27 @@ vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
 
-vi.mock("@/components/AssetBadge", () => ({
-  AssetBadge: ({
-    balance,
-    showIssuerSuffix,
-  }: {
-    balance: { asset: string; assetIssuer?: string };
-    showIssuerSuffix?: boolean;
-  }) => (
-    <span data-testid="asset-badge">
-      {balance.asset}
-      {showIssuerSuffix && balance.assetIssuer
-        ? ` (${balance.assetIssuer.slice(0, 4)}...${balance.assetIssuer.slice(-4)})`
-        : ""}
-    </span>
-  ),
-}));
+// Tests that inspect issuer truncation/tooltips flip this to render the real
+// AssetBadge; everything else uses the lightweight stub below.
+const assetBadgeMode = vi.hoisted(() => ({ real: false }));
+
+vi.mock("@/components/AssetBadge", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/AssetBadge")>();
+  return {
+    AssetBadge: (props: React.ComponentProps<typeof actual.AssetBadge>) => {
+      if (assetBadgeMode.real) return <actual.AssetBadge {...props} />;
+      const { balance, showIssuerSuffix } = props;
+      return (
+        <span data-testid="asset-badge">
+          {balance.asset}
+          {showIssuerSuffix && balance.assetIssuer
+            ? ` (${balance.assetIssuer.slice(0, 4)}...${balance.assetIssuer.slice(-4)})`
+            : ""}
+        </span>
+      );
+    },
+  };
+});
 
 vi.mock("@/components/ui/Skeleton", () => ({
   AssetRowSkeleton: () => <div data-testid="skeleton-row" />,
@@ -70,6 +76,7 @@ const mockLpBalance2 = {
 describe("BalanceList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    assetBadgeMode.real = false;
   });
 
   it("renders 'Connect your wallet' prompt when not connected", () => {
@@ -805,6 +812,288 @@ describe("BalanceList", () => {
 
       expect(duplicateWarnings).toHaveLength(0);
       consoleSpy.mockRestore();
+    });
+  });
+
+  describe("zero-balance toggle (issue #665)", () => {
+    it("hides zero-balance trustlines when the toggle is enabled", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance, mockUsdtZeroBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+      expect(screen.getAllByTestId("asset-badge")).toHaveLength(2);
+
+      fireEvent.click(screen.getByTitle("Hide zero balances"));
+
+      const badges = screen.getAllByTestId("asset-badge");
+      expect(badges).toHaveLength(1);
+      expect(badges[0]).toHaveTextContent("XLM");
+    });
+  });
+
+  describe("numeric sorting (issue #665)", () => {
+    it("sorts scientific-notation balances by numeric value, not alphabetically", () => {
+      const zed = {
+        asset: "ZED",
+        balance: "1.2e10",
+        assetType: "credit_alphanum4" as const,
+        assetCode: "ZED",
+        assetIssuer: "GZEDISSUER1111111111111111111111111111111",
+      };
+      const alpha = {
+        asset: "ALPHA",
+        balance: "0.5",
+        assetType: "credit_alphanum4" as const,
+        assetCode: "ALPHA",
+        assetIssuer: "GALPHAISSUER222222222222222222222222222222",
+      };
+
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [alpha, zed],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+      fireEvent.click(screen.getByTitle("Sort: Default")); // -> balance-desc
+
+      const badges = screen.getAllByTestId("asset-badge");
+      expect(badges.map((b) => b.textContent)).toEqual(["ZED", "ALPHA"]);
+    });
+  });
+
+  describe("currency display (issue #665)", () => {
+    it("formats the portfolio total in the requested currency", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList showTotal xlmPrice={0.5} currency="EUR" />);
+      expect(screen.getByText(/~100 XLM \(/)).toBeInTheDocument();
+    });
+  });
+
+  // ── Issue #919: fiat conversion, zero-state and issuer tooltips ────────────
+  describe("fiat currency conversion (issue #919)", () => {
+    function mockXlm(balance = "100.0000000") {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [{ ...mockXlmBalance, balance }, mockUsdcBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+    }
+
+    it.each([
+      ["USD", "$"],
+      ["EUR", "€"],
+      ["GBP", "£"],
+    ])("prefixes the %s total with %s", (currency, symbol) => {
+      mockXlm();
+      render(<BalanceList showTotal xlmPrice={0.5} currency={currency} />);
+      expect(screen.getByText(`~100 XLM (~${symbol}50)`)).toBeInTheDocument();
+    });
+
+    it("defaults to USD when no currency is passed", () => {
+      mockXlm();
+      render(<BalanceList showTotal xlmPrice={0.5} />);
+      expect(screen.getByText("~100 XLM (~$50)")).toBeInTheDocument();
+      expect(screen.queryByText(/€|£/)).not.toBeInTheDocument();
+    });
+
+    describe("display currency from Settings", () => {
+      afterEach(() => {
+        window.localStorage.clear();
+        reloadPreferences();
+      });
+
+      it("uses the saved display currency when no currency prop is passed", () => {
+        mockXlm();
+        setPreferences({ currency: "EUR" });
+        render(<BalanceList showTotal xlmPrice={0.5} />);
+        expect(screen.getByText("~100 XLM (~€50)")).toBeInTheDocument();
+      });
+
+      it("lets an explicit currency prop override the saved one", () => {
+        mockXlm();
+        setPreferences({ currency: "EUR" });
+        render(<BalanceList showTotal xlmPrice={0.5} currency="GBP" />);
+        expect(screen.getByText("~100 XLM (~£50)")).toBeInTheDocument();
+      });
+    });
+
+    it("updates the symbol and value when switching from USD to EUR", () => {
+      mockXlm();
+      const { rerender } = render(<BalanceList showTotal xlmPrice={0.12} currency="USD" />);
+      expect(screen.getByText("~100 XLM (~$12)")).toBeInTheDocument();
+
+      // A different currency typically comes with a different XLM price.
+      rerender(<BalanceList showTotal xlmPrice={0.11} currency="EUR" />);
+      expect(screen.getByText("~100 XLM (~€11)")).toBeInTheDocument();
+      expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+    });
+
+    it("falls back to the currency code for currencies without a known symbol", () => {
+      mockXlm();
+      render(<BalanceList showTotal xlmPrice={2} currency="JPY" />);
+      expect(screen.getByText("~100 XLM (~JPY 200)")).toBeInTheDocument();
+    });
+
+    it("rounds the fiat value to at most two decimal places", () => {
+      mockXlm("12.3456789");
+      render(<BalanceList showTotal xlmPrice={0.123456} currency="EUR" />);
+      // 12.3456789 XLM * 0.123456 = 1.5241...
+      expect(screen.getByText("~12.35 XLM (~€1.52)")).toBeInTheDocument();
+    });
+
+    it("only converts native XLM, ignoring non-native balances", () => {
+      mockXlm("10");
+      render(<BalanceList showTotal xlmPrice={3} currency="GBP" />);
+      // mockUsdcBalance (50 USDC) has no price feed and is excluded.
+      expect(screen.getByText("~10 XLM (~£30)")).toBeInTheDocument();
+    });
+
+    it("omits the fiat figure but keeps the XLM total when xlmPrice is missing", () => {
+      mockXlm();
+      render(<BalanceList showTotal currency="EUR" />);
+      expect(screen.getByText("~100 XLM")).toBeInTheDocument();
+      expect(screen.queryByText(/€/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("empty account state (issue #919)", () => {
+    const zeroXlm = { ...mockXlmBalance, balance: "0.0000000" };
+
+    it("renders an empty state, a 0 assets badge and a zero total for an account with no balances", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList showTotal xlmPrice={0.5} currency="EUR" />);
+
+      expect(screen.getByText(/no assets found/i)).toBeInTheDocument();
+      expect(screen.getByText("0 assets")).toBeInTheDocument();
+      expect(screen.getByText("~0 XLM (~€0)")).toBeInTheDocument();
+      expect(screen.queryAllByTestId("asset-badge")).toHaveLength(0);
+      // There is nothing to search through.
+      expect(screen.queryByPlaceholderText("Search assets…")).not.toBeInTheDocument();
+    });
+
+    it("renders zero XLM and zero-asset trustlines as dimmed 'No balance' rows", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockUsdtZeroBalance, zeroXlm],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList showTotal xlmPrice={0.5} />);
+
+      const badges = screen.getAllByTestId("asset-badge");
+      expect(badges.map((b) => b.textContent)).toEqual(["XLM", "USDT"]);
+      const labels = screen.getAllByText("No balance");
+      expect(labels).toHaveLength(2);
+      for (const label of labels) {
+        expect(label.closest(".border-b")).toHaveClass("opacity-50");
+      }
+      expect(screen.getAllByText("0.00")).toHaveLength(2);
+      expect(screen.getByText("~0 XLM (~$0)")).toBeInTheDocument();
+      expect(screen.getByText("2 assets")).toBeInTheDocument();
+    });
+
+    it("shows 'No assets found' when hiding zero balances on an all-zero account", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [zeroXlm, mockUsdtZeroBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+        network: { name: "testnet" as const, passphrase: "Test SDF Network", rpcUrl: "https://testnet.rpc.com", horizonUrl: "https://testnet.horizon.com" },
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+      fireEvent.click(screen.getByTitle("Hide zero balances"));
+
+      expect(screen.getByText(/no assets found/i)).toBeInTheDocument();
+      expect(screen.queryAllByTestId("asset-badge")).toHaveLength(0);
+      // The account exists (it has trustlines), so Friendbot is not offered.
+      expect(screen.queryByText(/fund with friendbot/i)).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTitle("Show zero balances"));
+      expect(screen.getAllByTestId("asset-badge")).toHaveLength(2);
+    });
+
+    it("treats a malformed balance string as zero", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [{ ...mockXlmBalance, balance: "not-a-number" }],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList showTotal xlmPrice={0.5} />);
+      expect(screen.getByText("No balance")).toBeInTheDocument();
+      expect(screen.getByText("~0 XLM (~$0)")).toBeInTheDocument();
+      expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("issuer truncation and tooltip (issue #919)", () => {
+    beforeEach(() => {
+      assetBadgeMode.real = true;
+    });
+
+    it("truncates the issuer key and exposes the full key as a tooltip", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance, mockAbcBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+
+      const issuer = screen.getByText("GABCDE...EFGH");
+      expect(issuer).toHaveAttribute("title", mockAbcBalance.assetIssuer);
+      expect(screen.queryByText(mockAbcBalance.assetIssuer)).not.toBeInTheDocument();
+      expect(screen.getByTitle(mockAbcBalance.assetIssuer)).toBe(issuer);
+    });
+
+    it("does not render an issuer tooltip for native XLM", () => {
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [mockXlmBalance],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      const { container } = render(<BalanceList />);
+
+      expect(screen.getByText("Stellar Lumens")).not.toHaveAttribute("title");
+      expect(container.querySelector("[data-address]")).toBeNull();
+    });
+
+    it("adds a tooltipped issuer suffix to disambiguate same-code assets", () => {
+      const issuerA = "GISSUERAAAA1111111111111111111111111111111";
+      const issuerB = "GISSUERBBBB2222222222222222222222222222222";
+      vi.mocked(useSorokit).mockReturnValue({
+        balances: [
+          { ...mockUsdcBalance, assetIssuer: issuerA },
+          { ...mockUsdcBalance, assetIssuer: issuerB, balance: "1.0000000" },
+          mockAbcBalance,
+        ],
+        isLoadingAccount: false,
+        isConnected: true,
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<BalanceList />);
+
+      // Suffix = first 4 + last 4 chars of the issuer.
+      expect(screen.getByText("(GISS...1111)")).toHaveAttribute("title", issuerA);
+      expect(screen.getByText("(GISS...2222)")).toHaveAttribute("title", issuerB);
+      // A unique asset code gets no suffix, only the truncated issuer line.
+      expect(screen.queryByText(/\(GABC\.\.\./)).not.toBeInTheDocument();
+      expect(screen.getAllByTitle(issuerA)).toHaveLength(2);
     });
   });
 });

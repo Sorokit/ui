@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
-import { WalletStatusBadge } from "./WalletStatusBadge";
+import { STATUS_STYLES, WalletStatusBadge } from "./WalletStatusBadge";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -333,6 +333,182 @@ describe("WalletStatusBadge", () => {
       expect(
         screen.queryByTestId("wallet-copy-confirmation"),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("network reconnection and error states", () => {
+    it("renders pulsating yellow dot and 'Reconnecting...' label during transient network connecting", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          walletName: "Freighter",
+          network: { ...NETWORK, status: "connecting" },
+        }),
+      );
+
+      render(<WalletStatusBadge />);
+      const dot = screen.getByTestId("wallet-status-dot");
+      expect(dot).toHaveClass("bg-yellow-400", "motion-safe:animate-pulse");
+      expect(dot).not.toHaveClass("bg-green");
+      const label = screen.getByText("Reconnecting...");
+      expect(label).toBeInTheDocument();
+      expect(label).toHaveClass("text-yellow-400");
+      expect(
+        screen.getByRole("button", { name: /Network reconnecting/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("renders reconnecting state when isSwitchingNetwork is active", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          walletName: "Freighter",
+          network: { ...NETWORK, status: "online" },
+          isSwitchingNetwork: true,
+        }),
+      );
+
+      render(<WalletStatusBadge />);
+      const dot = screen.getByTestId("wallet-status-dot");
+      expect(dot).toHaveClass("bg-yellow-400", "motion-safe:animate-pulse");
+      expect(screen.getByText("Reconnecting...")).toBeInTheDocument();
+    });
+
+    it("renders red dot and 'Error' label when network status is error", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          walletName: "Freighter",
+          network: { ...NETWORK, status: "error" },
+        }),
+      );
+
+      render(<WalletStatusBadge />);
+      const dot = screen.getByTestId("wallet-status-dot");
+      expect(dot).toHaveClass("bg-red");
+      expect(dot).not.toHaveClass("bg-green");
+      const label = screen.getByText("Error");
+      expect(label).toBeInTheDocument();
+      expect(label).toHaveClass("text-red-400");
+      expect(
+        screen.getByRole("button", { name: /Network error/ }),
+      ).toBeInTheDocument();
+    });
+
+    it("uses WCAG 2.1 AA compliant color tokens for degraded and offline states", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          network: { ...NETWORK, status: "degraded" },
+        }),
+      );
+      const { unmount } = render(<WalletStatusBadge />);
+      expect(screen.getByText("Degraded")).toHaveClass("text-warning");
+      unmount();
+
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          network: { ...NETWORK, status: "offline" },
+        }),
+      );
+      render(<WalletStatusBadge />);
+      expect(screen.getByText("Offline")).toHaveClass("text-red-400");
+    });
+  });
+
+  describe("lifecycle transitions (disconnected -> connecting -> connected -> error)", () => {
+    it("transitions smoothly through all four network lifecycle states", () => {
+      // 1. Disconnected
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+          address: null,
+          isConnecting: false,
+        }),
+      );
+      const { rerender } = render(<WalletStatusBadge />);
+      expect(screen.getByText("Disconnected")).toBeInTheDocument();
+      expect(screen.getByTestId("wallet-status-dot")).toHaveClass("bg-ink-4");
+
+      // 2. Connecting
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+          address: null,
+          isConnecting: true,
+        }),
+      );
+      rerender(<WalletStatusBadge />);
+      expect(screen.getByText("Connecting…")).toBeInTheDocument();
+      expect(screen.getByTestId("wallet-status-dot")).toHaveClass(
+        "bg-yellow-400",
+        "motion-safe:animate-pulse",
+      );
+
+      // 3. Connected (healthy / online)
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          walletName: "Freighter",
+          isConnecting: false,
+          network: { ...NETWORK, status: "online" },
+        }),
+      );
+      rerender(<WalletStatusBadge />);
+      expect(screen.getByText("Freighter")).toBeInTheDocument();
+      expect(screen.getByTestId("wallet-status-dot")).toHaveClass("bg-green");
+      expect(screen.queryByText("Connecting…")).not.toBeInTheDocument();
+      expect(screen.queryByText("Disconnected")).not.toBeInTheDocument();
+
+      // 4. Error / Degraded / Offline
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: ADDRESS,
+          walletName: "Freighter",
+          isConnecting: false,
+          network: { ...NETWORK, status: "error" },
+        }),
+      );
+      rerender(<WalletStatusBadge />);
+      expect(screen.getByText("Error")).toBeInTheDocument();
+      expect(screen.getByTestId("wallet-status-dot")).toHaveClass("bg-red");
+    });
+  });
+
+  describe("WCAG 2.1 AA contrast compliance", () => {
+    it("guarantees all status color tokens satisfy WCAG AA >= 4.5:1 contrast against bg-surface-2", () => {
+      // Surface background is #1c1c1c
+      const bgLum = 0.01165;
+      const calcContrast = (fgLum: number) =>
+        (Math.max(fgLum, bgLum) + 0.05) / (Math.min(fgLum, bgLum) + 0.05);
+
+      // Token luminosities:
+      // text-yellow-400 (#facc15): lum = 0.619 -> contrast ~ 10.85:1
+      // text-warning (#fdba74): lum = 0.546 -> contrast ~ 9.67:1
+      // text-red-400 (#f87171): lum = 0.311 -> contrast ~ 5.85:1
+      const tokenLuminance: Record<string, number> = {
+        "text-yellow-400": 0.619,
+        "text-warning": 0.546,
+        "text-red-400": 0.311,
+      };
+
+      for (const [state, style] of Object.entries(STATUS_STYLES)) {
+        const lum = tokenLuminance[style.text];
+        expect(lum, `Known luminance for token ${style.text}`).toBeDefined();
+        const contrast = calcContrast(lum);
+        expect(
+          contrast,
+          `Contrast ratio for ${state} status text (${style.text}) against bg-surface-2`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
     });
   });
 });

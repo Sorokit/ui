@@ -5,21 +5,29 @@ import {
   CheckmarkCircle01Icon,
   CoinsSwapIcon,
   ContractsIcon,
+  Copy01Icon,
   GiftIcon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
+import { OfflineBadge } from "@/components/OfflineBadge";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import type { Transaction } from "@/lib/client";
 import { getClient } from "@/lib/client";
+import { readSnapshot, writeSnapshot } from "@/lib/offline-cache";
+import { matchesTransactionSearch } from "@/lib/transaction-search";
 import { cn, truncateAddress } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
+// Search scans the full history, fetched in larger pages up to a hard cap.
+const SEARCH_PAGE_SIZE = 100;
+const MAX_SEARCH_PAGES = 10;
 const MEMO_TRUNCATE_LENGTH = 20;
 const STROOPS_PER_XLM = 10_000_000;
 const TREND_DAYS = 7;
@@ -217,8 +225,11 @@ export const TxRow = memo(function TxRow({
       className="flex items-center justify-between px-5 py-3.5 border-b border-line last:border-0 gap-4 hover:bg-surface-2 transition-colors cursor-pointer"
     >
       <div className="flex items-center gap-3 min-w-0">
-        {/* Status icon */}
+        {/* Status icon: purely decorative, hidden from the accessibility
+            tree since the Success/Failed badge below already announces
+            the same status as real text (issue #961). */}
         <div
+          aria-hidden="true"
           data-testid="status-icon-container"
           className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${tx.successful ? "bg-success-dim" : "bg-error-dim"}`}
         >
@@ -235,10 +246,13 @@ export const TxRow = memo(function TxRow({
           <span data-txhash className="truncate">
             {truncateAddress(tx.hash, 10, 6)}
           </span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-ink-3">Ledger {tx.ledger}</span>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] text-ink-3 shrink-0">Ledger {tx.ledger}</span>
             {tx.memo && (
-              <span className="text-[10px] text-ink-3" title={tx.memo}>
+              <span
+                className="text-[10px] text-ink-3 truncate min-w-0"
+                title={tx.memo}
+              >
                 · {truncateMemo(tx.memo)}
               </span>
             )}
@@ -265,6 +279,31 @@ export const TxRow = memo(function TxRow({
               {tx.operationCount} ops
             </Badge>
           )}
+          {/* A real <button> would be invalid HTML nested inside the row's
+              own <a> wrapper (when it links to the explorer), so this
+              uses role="button" on a <span> instead, with the same click
+              and keyboard handling a native button gets for free. */}
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              navigator.clipboard?.writeText(tx.hash).catch(() => {});
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                e.stopPropagation();
+                navigator.clipboard?.writeText(tx.hash).catch(() => {});
+              }
+            }}
+            className="p-1 rounded hover:bg-surface-2 text-ink-3 hover:text-ink transition-colors cursor-pointer"
+            aria-label={`Copy transaction hash ${truncateAddress(tx.hash, 10, 6)}`}
+            title="Copy transaction hash"
+          >
+            <HugeiconsIcon icon={Copy01Icon} size={12} strokeWidth={1.5} />
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <span
@@ -301,47 +340,152 @@ export function TransactionHistory({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [multiOpOnly, setMultiOpOnly] = useState(false);
   const [memoQuery, setMemoQuery] = useState("");
+  // #1159 - search date range (in addition to the optional startDate/endDate
+  // props) and the full history used as the search pool.
+  const [searchFrom, setSearchFrom] = useState("");
+  const [searchTo, setSearchTo] = useState("");
+  const [allTxs, setAllTxs] = useState<Transaction[] | null>(null);
+  const [searchingAll, setSearchingAll] = useState(false);
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #1163 - offline mode: true while `txs` came from the local cache.
+  const isOnline = useOnlineStatus();
+  const [isCached, setIsCached] = useState(false);
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
+
+  // Shared fetch counter to guard against stale responses when rapid address
+  // or page changes occur (e.g., address change triggering a page-reset cycle).
+  // Responses from superseded fetch IDs are discarded regardless of execution order.
+  // See docs/async-race-conditions.md for background on async race conditions.
+  const fetchIdRef = useRef(0);
 
   if (prevAddress !== address) {
     setPrevAddress(address);
     setPage(1);
     setTotal(0);
     setTxs([]);
+    setIsCached(false);
+    setAllTxs(null);
   }
 
   useEffect(() => {
     if (!address || !client) return;
 
-    let active = true;
+    const fetchId = ++fetchIdRef.current;
     const timerId = window.setTimeout(() => {
+      if (fetchId !== fetchIdRef.current) return;
       setLoading(true);
       client
         .transaction.getHistory(address, page, PAGE_SIZE)
         .then(({ data, error: err, total: t }) => {
-          if (!active) return;
+          if (fetchId !== fetchIdRef.current) return;
           if (err) {
+            // #1163 - fall back to the last-known page instead of an error
+            // wall, unless the failure is a real "unfunded account" state.
+            const cached = isUnfundedAccountError(err)
+              ? null
+              : readSnapshot(network?.name, address)?.transactions?.[page];
+            if (cached) {
+              setTxs(cached.items);
+              setTotal(cached.total);
+              setIsCached(true);
+              setCachedAt(readSnapshot(network?.name, address)?.cachedAt ?? null);
+              setError(null);
+              return;
+            }
             setError(err);
             return;
           }
-          setTxs(data ?? []);
-          setTotal(Number.isFinite(t) && t > 0 ? t : 0);
+          const items = data ?? [];
+          const nextTotal = Number.isFinite(t) && t > 0 ? t : 0;
+          setTxs(items);
+          setTotal(nextTotal);
           setError(null);
+          setIsCached(false);
+          writeSnapshot(network?.name, address, {
+            transactions: { [page]: { items, total: nextTotal } },
+          });
+        })
+        .catch((e) => {
+          if (fetchId !== fetchIdRef.current) return;
+          const snapshot = readSnapshot(network?.name, address);
+          const cached = snapshot?.transactions?.[page];
+          if (cached) {
+            setTxs(cached.items);
+            setTotal(cached.total);
+            setIsCached(true);
+            setCachedAt(snapshot?.cachedAt ?? null);
+            setError(null);
+          } else {
+            setError(e instanceof Error ? e.message : "Failed to load history");
+          }
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (fetchId === fetchIdRef.current) setLoading(false);
         });
     }, 0);
 
+    const activeFetchIdRef = fetchIdRef;
     return () => {
-      active = false;
+      activeFetchIdRef.current++;
       window.clearTimeout(timerId);
     };
-  }, [address, client, page]);
+    // `isOnline` is a dependency so history refetches automatically when the
+    // connection comes back (#1163).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [address, client, page, isOnline]);
+
+  const searchActive =
+    memoQuery.trim() !== "" || searchFrom !== "" || searchTo !== "";
+
+  // #1159 - a search must cover *all* history, not just the 10 rows on screen.
+  // Matching starts instantly against the current page; once the full history
+  // has loaded in the background the results widen to include it.
+  useEffect(() => {
+    if (!searchActive) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAllTxs((prev) => (prev ? null : prev));
+      return;
+    }
+    if (!address || !client || allTxs) return;
+
+    let cancelled = false;
+    void (async () => {
+      setSearchingAll(true);
+      const collected: Transaction[] = [];
+      for (let p = 1; p <= MAX_SEARCH_PAGES; p++) {
+        const res = await client.transaction.getHistory(
+          address,
+          p,
+          SEARCH_PAGE_SIZE,
+        );
+        if (cancelled) return;
+        if (res.error || !res.data) break;
+        collected.push(...res.data);
+        if (
+          res.data.length < SEARCH_PAGE_SIZE ||
+          (res.total > 0 && collected.length >= res.total)
+        ) {
+          break;
+        }
+      }
+      if (cancelled) return;
+      if (collected.length) {
+        const seen = new Set<string>();
+        setAllTxs(collected.filter((t) => !seen.has(t.hash) && seen.add(t.hash)));
+      }
+      setSearchingAll(false);
+    })().catch(() => {
+      if (!cancelled) setSearchingAll(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchActive, address, client, allTxs]);
 
   const totalPages = total > 0 ? Math.ceil(total / PAGE_SIZE) : 0;
 
@@ -350,18 +494,38 @@ export function TransactionHistory({
   }
 
   const filteredTxs = useMemo(() => {
-    const q = memoQuery.trim().toLowerCase();
-    return txs.filter((tx) => {
+    const pool = searchActive && allTxs ? allTxs : txs;
+    return pool.filter((tx) => {
       if (statusFilter === "success" && !tx.successful) return false;
       if (statusFilter === "failed" && tx.successful) return false;
       if (multiOpOnly && tx.operationCount <= 1) return false;
       if (startDate && new Date(tx.createdAt) < new Date(startDate)) return false;
       if (endDate && new Date(tx.createdAt) > new Date(endDate + "T23:59:59"))
         return false;
-      if (q && !(tx.memo ?? "").toLowerCase().includes(q)) return false;
+      if (
+        !matchesTransactionSearch(tx, {
+          query: memoQuery,
+          dateFrom: searchFrom,
+          dateTo: searchTo,
+        })
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [endDate, memoQuery, multiOpOnly, startDate, statusFilter, txs]);
+  }, [
+    allTxs,
+    endDate,
+    memoQuery,
+    multiOpOnly,
+    searchActive,
+    searchFrom,
+    searchTo,
+    startDate,
+    statusFilter,
+    txs,
+  ]);
+  const searchPaged = searchActive && allTxs !== null;
 
   const feeTotal = totalFeeStroops(filteredTxs);
 
@@ -384,6 +548,11 @@ export function TransactionHistory({
         </div>
         <div className="flex items-center gap-3">
           {showTrend && <TrendSparkline counts={dailyCounts(filteredTxs)} />}
+          <OfflineBadge
+            isOffline={!isOnline}
+            isCached={isCached}
+            lastSyncedAt={cachedAt}
+          />
           {loading && (
             <span className="w-4 h-4 border border-ink-3 border-t-transparent rounded-full animate-spin" />
           )}
@@ -416,12 +585,12 @@ export function TransactionHistory({
           Multi-op
         </button>
       </div>
-      <div className="px-5 py-2.5 border-b border-line">
+      <div className="px-5 py-2.5 border-b border-line flex flex-col gap-2">
         <Input
           value={memoQuery}
           onChange={(e) => setMemoQuery(e.target.value)}
-          placeholder="Search by memo…"
-          aria-label="Search transactions by memo"
+          placeholder="Search memo, recipient, amount, hash, status…"
+          aria-label="Search transactions by memo, recipient, amount, hash or status"
           prefix={
             <HugeiconsIcon
               icon={Search01Icon}
@@ -435,6 +604,49 @@ export function TransactionHistory({
           clearLabel="Clear memo search"
           className="h-8 text-[12px]"
         />
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            type="date"
+            value={searchFrom}
+            max={searchTo || undefined}
+            onChange={(e) => setSearchFrom(e.target.value)}
+            aria-label="Search from date"
+            className="h-8 text-[12px]"
+          />
+          <span className="text-[11px] text-ink-3">to</span>
+          <Input
+            type="date"
+            value={searchTo}
+            min={searchFrom || undefined}
+            onChange={(e) => setSearchTo(e.target.value)}
+            aria-label="Search to date"
+            className="h-8 text-[12px]"
+          />
+          {searchActive && (
+            <button
+              type="button"
+              onClick={() => {
+                setMemoQuery("");
+                setSearchFrom("");
+                setSearchTo("");
+              }}
+              className="ml-auto text-[11px] font-medium text-brand hover:underline"
+            >
+              Clear search
+            </button>
+          )}
+        </div>
+        {searchActive && (
+          <p
+            role="status"
+            aria-live="polite"
+            data-testid="search-result-count"
+            className="text-[11px] text-ink-3"
+          >
+            {filteredTxs.length} result{filteredTxs.length === 1 ? "" : "s"}
+            {searchingAll ? " · searching all history…" : ""}
+          </p>
+        )}
       </div>
 
       {!isConnected ? (
@@ -526,6 +738,11 @@ export function TransactionHistory({
             {filteredTxs.map((tx) => (
               <TxRow key={tx.hash} tx={tx} networkName={network?.name} />
             ))}
+            {searchActive && filteredTxs.length === 0 && !searchingAll && (
+              <p className="text-[13px] text-ink-3 text-center py-8">
+                No transactions match your search
+              </p>
+            )}
           </div>
           {filteredTxs.length > 0 && (
             <div className="flex items-center justify-between px-5 py-3 border-t border-line">
@@ -541,7 +758,7 @@ export function TransactionHistory({
               </span>
             </div>
           )}
-          {totalPages > 1 && (
+          {totalPages > 1 && !searchPaged && (
             <div className="flex items-center justify-between px-5 py-3 border-t border-line">
               <span className="text-[11px] text-ink-3">
                 Page {page} of {totalPages}

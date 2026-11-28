@@ -1,5 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
+export interface UseIsVisibleOptions {
+  /**
+   * IntersectionObserver threshold(s). Defaults to `0` — any non-zero
+   * intersection counts as visible. Raise it (or pass an array) when a
+   * component should only be considered "visible" once enough of it is on
+   * screen, e.g. to gate an expensive animation on a mostly-visible panel.
+   */
+  threshold?: number | number[];
+  /**
+   * IntersectionObserver rootMargin. Useful to start/stop work slightly
+   * before an element actually enters the viewport (e.g. `"200px"`).
+   */
+  rootMargin?: string;
+  /**
+   * IntersectionObserver root. Defaults to the viewport; pass a scroll
+   * container when visibility should be measured against it instead.
+   */
+  root?: Element | Document | null;
+}
+
 /**
  * Tracks whether the element `ref` is attached to currently has a laid-out,
  * non-zero-area box — i.e. it isn't `display: none` (directly, or via a
@@ -22,9 +42,19 @@ import { useEffect, useRef, useState } from "react";
  * very first load while waiting on the initial IntersectionObserver
  * entry, which can arrive a frame or two after mount.
  */
-export function useIsVisible<T extends Element>(): [React.RefObject<T | null>, boolean] {
+export function useIsVisible<T extends Element>(
+  options: UseIsVisibleOptions = {},
+): [React.RefObject<T | null>, boolean] {
   const ref = useRef<T | null>(null);
   const [isVisible, setIsVisible] = useState(true);
+  const { threshold = 0, rootMargin, root } = options;
+
+  // Thresholds are commonly passed as an inline array, which would be a new
+  // identity on every render and needlessly tear down/recreate the observer.
+  // Key the effect on the serialized value instead.
+  const thresholdKey = Array.isArray(threshold)
+    ? threshold.join(",")
+    : String(threshold);
 
   useEffect(() => {
     const node = ref.current;
@@ -39,13 +69,16 @@ export function useIsVisible<T extends Element>(): [React.RefObject<T | null>, b
       ([entry]) => {
         if (entry) setIsVisible(entry.isIntersecting);
       },
-      // threshold: 0 — any non-zero intersection counts as visible; this
-      // is a mount-gate, not a "is it prominently on screen" measurement.
-      { threshold: 0 },
+      // Default threshold: 0 — any non-zero intersection counts as visible;
+      // this is a mount-gate, not a "is it prominently on screen" measurement.
+      { threshold, rootMargin, root },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+    // `thresholdKey` stands in for `threshold` (which may be an array);
+    // numeric/string options are compared by value, `root` by identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [thresholdKey, rootMargin, root]);
 
   return [ref, isVisible];
 }

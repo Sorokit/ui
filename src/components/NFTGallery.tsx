@@ -21,8 +21,14 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
+import { useIsVisible } from "@/hooks/useIsVisible";
 import type { Nft, NftCollection } from "@/lib/client";
-import { IPFS_GATEWAY_COUNT, ipfsContentPath, resolveIpfsUrl } from "@/lib/ipfs";
+import {
+  IPFS_GATEWAY_COUNT,
+  IPFS_REQUEST_TIMEOUT_MS,
+  ipfsContentPath,
+  resolveIpfsUrl,
+} from "@/lib/ipfs";
 import { cn, validateStellarAddress } from "@/lib/utils";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -88,21 +94,119 @@ function NftImage({
     setFailed(false);
   }
 
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  // `loading="lazy"` defers off-screen images, so the stall timer only runs
+  // while the image is actually in view (and therefore actually loading).
+  const [imgRef, inView] = useIsVisible<HTMLImageElement>();
+  const src = isIpfs ? resolveIpfsUrl(source, attempt) : source;
+
+  const handleFailure = useCallback(() => {
+    if (isIpfs && attempt + 1 < IPFS_GATEWAY_COUNT) {
+      setAttempt((current) => current + 1);
+      return;
+    }
+    setFailed(true);
+  }, [isIpfs, attempt]);
+
+  // An unresponsive gateway can hold a request open indefinitely without ever
+  // firing `error`. Give each gateway IPFS_REQUEST_TIMEOUT_MS; swapping `src`
+  // to the next gateway cancels the stalled request in the browser.
+  useEffect(() => {
+    if (!source || failed || !inView || loadedSrc === src) return;
+    const timer = window.setTimeout(handleFailure, IPFS_REQUEST_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [source, failed, inView, loadedSrc, src, handleFailure]);
+
   if (!source || failed) return <>{fallback}</>;
 
   return (
     <img
-      src={isIpfs ? resolveIpfsUrl(source, attempt) : source}
+      ref={imgRef}
+      src={src}
       alt={alt}
       loading="lazy"
-      onError={() => {
-        if (isIpfs && attempt + 1 < IPFS_GATEWAY_COUNT) {
-          setAttempt((current) => current + 1);
-          return;
-        }
-        setFailed(true);
-      }}
+      onLoad={() => setLoadedSrc(src)}
+      onError={handleFailure}
       className={className}
+    />
+  );
+}
+
+type MediaKind = "image" | "video" | "audio";
+
+const VIDEO_EXT = /\.(mp4|webm|mov|m4v|ogv)(\?|#|$)/i;
+const AUDIO_EXT = /\.(mp3|wav|ogg|oga|flac|m4a|aac)(\?|#|$)/i;
+
+/** Detect the media kind from metadata MIME type, falling back to file extension. */
+function detectMediaKind(metadata: Nft["metadata"]): { kind: MediaKind; url?: string } {
+  const mime = metadata.mimeType?.toLowerCase() ?? "";
+  const url = metadata.animationUrl?.trim() || metadata.image?.trim() || undefined;
+  if (mime.startsWith("video/")) return { kind: "video", url };
+  if (mime.startsWith("audio/")) return { kind: "audio", url };
+  if (url && VIDEO_EXT.test(url)) return { kind: "video", url };
+  if (url && AUDIO_EXT.test(url)) return { kind: "audio", url };
+  return { kind: "image", url: metadata.image };
+}
+
+/** Renders an NFT's media: <video>/<audio> with controls for A/V assets, otherwise an image. */
+function NftMedia({
+  metadata,
+  className,
+  fallback,
+}: {
+  metadata: Nft["metadata"];
+  className?: string;
+  fallback: React.ReactNode;
+}) {
+  const { kind, url } = detectMediaKind(metadata);
+  const src = url && ipfsContentPath(url) !== null ? resolveIpfsUrl(url, 0) : url;
+
+  if (kind === "video" && src) {
+    return (
+      <video
+        src={src}
+        poster={metadata.image ? resolveIpfsUrl(metadata.image, 0) : undefined}
+        controls
+        preload="metadata"
+        playsInline
+        aria-label={metadata.name}
+        data-testid="nft-video"
+        className={className}
+      />
+    );
+  }
+
+  if (kind === "audio" && src) {
+    return (
+      <div className="relative w-full h-full flex flex-col items-center justify-center gap-3 p-3">
+        {metadata.image && (
+          <NftImage
+            image={metadata.image}
+            alt={metadata.name}
+            className="w-full flex-1 min-h-0 object-cover rounded-lg"
+            fallback={
+              <HugeiconsIcon icon={Album01Icon} size={32} color="currentColor" strokeWidth={1} />
+            }
+          />
+        )}
+        <audio
+          src={src}
+          controls
+          preload="metadata"
+          aria-label={metadata.name}
+          data-testid="nft-audio"
+          className="w-full shrink-0"
+        />
+      </div>
+    );
+  }
+
+  return (
+    <NftImage
+      image={metadata.image}
+      alt={metadata.name}
+      className={className}
+      fallback={fallback}
     />
   );
 }
@@ -156,9 +260,8 @@ export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: N
 
       {/* Image */}
       <div className="aspect-square w-full bg-surface-2 flex items-center justify-center overflow-hidden">
-        <NftImage
-          image={nft.metadata.image}
-          alt={nft.metadata.name}
+        <NftMedia
+          metadata={nft.metadata}
           className="w-full h-full object-cover"
           fallback={
             <div className="flex flex-col items-center gap-2 text-ink-4">
@@ -203,12 +306,12 @@ export function NFTCard({ nft, selected, bulkMode, onSelect, onSend, onList }: N
             {nft.metadata.attributes.slice(0, 3).map((attr) => (
               <span
                 key={attr.traitType}
-                title={attr.rarityPct !== undefined ? `${attr.rarityPct.toFixed(1)}% have this trait` : attr.traitType}
-                className="inline-flex items-center rounded-md bg-surface-2 border border-line px-1.5 py-0.5 text-[9px] text-ink-3"
+                title={`${attr.traitType}: ${attr.value}${attr.rarityPct !== undefined ? ` (${attr.rarityPct.toFixed(1)}% have this trait)` : ""}`}
+                className="inline-flex items-center max-w-full min-w-0 rounded-md bg-surface-2 border border-line px-1.5 py-0.5 text-[9px] text-ink-3"
               >
-                {attr.value}
+                <span className="truncate min-w-0">{attr.value}</span>
                 {attr.rarityPct !== undefined && (
-                  <span className="ml-1 text-brand font-semibold">{attr.rarityPct.toFixed(0)}%</span>
+                  <span className="ml-1 shrink-0 text-brand font-semibold">{attr.rarityPct.toFixed(0)}%</span>
                 )}
               </span>
             ))}
@@ -680,9 +783,8 @@ function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialog
         >
           {/* Image */}
           <div className="aspect-square w-full bg-surface-2 overflow-hidden">
-            <NftImage
-              image={nft.metadata.image}
-              alt={nft.metadata.name}
+            <NftMedia
+              metadata={nft.metadata}
               className="w-full h-full object-cover"
               fallback={
                 <div className="w-full h-full flex items-center justify-center text-ink-4">
@@ -733,9 +835,9 @@ function NFTDetailDialog({ nft, open, onClose, onSend, onList }: NFTDetailDialog
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {nft.metadata.attributes.map((attr) => (
-                    <div key={attr.traitType} className="rounded-lg border border-line bg-surface-2/50 px-3 py-2">
-                      <p className="text-[9px] font-semibold uppercase tracking-wider text-ink-4">{attr.traitType}</p>
-                      <p className="text-[12px] font-semibold text-ink mt-0.5">{attr.value}</p>
+                    <div key={attr.traitType} className="min-w-0 overflow-hidden rounded-lg border border-line bg-surface-2/50 px-3 py-2">
+                      <p className="text-[9px] font-semibold uppercase tracking-wider text-ink-4 break-words [overflow-wrap:anywhere]">{attr.traitType}</p>
+                      <p data-testid="nft-trait-value" className="text-[12px] font-semibold text-ink mt-0.5 break-words [overflow-wrap:anywhere]">{attr.value}</p>
                       {attr.rarityPct !== undefined && (
                         <p className="text-[10px] text-brand">{attr.rarityPct.toFixed(1)}% have this</p>
                       )}
@@ -778,9 +880,27 @@ export interface NFTGalleryProps {
   className?: string;
 }
 
+function NftSkeletonCard() {
+  return (
+    <div
+      data-testid="nft-skeleton-card"
+      className="rounded-xl border border-line overflow-hidden"
+    >
+      <Skeleton className="aspect-square w-full" />
+      <div className="p-3 flex flex-col gap-2">
+        <Skeleton className="h-3.5 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+    </div>
+  );
+}
+
 type SortKey = "name" | "rarity" | "floor";
 type RarityFilter = "all" | "legendary" | "epic" | "rare" | "common";
 
+const PAGE_SIZE = 20;
+
+/** Displays a wallet’s NFTs in a filterable, paginated gallery with bulk actions. */
 export function NFTGallery({ className }: NFTGalleryProps) {
   const { address, isConnected, client } = useSorokit();
 
@@ -796,6 +916,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
   const [minFloor, setMinFloor] = useState("");
   const [maxFloor, setMaxFloor] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
 
   // ── Selection state ───────────────────────────────────────────────────────
@@ -820,6 +941,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
           if (!active) return;
           if (error) { setFetchError(error); return; }
           setAllNfts(data ?? []);
+          setPage(1);
           setFetchError(null);
         })
         .finally(() => { if (active) setLoading(false); });
@@ -872,6 +994,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
     });
   }, [allNfts, activeCollection, search, rarityFilter, minFloor, maxFloor, sortKey]);
 
+  const pageCount = Math.ceil(displayedNfts.length / PAGE_SIZE);
+  const pageStart = (page - 1) * PAGE_SIZE;
+  const pageNfts = displayedNfts.slice(pageStart, pageStart + PAGE_SIZE);
+
   // ── Selection helpers ─────────────────────────────────────────────────────
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -881,13 +1007,15 @@ export function NFTGallery({ className }: NFTGalleryProps) {
     });
   }, []);
 
+  const allResultsSelected = displayedNfts.length > 0 && displayedNfts.every((nft) => selectedIds.has(nft.id));
+
   const toggleSelectAll = useCallback(() => {
-    if (selectedIds.size === displayedNfts.length) {
+    if (allResultsSelected) {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(displayedNfts.map((n) => n.id)));
     }
-  }, [selectedIds.size, displayedNfts]);
+  }, [allResultsSelected, displayedNfts]);
 
   const exitBulkMode = useCallback(() => {
     setBulkMode(false);
@@ -966,7 +1094,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                   type="search"
                   placeholder="Search NFTs or collections…"
                   value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setPage(1);
+                  }}
                   className="h-9 w-full rounded-lg border border-line bg-surface-2 pl-9 pr-3.5 text-[13px] text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors"
                   aria-label="Search NFTs"
                 />
@@ -991,7 +1122,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-ink-4">Rarity</label>
                   <select
                     value={rarityFilter}
-                    onChange={(e) => setRarityFilter(e.target.value as RarityFilter)}
+                    onChange={(e) => {
+                      setRarityFilter(e.target.value as RarityFilter);
+                      setPage(1);
+                    }}
                     className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] text-ink outline-none focus:border-line-2"
                     aria-label="Filter by rarity"
                   >
@@ -1009,7 +1143,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                     min="0"
                     placeholder="0"
                     value={minFloor}
-                    onChange={(e) => setMinFloor(e.target.value)}
+                    onChange={(e) => {
+                      setMinFloor(e.target.value);
+                      setPage(1);
+                    }}
                     className="h-8 w-24 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] text-ink outline-none focus:border-line-2"
                     aria-label="Minimum floor price"
                   />
@@ -1021,7 +1158,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                     min="0"
                     placeholder="∞"
                     value={maxFloor}
-                    onChange={(e) => setMaxFloor(e.target.value)}
+                    onChange={(e) => {
+                      setMaxFloor(e.target.value);
+                      setPage(1);
+                    }}
                     className="h-8 w-24 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] text-ink outline-none focus:border-line-2"
                     aria-label="Maximum floor price"
                   />
@@ -1030,7 +1170,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                   <label className="text-[10px] font-semibold uppercase tracking-wider text-ink-4">Sort by</label>
                   <select
                     value={sortKey}
-                    onChange={(e) => setSortKey(e.target.value as SortKey)}
+                    onChange={(e) => {
+                      setSortKey(e.target.value as SortKey);
+                      setPage(1);
+                    }}
                     className="h-8 rounded-lg border border-line bg-surface-2 px-2.5 text-[12px] text-ink outline-none focus:border-line-2"
                     aria-label="Sort NFTs"
                   >
@@ -1053,7 +1196,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
               <button
                 role="tab"
                 aria-selected={activeCollection === ALL_COLLECTION_ID}
-                onClick={() => setActiveCollection(ALL_COLLECTION_ID)}
+                onClick={() => {
+                  setActiveCollection(ALL_COLLECTION_ID);
+                  setPage(1);
+                }}
                 className={cn(
                   "px-3 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors shrink-0",
                   activeCollection === ALL_COLLECTION_ID
@@ -1068,7 +1214,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                   key={col.id}
                   role="tab"
                   aria-selected={activeCollection === col.id}
-                  onClick={() => setActiveCollection(col.id)}
+                  onClick={() => {
+                    setActiveCollection(col.id);
+                    setPage(1);
+                  }}
                   className={cn(
                     "px-3 py-1.5 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors shrink-0",
                     activeCollection === col.id
@@ -1090,7 +1239,7 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                 onClick={toggleSelectAll}
                 className="text-[12px] text-brand font-medium hover:underline"
               >
-                {selectedIds.size === displayedNfts.length ? "Deselect all" : "Select all"}
+                {allResultsSelected ? "Deselect all" : "Select all"}
               </button>
               <span className="text-[11px] text-ink-3">
                 {selectedIds.size} / {displayedNfts.length}
@@ -1103,16 +1252,10 @@ export function NFTGallery({ className }: NFTGalleryProps) {
             {loading && allNfts.length === 0 ? (
               <div
                 data-testid="nft-loading-skeleton"
-                className="grid grid-cols-2 sm:grid-cols-3 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
               >
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <div key={i} className="rounded-xl border border-line overflow-hidden">
-                    <Skeleton className="aspect-square w-full" />
-                    <div className="p-3 flex flex-col gap-2">
-                      <Skeleton className="h-3.5 w-3/4" />
-                      <Skeleton className="h-3 w-1/2" />
-                    </div>
-                  </div>
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                  <NftSkeletonCard key={i} />
                 ))}
               </div>
             ) : displayedNfts.length === 0 ? (
@@ -1123,9 +1266,9 @@ export function NFTGallery({ className }: NFTGalleryProps) {
               <div
                 role="list"
                 aria-label="NFT grid"
-                className="grid grid-cols-2 sm:grid-cols-3 gap-4"
+                className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
               >
-                {displayedNfts.map((nft) => (
+                {pageNfts.map((nft) => (
                   <div
                     key={nft.id}
                     role="listitem"
@@ -1142,7 +1285,32 @@ export function NFTGallery({ className }: NFTGalleryProps) {
                     />
                   </div>
                 ))}
+                {loading &&
+                  [1, 2, 3, 4].map((i) => <NftSkeletonCard key={`more-${i}`} />)}
               </div>
+            )}
+            {pageCount > 1 && (
+              <nav aria-label="NFT pagination" className="mt-4 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  disabled={page === 1}
+                  onClick={() => setPage(page - 1)}
+                  className="rounded-lg border border-line px-3 py-2 text-xs text-ink disabled:opacity-50"
+                >
+                  Previous
+                </button>
+                <span role="status" className="text-xs text-ink-2">
+                  Page {page} of {pageCount}
+                </span>
+                <button
+                  type="button"
+                  disabled={page === pageCount}
+                  onClick={() => setPage(page + 1)}
+                  className="rounded-lg border border-line px-3 py-2 text-xs text-ink disabled:opacity-50"
+                >
+                  Next
+                </button>
+              </nav>
             )}
           </div>
         </>

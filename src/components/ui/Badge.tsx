@@ -53,11 +53,34 @@ export function Badge({
   live,
   className,
   children,
+  onClick,
+  onKeyDown,
   ...props
 }: BadgeProps) {
   const liveProps = live
     ? ({ role: "status", "aria-live": "polite" } as const)
     : {};
+
+  // A clickable badge is a button in all but element name: expose the role,
+  // make it focusable, and activate on Enter / Space like a native button.
+  const interactiveProps = onClick
+    ? {
+        role: "button" as const,
+        tabIndex: 0,
+        onClick,
+        onKeyDown: (e: React.KeyboardEvent<HTMLSpanElement>) => {
+          onKeyDown?.(e);
+          if (e.defaultPrevented || e.target !== e.currentTarget) return;
+          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            e.preventDefault(); // stop Space from scrolling the page
+            e.currentTarget.click();
+          }
+        },
+      }
+    : { onKeyDown };
+  const interactiveClasses = onClick
+    ? "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+    : undefined;
 
   const hasChildren =
     children !== undefined &&
@@ -71,8 +94,13 @@ export function Badge({
   if (dot && !hasChildren) {
     return (
       <span
-        className={cn("inline-flex items-center justify-center", className)}
+        className={cn(
+          "inline-flex items-center justify-center",
+          interactiveClasses,
+          className,
+        )}
         {...liveProps}
+        {...interactiveProps}
         {...props}
       >
         <span
@@ -89,9 +117,11 @@ export function Badge({
         "inline-flex items-center gap-1 rounded-full font-semibold tracking-wide",
         sizes[size],
         variants[variant],
+        interactiveClasses,
         className,
       )}
       {...liveProps}
+      {...interactiveProps}
       {...props}
     >
       {dot && (

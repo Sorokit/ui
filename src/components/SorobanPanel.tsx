@@ -5,18 +5,51 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useSorokit } from "@/context/useSorokit";
 
-import { ContractInteractionDebugger } from "./ContractInteractionDebugger";
+import { addDebugHistory, ContractInteractionDebugger, createDebuggerEntry, type DebuggerEntry, readDebugHistory } from "./ContractInteractionDebugger";
 
 type State = "idle" | "loading" | "success" | "error";
+
+/** Stellar/Soroban contract IDs are strict-key-encoded: "C" + 55 base32 chars. */
+const CONTRACT_ID_PATTERN = /^C[A-Z0-9]{55}$/;
+
+/** True read-only ABI entries. Anything else is treated as state-changing. */
+const READ_ONLY_HINTS = ["view", "read", "query", "get"];
+
+function isReadOnlyMethod(name: string, mutating?: boolean): boolean {
+  if (typeof mutating === "boolean") return !mutating;
+  const lower = name.toLowerCase();
+  return READ_ONLY_HINTS.some((hint) => lower.startsWith(hint) || lower.includes(`_${hint}`));
+}
+
+interface AbiMethod {
+  name: string;
+  readOnly: boolean;
+}
+
+/**
+ * Validates and trims a contract ID before any RPC call is allowed. An empty
+ * string is not itself an error (nothing has been typed yet) — only a
+ * non-empty value that fails the format check produces a message.
+ */
+function validateContractId(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (!CONTRACT_ID_PATTERN.test(trimmed)) {
+    return 'Invalid contract ID — expected "C" followed by 55 uppercase letters/digits';
+  }
+  return null;
+}
 
 interface SorobanPanelProps {
   contractId: string;
   onContractIdChange: (contractId: string) => void;
+  onContractSave?: (contractId: string) => void;
   mode?: "invoke" | "simulate";
+  maxHistory?: number;
 }
 
 const CONTRACT_HISTORY_KEY = "sorokit-soroban-contract-history";
-const CONTRACT_HISTORY_LIMIT = 10;
+const DEFAULT_MAX_HISTORY = 20;
 const CONTRACT_HISTORY_DATALIST_ID = "sorokit-soroban-contract-history-list";
 
 function parseArgsInput(raw: string): {
@@ -47,23 +80,27 @@ function extractTxHash(data: unknown): string | null {
   return null;
 }
 
-function readContractHistory(): string[] {
+function readContractHistory(limit: number = DEFAULT_MAX_HISTORY): string[] {
   try {
     const raw = localStorage.getItem(CONTRACT_HISTORY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
-      ? parsed.filter((id): id is string => typeof id === "string")
+      ? parsed.filter((id): id is string => typeof id === "string").slice(0, limit)
       : [];
   } catch {
     return [];
   }
 }
 
-function addContractToHistory(contractId: string, current: string[]): string[] {
+function addContractToHistory(
+  contractId: string,
+  current: string[],
+  limit: number = DEFAULT_MAX_HISTORY,
+): string[] {
   const next = [contractId, ...current.filter((id) => id !== contractId)].slice(
     0,
-    CONTRACT_HISTORY_LIMIT,
+    limit,
   );
   try {
     localStorage.setItem(CONTRACT_HISTORY_KEY, JSON.stringify(next));
@@ -85,7 +122,9 @@ function buildCurlCommand(
 export function SorobanPanel({
   contractId,
   onContractIdChange,
+  onContractSave,
   mode = "invoke",
+  maxHistory = DEFAULT_MAX_HISTORY,
 }: SorobanPanelProps) {
   const { isConnected, address, client } = useSorokit();
   const [method, setMethod] = useState("");
@@ -96,12 +135,16 @@ export function SorobanPanel({
   const [error, setError] = useState<string | null>(null);
   const [curlCopied, setCurlCopied] = useState(false);
   const [contractHistory, setContractHistory] = useState<string[]>(() =>
-    readContractHistory(),
+    readContractHistory(maxHistory),
+  );
+  const [debugHistory, setDebugHistory] = useState<DebuggerEntry[]>(() =>
+    readDebugHistory(),
   );
   const [abiOpen, setAbiOpen] = useState(false);
   const [abiRaw, setAbiRaw] = useState("");
-  const [abiMethods, setAbiMethods] = useState<string[]>([]);
+  const [abiMethods, setAbiMethods] = useState<AbiMethod[]>([]);
   const [abiError, setAbiError] = useState<string | null>(null);
+  const [contractIdTouched, setContractIdTouched] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const argsRef = useRef(args);
   const formId = useId();
@@ -130,13 +173,35 @@ export function SorobanPanel({
     }
   }, [args]);
 
+  const contractIdError = validateContractId(contractId);
+
   const canInvoke =
     Boolean(isConnected && contractId.trim() && method.trim()) &&
     isArgsJsonValid &&
+    !contractIdError &&
     state !== "loading";
+
+  // Switching from one loaded ABI method to another means the previous
+  // method's arguments no longer apply, so drop them instead of submitting
+  // them against the wrong signature.
+  function handleMethodChange(raw: string) {
+    const next = raw.slice(0, 64);
+    if (
+      next !== method &&
+      abiMethods.some((m) => m.name === method) &&
+      abiMethods.some((m) => m.name === next)
+    ) {
+      setArgs("");
+    }
+    setMethod(next);
+  }
 
   async function doInvoke() {
     if (!canInvoke) return;
+    // Belt-and-suspenders: canInvoke already covers this, but doInvoke can
+    // also be reached via the Cmd+Enter shortcut, so re-check right before
+    // any RPC call is made rather than relying solely on the disabled button.
+    if (validateContractId(contractId)) return;
 
     abortControllerRef.current?.abort();
     abortControllerRef.current = new AbortController();
@@ -166,14 +231,17 @@ export function SorobanPanel({
         if (err) {
           setError(err);
           setState("error");
+          setDebugHistory((prev) => addDebugHistory(createDebuggerEntry({ contractId: contractId.trim(), method: method.trim(), args: parsedArgs, state: "error", error: err }), prev));
           return;
         }
         setResult(data);
         setTxHash(extractTxHash(data));
         setState("success");
         setContractHistory((prev) =>
-          addContractToHistory(contractId.trim(), prev),
+          addContractToHistory(contractId.trim(), prev, maxHistory),
         );
+        onContractSave?.(contractId.trim());
+        setDebugHistory((prev) => addDebugHistory(createDebuggerEntry({ contractId: contractId.trim(), method: method.trim(), args: parsedArgs, state: "success", result: data, txHash: extractTxHash(data) }), prev));
       } else {
         const { data, error: err } = await soroban.invokeContract({
           contractId: contractId.trim(),
@@ -185,14 +253,17 @@ export function SorobanPanel({
         if (err) {
           setError(err);
           setState("error");
+          setDebugHistory((prev) => addDebugHistory(createDebuggerEntry({ contractId: contractId.trim(), method: method.trim(), args: parsedArgs, state: "error", error: err }), prev));
           return;
         }
         setResult(data);
         setTxHash(extractTxHash(data));
         setState("success");
         setContractHistory((prev) =>
-          addContractToHistory(contractId.trim(), prev),
+          addContractToHistory(contractId.trim(), prev, maxHistory),
         );
+        onContractSave?.(contractId.trim());
+        setDebugHistory((prev) => addDebugHistory(createDebuggerEntry({ contractId: contractId.trim(), method: method.trim(), args: parsedArgs, state: "success", result: data, txHash: extractTxHash(data) }), prev));
       }
     } catch (e: unknown) {
       if (signal.aborted) return;
@@ -204,6 +275,7 @@ export function SorobanPanel({
             : "An unexpected error occurred while invoking the contract.";
       setError(message);
       setState("error");
+      setDebugHistory((prev) => addDebugHistory(createDebuggerEntry({ contractId: contractId.trim(), method: method.trim(), args: parseArgsInput(argsRef.current).parsedArgs, state: "error", error: message }), prev));
     }
   }
 
@@ -217,20 +289,33 @@ export function SorobanPanel({
     setAbiError(null);
     try {
       const parsed = JSON.parse(abiRaw);
-      const methods: string[] = [];
-      if (Array.isArray(parsed)) {
-        for (const entry of parsed) {
-          if (entry.name && typeof entry.name === "string") {
-            methods.push(entry.name);
-          }
-        }
-      } else if (parsed.spec && Array.isArray(parsed.spec)) {
-        for (const entry of parsed.spec) {
-          if (entry.name && typeof entry.name === "string") {
-            methods.push(entry.name);
-          }
-        }
+      const entries: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : parsed?.spec && Array.isArray(parsed.spec)
+          ? parsed.spec
+          : [];
+
+      const methods: AbiMethod[] = [];
+      for (const entry of entries) {
+        if (!entry || typeof entry !== "object") continue;
+        const { name, mutating, readonly, stateMutability } = entry as {
+          name?: unknown;
+          mutating?: unknown;
+          readonly?: unknown;
+          stateMutability?: unknown;
+        };
+        if (typeof name !== "string") continue;
+        const isMutating =
+          typeof mutating === "boolean"
+            ? mutating
+            : typeof readonly === "boolean"
+              ? !readonly
+              : typeof stateMutability === "string"
+                ? !["view", "pure"].includes(stateMutability.toLowerCase())
+                : undefined;
+        methods.push({ name, readOnly: isReadOnlyMethod(name, isMutating) });
       }
+
       if (methods.length === 0) {
         setAbiError("No method names found in the ABI spec");
         return;
@@ -239,6 +324,13 @@ export function SorobanPanel({
     } catch {
       setAbiError("Invalid JSON — check the format and try again");
     }
+  }
+
+  /** Repopulates the builder inputs from a past invocation-history entry. */
+  function handleLoadHistoryEntry(entry: DebuggerEntry) {
+    onContractIdChange(entry.contractId);
+    setMethod(entry.method);
+    setArgs(JSON.stringify(entry.args ?? [], null, 2));
   }
 
   const handleCopyCurl = useCallback(() => {
@@ -277,12 +369,19 @@ export function SorobanPanel({
               placeholder="C..."
               value={contractId}
               onChange={(e) => onContractIdChange(e.target.value)}
+              onBlur={(e) => {
+                setContractIdTouched(true);
+                const trimmed = e.target.value.trim();
+                if (trimmed !== e.target.value) onContractIdChange(trimmed);
+              }}
               disabled={state === "loading"}
               list={
                 contractHistory.length > 0
                   ? CONTRACT_HISTORY_DATALIST_ID
                   : undefined
               }
+              error={contractIdTouched ? contractIdError ?? undefined : undefined}
+              aria-invalid={Boolean(contractIdTouched && contractIdError)}
             />
             {contractHistory.length > 0 && (
               <datalist id={CONTRACT_HISTORY_DATALIST_ID}>
@@ -308,7 +407,7 @@ export function SorobanPanel({
                 type="text"
                 placeholder="transfer, balance, mint…"
                 value={method}
-                onChange={(e) => setMethod(e.target.value.slice(0, 64))}
+                onChange={(e) => handleMethodChange(e.target.value)}
                 disabled={state === "loading"}
                 maxLength={64}
                 className="w-full rounded-lg border border-line bg-surface-2 px-4 py-2 text-[13px] text-ink placeholder:text-ink-4 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
@@ -316,10 +415,48 @@ export function SorobanPanel({
               />
               {abiMethods.length > 0 && (
                 <datalist id="soroban-abi-methods">
-                  {abiMethods.map((name) => (
+                  {abiMethods.map(({ name }) => (
                     <option key={name} value={name} />
                   ))}
                 </datalist>
+              )}
+              {abiMethods.length > 0 && (
+                <select
+                  aria-label="Select ABI method"
+                  value=""
+                  disabled={state === "loading"}
+                  onChange={(e) => {
+                    if (e.target.value) setMethod(e.target.value);
+                    e.target.value = "";
+                  }}
+                  className="w-full rounded-lg border border-line bg-surface-2 px-4 py-2 text-[12px] text-ink-2 outline-none focus:border-line-2 focus:ring-1 focus:ring-brand-dim transition-colors disabled:opacity-40"
+                >
+                  <option value="" disabled>
+                    Choose from loaded ABI…
+                  </option>
+                  {abiMethods.some((m) => m.readOnly) && (
+                    <optgroup label="Read (View)">
+                      {abiMethods
+                        .filter((m) => m.readOnly)
+                        .map((m) => (
+                          <option key={`read-${m.name}`} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                  {abiMethods.some((m) => !m.readOnly) && (
+                    <optgroup label="Write (State Changes)">
+                      {abiMethods
+                        .filter((m) => !m.readOnly)
+                        .map((m) => (
+                          <option key={`write-${m.name}`} value={m.name}>
+                            {m.name}
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
+                </select>
               )}
             </div>
             {/* Issue #542: reuse the Input component's label-association logic
@@ -378,8 +515,10 @@ export function SorobanPanel({
                         {mode === "simulate" ? "Simulation Result" : "Result"}
                       </Badge>
                       <Button
+                        type="button"
                         variant="secondary"
                         size="sm"
+                        data-testid="soroban-copy-curl-success"
                         onClick={() => {
                           const curl = buildCurlCommand(contractId.trim(), method.trim(), parseArgsInput(args).parsedArgs);
                           navigator.clipboard.writeText(curl);
@@ -405,11 +544,18 @@ export function SorobanPanel({
                     result={result}
                     txHash={txHash}
                     error={error}
+                    history={debugHistory}
+                    onHistoryChange={setDebugHistory}
+                    onLoadEntry={handleLoadHistoryEntry}
                   />
                 )}
 
                 {state === "error" && error && (
-                  <div className="rounded-lg bg-error-dim-muted border border-error-dim px-5 py-4">
+                  <div
+                    role="alert"
+                    data-testid="soroban-error"
+                    className="rounded-lg bg-error-dim-muted border border-error-dim px-5 py-4"
+                  >
                     <p className="text-[13px] text-red">{error}</p>
                   </div>
                 )}
@@ -417,8 +563,10 @@ export function SorobanPanel({
                 {(state === "success" || state === "error") && (
                   <div className="mt-3">
                     <Button
+                      type="button"
                       variant="secondary"
                       size="sm"
+                      data-testid="soroban-copy-curl-bottom"
                       onClick={handleCopyCurl}
                     >
                       Copy as cURL
@@ -436,6 +584,7 @@ export function SorobanPanel({
           <Button
             variant="ghost"
             size="sm"
+            data-testid="soroban-clear"
             onClick={() => {
               setState("idle");
               setResult(null);
@@ -449,6 +598,7 @@ export function SorobanPanel({
           <Button
             variant="ghost"
             size="sm"
+            data-testid="soroban-copy-curl-invoke"
             onClick={() => {
               const curl = buildCurlCommand(contractId.trim(), method.trim(), parseArgsInput(args).parsedArgs);
               navigator.clipboard.writeText(curl);
@@ -463,6 +613,7 @@ export function SorobanPanel({
           type="submit"
           form={formId}
           size="md"
+          data-testid="soroban-submit"
           loading={state === "loading"}
           // `canInvoke` already requires state !== "loading".
           disabled={!canInvoke}
@@ -480,6 +631,7 @@ export function SorobanPanel({
       <div className="border-t border-line">
         <button
           type="button"
+          data-testid="soroban-toggle-abi"
           onClick={() => setAbiOpen((v) => !v)}
           className="w-full flex items-center justify-between px-6 py-3 text-[12px] font-medium text-ink-2 hover:bg-surface-2 transition-colors"
         >
@@ -499,12 +651,13 @@ export function SorobanPanel({
               <p className="text-[11px] text-red">{abiError}</p>
             )}
             <div className="flex gap-2">
-              <Button size="sm" onClick={handleLoadAbi} disabled={!abiRaw.trim()}>
+              <Button size="sm" data-testid="soroban-load-abi" onClick={handleLoadAbi} disabled={!abiRaw.trim()}>
                 Load
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
+                data-testid="soroban-clear-abi"
                 onClick={() => {
                   setAbiRaw("");
                   setAbiError(null);

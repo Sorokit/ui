@@ -1,7 +1,10 @@
 import * as ToastPrimitive from "@radix-ui/react-toast";
 import { useEffect, useRef } from "react";
 
-import type { Toast as ToastType } from "@/context/ToastContext";
+import {
+  type Toast as ToastType,
+  useOptionalToast,
+} from "@/context/ToastContext";
 import { cn } from "@/lib/utils";
 
 function CheckIcon({ className }: { className?: string }) {
@@ -47,6 +50,10 @@ const iconMap = {
 interface ToastItemProps {
   toast: ToastType;
   onDismiss: (id: string) => void;
+  /** Pause the countdown while the pointer hovers the toast. */
+  onPause?: (id: string) => void;
+  /** Resume the countdown once the pointer leaves the toast. */
+  onResume?: (id: string) => void;
 }
 
 /**
@@ -61,16 +68,31 @@ function focusAdjacentToast(current: HTMLElement) {
   if (next?.hasAttribute("data-toast-id")) next.focus();
 }
 
-function ToastItem({ toast, onDismiss }: ToastItemProps) {
+function ToastItem({ toast, onDismiss, onPause, onResume }: ToastItemProps) {
   const { icon: Icon, bg, fg } = iconMap[toast.type];
 
   return (
     <ToastPrimitive.Root
       type={toast.duration === 0 ? "foreground" : "background"}
-      // Radix runs its own close timer (5s by default) regardless of ours, so
-      // a sticky `duration: 0` toast must be told explicitly never to expire.
-      duration={toast.duration === 0 ? Infinity : toast.duration}
+      // Radix's own close timer is disabled entirely: the provider owns the
+      // countdown so it can be paused on hover/focus and resumed where it left
+      // off. Radix would otherwise fire its timer independently and dismiss
+      // the toast even while our timer was paused.
+      duration={Infinity}
       onOpenChange={(open) => { if (!open) onDismiss(toast.id); }}
+      // Hovering or focusing a toast freezes its countdown so the user has
+      // time to read it or interact with its action button.
+      onMouseEnter={() => onPause?.(toast.id)}
+      onMouseLeave={() => onResume?.(toast.id)}
+      onFocus={() => onPause?.(toast.id)}
+      onBlur={(e) => {
+        // React bubbles focus/blur, so moving focus between the toast and one
+        // of its own buttons fires blur here too. Only resume once focus has
+        // actually left the toast subtree.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          onResume?.(toast.id);
+        }
+      }}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;
         // Escape from anywhere inside this toast (the toast itself, its
@@ -137,6 +159,10 @@ interface ToastContainerProps {
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   const viewportRef = useRef<HTMLOListElement>(null);
+  // The timer lives in the provider, so read the pause/resume controls from
+  // context rather than threading them through every call site. Optional so
+  // the container can still be rendered standalone (outside a provider).
+  const toast = useOptionalToast();
 
   // When the stack overflows, keep the newest toast (last, nearest the
   // corner) in view rather than leaving it scrolled off the bottom.
@@ -149,8 +175,14 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
 
   return (
     <ToastPrimitive.Provider swipeDirection="right">
-      {toasts.map((toast) => (
-        <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} />
+      {toasts.map((item) => (
+        <ToastItem
+          key={item.id}
+          toast={item}
+          onDismiss={onDismiss}
+          onPause={toast?.pauseToast}
+          onResume={toast?.resumeToast}
+        />
       ))}
       {/*
         Toasts are laid out in normal flow in a single column with a fixed gap,

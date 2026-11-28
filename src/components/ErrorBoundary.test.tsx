@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -174,8 +174,8 @@ describe("ErrorBoundary", () => {
     expect(onErrorSpy).toHaveBeenCalled();
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
     const errorArg = onErrorSpy.mock.calls[0][0];
     const infoArg = onErrorSpy.mock.calls[0][1];
@@ -197,8 +197,8 @@ describe("ErrorBoundary", () => {
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
   });
 
@@ -215,13 +215,68 @@ describe("ErrorBoundary", () => {
 
     expect(consoleSpy).not.toHaveBeenCalledWith(
       "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+      expect.anything(),
+      expect.anything()
     );
     expect(onErrorSpy).toHaveBeenCalled();
   });
 
-  it("calls console.error in development mode by default", () => {
+  it("logs the original error, its cause, and the failing component in development", () => {
+    vi.stubEnv("DEV", true);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cause = new Error("Original failure");
+    let originalError: Error | undefined;
+
+    function NestedFailure(): never {
+      originalError = new Error("Nested failure", { cause });
+      throw originalError;
+    }
+
+    render(
+      <ErrorBoundary>
+        <div>
+          <NestedFailure />
+        </div>
+      </ErrorBoundary>
+    );
+
+    const log = consoleSpy.mock.calls.find(
+      ([message]) => message === "[sorokit-ui] Uncaught error:",
+    );
+    expect(log).toBeDefined();
+    expect(log?.[1]).toBe(originalError);
+    expect(log?.[1]).toHaveProperty("cause", cause);
+    expect(log?.[1]).toHaveProperty(
+      "stack",
+      expect.stringContaining("NestedFailure"),
+    );
+    expect(log?.[2]).toHaveProperty(
+      "componentStack",
+      expect.stringContaining("NestedFailure"),
+    );
+  });
+
+  it("shows an error id in production without logging the stack (#1064)", () => {
+    vi.stubEnv("DEV", false);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    render(
+      <ErrorBoundary>
+        <ThrowingComponent shouldThrow={true} />
+      </ErrorBoundary>
+    );
+
+    expect(screen.getByTestId("error-id").textContent).toMatch(/^Error #[0-9a-f]{6}$/);
+    expect(screen.getByText("Details are hidden in production.")).toBeInTheDocument();
+    expect(consoleSpy).not.toHaveBeenCalledWith(
+      "[sorokit-ui] Uncaught error:",
+      expect.anything(),
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  it("logs the full stack with the same error id shown in the UI in development (#1064)", () => {
     vi.stubEnv("DEV", true);
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -231,12 +286,12 @@ describe("ErrorBoundary", () => {
       </ErrorBoundary>
     );
 
-    expect(consoleSpy).toHaveBeenCalled();
-    expect(consoleSpy).toHaveBeenCalledWith(
-      "[sorokit-ui] Uncaught error:",
-      expect.any(Error),
-      expect.any(String)
+    const shownId = screen.getByTestId("error-id").textContent;
+    const log = consoleSpy.mock.calls.find(
+      ([message]) => message === "[sorokit-ui] Uncaught error:",
     );
+    expect(log?.[1]).toHaveProperty("stack");
+    expect(log?.[3]).toBe(shownId);
   });
 
   it("reset key remounts children with fresh state to avoid an error loop", () => {
@@ -332,6 +387,38 @@ describe("ErrorBoundary", () => {
     expect(screen.getByTestId("ready")).toBeInTheDocument();
   });
 
+  it("clears all error state atomically on retry, no stale error visible", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const TestWrapper = () => {
+      const [shouldThrow, setShouldThrow] = useState(true);
+      return (
+        <div>
+          <button onClick={() => setShouldThrow(false)}>Fix Error</button>
+          <ErrorBoundary>
+            <ThrowingComponent
+              shouldThrow={shouldThrow}
+              errorMessage="Temporary crash"
+            />
+          </ErrorBoundary>
+        </div>
+      );
+    };
+
+    render(<TestWrapper />);
+
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByText("Temporary crash")).toBeInTheDocument();
+
+    // Fix the error and click retry
+    fireEvent.click(screen.getByText("Fix Error"));
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+
+    // Error message should be cleared immediately when attempting retry
+    expect(screen.queryByText("Temporary crash")).not.toBeInTheDocument();
+    expect(screen.getByTestId("child-content")).toBeInTheDocument();
+  });
+
   it("applies scoped container styling when isolate is true", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -410,6 +497,76 @@ describe("ErrorBoundary", () => {
       );
 
       expect(screen.queryByText("Show component stack")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("copy error details (#953)", () => {
+    it("renders a 'Copy error details' button in the fallback UI", () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent shouldThrow={true} />
+        </ErrorBoundary>
+      );
+
+      expect(
+        screen.getByRole("button", { name: /copy error details/i })
+      ).toBeInTheDocument();
+    });
+
+    it("copies a diagnostics report and confirms with 'Copied!'", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      const originalClipboard = navigator.clipboard;
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText },
+      });
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent
+            shouldThrow={true}
+            errorMessage="Diagnostics boom"
+          />
+        </ErrorBoundary>
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /copy error details/i })
+      );
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      const report = writeText.mock.calls[0][0] as string;
+      expect(report).toContain("sorokit-ui error report");
+      expect(report).toContain("Diagnostics boom");
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /copied!/i })
+        ).toBeInTheDocument()
+      );
+
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    });
+
+    it("keeps the details copyable even when production hides the message", () => {
+      vi.stubEnv("DEV", false);
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      render(
+        <ErrorBoundary>
+          <ThrowingComponent shouldThrow={true} />
+        </ErrorBoundary>
+      );
+
+      expect(
+        screen.getByRole("button", { name: /copy error details/i })
+      ).toBeInTheDocument();
     });
   });
 });

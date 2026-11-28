@@ -87,6 +87,44 @@ function getAssetName(asset: AssetItem): string {
   return asset.displayName ?? asset.assetCode ?? asset.asset;
 }
 
+function HighlightedText({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}) {
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return <>{text}</>;
+
+  const lowerText = text.toLocaleLowerCase();
+  const lowerQuery = trimmedQuery.toLocaleLowerCase();
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let matchIndex = lowerText.indexOf(lowerQuery);
+
+  while (matchIndex !== -1) {
+    if (matchIndex > cursor) {
+      parts.push(text.slice(cursor, matchIndex));
+    }
+    const matchEnd = matchIndex + trimmedQuery.length;
+    parts.push(
+      <mark
+        key={`${matchIndex}-${matchEnd}`}
+        data-testid="asset-filter-highlight"
+        className="rounded-sm bg-[rgba(249,115,22,0.22)] text-inherit"
+      >
+        {text.slice(matchIndex, matchEnd)}
+      </mark>,
+    );
+    cursor = matchEnd;
+    matchIndex = lowerText.indexOf(lowerQuery, cursor);
+  }
+
+  if (cursor < text.length) parts.push(text.slice(cursor));
+  return <>{parts}</>;
+}
+
 function parseBalance(balance: string): number {
   return Number.parseFloat(balance) || 0;
 }
@@ -182,6 +220,8 @@ interface DefaultAssetRowProps {
   onFavoriteToggle: (asset: AssetItem) => void;
   onSelect?: (asset: AssetItem) => void;
   isFocused: boolean;
+  isSelected: boolean;
+  highlightQuery: string;
 }
 
 function DefaultAssetRow({
@@ -190,6 +230,8 @@ function DefaultAssetRow({
   onFavoriteToggle,
   onSelect,
   isFocused,
+  isSelected,
+  highlightQuery,
 }: DefaultAssetRowProps) {
   const code = getAssetCode(asset);
   const name = getAssetName(asset);
@@ -200,13 +242,14 @@ function DefaultAssetRow({
     <div
       role="button"
       tabIndex={0}
+      aria-pressed={isSelected}
       className={cn(
         "group flex w-full items-center gap-3 px-4 py-2 text-left transition-colors cursor-pointer",
         isFocused ? "bg-surface-2" : "hover:bg-surface-2",
       )}
       onClick={() => onSelect?.(asset)}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           onSelect?.(asset);
         }
@@ -241,15 +284,20 @@ function DefaultAssetRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2.5">
           <span className="truncate text-[13px] font-medium text-ink">
-            {code}
+            <HighlightedText text={code} query={highlightQuery} />
           </span>
           {name !== code && (
-            <span className="truncate text-[11px] text-ink-4">{name}</span>
+            <span className="truncate text-[11px] text-ink-4">
+              <HighlightedText text={name} query={highlightQuery} />
+            </span>
           )}
         </div>
         {asset.assetIssuer && (
           <div className="truncate text-[11px] text-ink-4">
-            {asset.assetIssuer.slice(0, 8)}…
+            <HighlightedText
+              text={`${asset.assetIssuer.slice(0, 8)}…`}
+              query={highlightQuery}
+            />
           </div>
         )}
       </div>
@@ -258,6 +306,7 @@ function DefaultAssetRow({
         <span className="text-[13px] font-medium text-ink">
           {balance.toLocaleString(undefined, { maximumFractionDigits: 7 })}
         </span>
+        {isSelected && <HugeiconsIcon icon={Tick01Icon} size={14} className="text-brand" />}
         {asset.isVerified && (
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-green-500/10 text-[10px] text-green-500">
             ✓
@@ -328,11 +377,17 @@ interface AssetFilterProps {
   countLabel?: (filtered: number, total: number) => string;
   showNetworkFilter?: boolean;
   allowCustomAssets?: boolean;
-  renderRow?: (asset: AssetItem, isFavorite: boolean) => ReactNode;
+  /** Custom rows can use the supplied selection state and toggle handler. */
+  renderRow?: (
+    asset: AssetItem,
+    isFavorite: boolean,
+    selection: { isSelected: boolean; toggle: () => void },
+  ) => ReactNode;
   /** Called whenever a filter changes (or is cleared) so the parent can reset its page index. */
   onPageReset?: () => void;
 }
 
+/** Filters assets and lets users toggle or clear selections. */
 function AssetFilter({
   assets,
   onAssetSelect: onSelect,
@@ -344,6 +399,7 @@ function AssetFilter({
   onPageReset,
 }: AssetFilterProps) {
   // ── State ──────────────────────────────────────────────────────────────────
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
   const [verifiedFilter, setVerifiedFilter] = useState<VerifiedFilter>("all");
@@ -372,7 +428,7 @@ function AssetFilter({
     setNetworkFilter(null);
     setShowFavoritesOnly(false);
     setSortKey("default");
-    setFocusedIndex(-1);
+    setFocusedIndex(0);
     onPageReset?.();
   }, [onPageReset]);
 
@@ -390,6 +446,8 @@ function AssetFilter({
     () => [...assets, ...customAssets],
     [assets, customAssets],
   );
+
+  const hasSelection = selectedKeys.size > 0 && allAssets.some((asset) => selectedKeys.has(getAssetKey(asset)));
 
   // ── Favorite check helper ──────────────────────────────────────────────────
   const isFav = useCallback(
@@ -497,6 +555,23 @@ function AssetFilter({
     setAddingCustom(false);
   }, [customCode, customIssuer, customAssets]);
 
+  // ── Derived focused index clamped to filtered list ─────────────────────────
+  const effectiveFocusedIndex =
+    filtered.length === 0
+      ? -1
+      : Math.max(-1, Math.min(focusedIndex, filtered.length - 1));
+
+  const toggleSelection = useCallback((asset: AssetItem) => {
+    const key = getAssetKey(asset);
+    setSelectedKeys((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    onSelect?.(asset);
+  }, [onSelect]);
+
   // ── Keyboard navigation ────────────────────────────────────────────────────
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -515,7 +590,8 @@ function AssetFilter({
         case "ArrowDown":
           e.preventDefault();
           setFocusedIndex((prev) => {
-            const next = clamp(prev + 1);
+            const current = effectiveFocusedIndex >= 0 ? effectiveFocusedIndex : prev;
+            const next = clamp(current + 1);
             scrollIntoView(next);
             return next;
           });
@@ -523,7 +599,8 @@ function AssetFilter({
         case "ArrowUp":
           e.preventDefault();
           setFocusedIndex((prev) => {
-            const next = clamp(prev - 1);
+            const current = effectiveFocusedIndex >= 0 ? effectiveFocusedIndex : prev;
+            const next = clamp(current - 1);
             scrollIntoView(next);
             return next;
           });
@@ -539,9 +616,9 @@ function AssetFilter({
           scrollIntoView(filtered.length - 1);
           break;
         case "Enter":
-          if (focusedIndex >= 0 && focusedIndex < filtered.length) {
+          if (effectiveFocusedIndex >= 0 && effectiveFocusedIndex < filtered.length) {
             e.preventDefault();
-            onSelect?.(filtered[focusedIndex]);
+            toggleSelection(filtered[effectiveFocusedIndex]);
           }
           break;
         case "Escape":
@@ -551,7 +628,7 @@ function AssetFilter({
           break;
       }
     },
-    [filtered, focusedIndex, onSelect],
+    [filtered, effectiveFocusedIndex, toggleSelection],
   );
 
   // Issue #664: move focus into the sort popover and trap Tab / Escape inside it.
@@ -608,11 +685,6 @@ function AssetFilter({
     return [...nets];
   }, [assets]);
 
-  // ── Reset focused index when filtered list changes ─────────────────────────
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setFocusedIndex(0); }, [filtered]);
-
-
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className={cn("flex flex-col", className)}>
@@ -629,6 +701,7 @@ function AssetFilter({
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
+            setFocusedIndex(0);
             onPageReset?.();
           }}
           onKeyDown={handleKeyDown}
@@ -638,7 +711,10 @@ function AssetFilter({
         {search && (
           <button
             type="button"
-            onClick={() => setSearch("")}
+            onClick={() => {
+              setSearch("");
+              setFocusedIndex(0);
+            }}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-4 hover:text-ink-2"
             aria-label="Clear search"
           >
@@ -648,13 +724,14 @@ function AssetFilter({
       </div>
 
       {/* ── Verified filter tabs + favorites toggle ───────────────────────── */}
-      <div className="flex items-center gap-2 px-4 pb-2">
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
             onClick={() => {
               setVerifiedFilter(tab.key);
+              setFocusedIndex(0);
               onPageReset?.();
             }}
             className={cn(
@@ -672,6 +749,7 @@ function AssetFilter({
             type="button"
             onClick={() => {
               setShowFavoritesOnly((p) => !p);
+              setFocusedIndex(0);
               onPageReset?.();
             }}
             className={cn(
@@ -686,6 +764,14 @@ function AssetFilter({
               icon={showFavoritesOnly ? StarFillIcon : StarIcon}
               size={14}
             />
+          </button>
+          <button
+            type="button"
+            disabled={!hasSelection}
+            onClick={() => setSelectedKeys(new Set())}
+            className="rounded-full px-2.5 py-1 text-[11px] font-medium text-brand disabled:text-ink-4"
+          >
+            Clear All
           </button>
           {hasActiveFilters && (
             <button
@@ -707,6 +793,7 @@ function AssetFilter({
             type="button"
             onClick={() => {
               setNetworkFilter(null);
+              setFocusedIndex(0);
               onPageReset?.();
             }}
             className={cn(
@@ -724,6 +811,7 @@ function AssetFilter({
               type="button"
               onClick={() => {
                 setNetworkFilter(net);
+                setFocusedIndex(0);
                 onPageReset?.();
               }}
               className={cn(
@@ -769,6 +857,7 @@ function AssetFilter({
                   onClick={() => {
                     setSortKey(opt.key);
                     setShowSortDropdown(false);
+                    setFocusedIndex(0);
                     onPageReset?.();
                   }}
                   className={cn(
@@ -802,7 +891,10 @@ function AssetFilter({
             {search && (
               <button
                 type="button"
-                onClick={() => setSearch("")}
+                onClick={() => {
+                  setSearch("");
+                  setFocusedIndex(0);
+                }}
                 className="mt-1 text-[12px] text-ink-4 underline hover:text-ink-2"
               >
                 Clear search
@@ -812,15 +904,22 @@ function AssetFilter({
         ) : (
           filtered.map((asset, index) =>
             renderRow ? (
-              <div key={getAssetKey(asset)}>{renderRow(asset, isFav(asset))}</div>
+              <div key={getAssetKey(asset)}>
+                {renderRow(asset, isFav(asset), {
+                  isSelected: selectedKeys.has(getAssetKey(asset)),
+                  toggle: () => toggleSelection(asset),
+                })}
+              </div>
             ) : (
               <DefaultAssetRow
                 key={getAssetKey(asset)}
                 asset={asset}
                 isFavorite={isFav(asset)}
                 onFavoriteToggle={toggleFavorite}
-                onSelect={onSelect}
-                isFocused={index === focusedIndex}
+                onSelect={toggleSelection}
+                isSelected={selectedKeys.has(getAssetKey(asset))}
+                isFocused={index === effectiveFocusedIndex}
+                highlightQuery={deferredSearch}
               />
             ),
           )

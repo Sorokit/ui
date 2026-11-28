@@ -1,11 +1,17 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 import type { AllowanceEntry, SorokitClient } from "@/lib/client";
 import { getClient } from "@/lib/client";
 
-import { AllowanceManager, formatCurrency, isExpired } from "./AllowanceManager";
+import {
+  AllowanceManager,
+  estimateLedgerExpiry,
+  formatCurrency,
+  isExpired,
+  validateSpender,
+} from "./AllowanceManager";
 
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
@@ -76,6 +82,36 @@ describe("AllowanceManager", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each([
+    ["Asset", ["AAA", "BBB", "CCC", "DDD"]],
+    ["Spender", ["CCC", "AAA", "DDD", "BBB"]],
+    ["Amount", ["BBB", "CCC", "AAA", "DDD"]],
+    ["Expiry", ["CCC", "BBB", "AAA", "DDD"]],
+  ] as const)("sorts by %s in both directions", async (column, ascending) => {
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, tokenCode: "AAA", spender: "spender-2", spenderName: undefined,
+        amount: "9007199254740992.01", expirationDate: "2026-12-30" },
+      { ...MOCK_ALLOWANCE, tokenCode: "BBB", spender: "spender-4", spenderName: undefined,
+        amount: "2", expirationDate: "2026-12-01" },
+      { ...MOCK_ALLOWANCE, tokenCode: "CCC", spender: "spender-1", spenderName: undefined,
+        amount: "9007199254740992.00", expirationLedger: 100, expirationDate: undefined },
+      { ...MOCK_ALLOWANCE, tokenCode: "DDD", spender: "spender-3", spenderName: undefined,
+        amount: "9007199254740992.02", expirationDate: undefined },
+    ]);
+    vi.setSystemTime(new Date("2026-11-01T00:00:00Z"));
+    render(<AllowanceManager currentLedger={99} />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    const controls = await screen.findByRole("group", { name: "Sort allowances" });
+    const assetCodes = () => screen.getAllByText(/^(AAA|BBB|CCC|DDD)$/).map((node) => node.textContent);
+    fireEvent.click(within(controls).getByRole("button", { name: column }));
+    expect(assetCodes()).toEqual(ascending);
+
+    fireEvent.click(within(controls).getByRole("button", { name: `${column}, ascending` }));
+    expect(within(controls).getByRole("button", { name: `${column}, descending` })).toHaveAttribute("aria-pressed", "true");
+    expect(assetCodes()).toEqual(column === "Expiry" ? ["AAA", "BBB", "CCC", "DDD"] : [...ascending].reverse());
   });
 
   it("renders 'Connect your wallet' when not connected", () => {
@@ -153,7 +189,7 @@ describe("AllowanceManager", () => {
     fireEvent.click(screen.getByText(/USDC/));
     await waitFor(() => {
       expect(screen.getByText(/Token Code/)).toBeInTheDocument();
-      expect(screen.getByText(/Spender/)).toBeInTheDocument();
+      expect(screen.getByText(MOCK_ALLOWANCE.spender)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getAllByText(/USDC/)[0]);
@@ -316,6 +352,33 @@ describe("AllowanceManager", () => {
       expect(screen.getByText("EXPIRED")).toBeInTheDocument();
     });
   });
+
+  it("marks an allowance expiring today as EXPIRED", async () => {
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, expirationDate: "2026-01-15T00:00:00Z" },
+    ]);
+    render(<AllowanceManager />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText("EXPIRED")).toBeInTheDocument();
+    });
+  });
+
+  it("does not mark an allowance expiring tomorrow as EXPIRED", async () => {
+    vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+    mockGetAllowances([
+      { ...MOCK_ALLOWANCE, expirationDate: "2026-01-16T00:00:00Z" },
+    ]);
+    render(<AllowanceManager />);
+    act(() => { vi.advanceTimersByTime(0); });
+
+    await waitFor(() => {
+      expect(screen.getByText(/DeFi Protocol/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("EXPIRED")).not.toBeInTheDocument();
+  });
 });
 
 describe("AllowanceManager helpers", () => {
@@ -333,5 +396,222 @@ describe("AllowanceManager helpers", () => {
   it("detects ledger-based expiry", () => {
     expect(isExpired(undefined, 1000, 1000)).toBe(true);
     expect(isExpired(undefined, 1000, 999)).toBe(false);
+  });
+});
+
+// ── Issue #917: self-approval, ledger expiry estimates, revoke confirmation ──
+describe("AllowanceManager — issue #917", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.mocked(useSorokit).mockReturnValue({ address: ADDRESS, isConnected: true, get client() { return getClient(); } } as unknown as ReturnType<typeof useSorokit>);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function renderLoaded(props: Parameters<typeof AllowanceManager>[0] = {}) {
+    render(<AllowanceManager {...props} />);
+    act(() => { vi.advanceTimersByTime(0); });
+    await waitFor(() => {
+      expect(screen.getByText(/DeFi Protocol/)).toBeInTheDocument();
+    });
+  }
+
+  function openNewAllowanceForm() {
+    fireEvent.click(screen.getByRole("button", { name: "New allowance" }));
+    return screen.getByRole("form", { name: "New allowance" });
+  }
+
+  function fillForm(values: { asset?: string; spender?: string; amount?: string }) {
+    const form = within(screen.getByRole("form", { name: "New allowance" }));
+    if (values.asset !== undefined) {
+      fireEvent.change(form.getByLabelText("Token"), { target: { value: values.asset } });
+    }
+    if (values.spender !== undefined) {
+      fireEvent.change(form.getByLabelText("Spender address"), {
+        target: { value: values.spender },
+      });
+    }
+    if (values.amount !== undefined) {
+      fireEvent.change(form.getByLabelText("Amount"), { target: { value: values.amount } });
+    }
+  }
+
+  describe("self-approval validation", () => {
+    it("blocks approving the active address with an inline error", async () => {
+      mockApproveAllowance(true);
+      await renderLoaded();
+      const form = openNewAllowanceForm();
+
+      fillForm({ asset: "XLM", spender: ADDRESS, amount: "10" });
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "You can't approve your own address as a spender",
+      );
+      const spenderInput = screen.getByLabelText("Spender address");
+      expect(spenderInput).toHaveAttribute("aria-invalid", "true");
+      expect(spenderInput).toHaveAttribute(
+        "aria-describedby",
+        screen.getByRole("alert").id,
+      );
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+
+      // Even a forced submit must not reach the client.
+      fireEvent.submit(form);
+      expect(getClient().allowance.approveAllowance).not.toHaveBeenCalled();
+    });
+
+    it("blocks the active address regardless of letter case or surrounding whitespace", async () => {
+      mockApproveAllowance(true);
+      await renderLoaded();
+      openNewAllowanceForm();
+
+      fillForm({ asset: "XLM", spender: `  ${ADDRESS.toLowerCase()} `, amount: "10" });
+
+      expect(screen.getByRole("alert")).toHaveTextContent(/own address/i);
+      expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    });
+
+    it("approves a different spender address", async () => {
+      mockApproveAllowance(true);
+      await renderLoaded();
+      openNewAllowanceForm();
+
+      fillForm({ asset: "XLM", spender: MOCK_ALLOWANCE.spender, amount: "10" });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+      const approve = screen.getByRole("button", { name: "Approve" });
+      expect(approve).toBeEnabled();
+      fireEvent.click(approve);
+
+      await waitFor(() => {
+        expect(getClient().allowance.approveAllowance).toHaveBeenCalledWith({
+          sourceAccount: ADDRESS,
+          asset: "XLM",
+          spender: MOCK_ALLOWANCE.spender,
+          amount: "10",
+        });
+      });
+    });
+
+    it("clears the error once the spender is corrected", async () => {
+      mockApproveAllowance(true);
+      await renderLoaded();
+      openNewAllowanceForm();
+
+      fillForm({ spender: ADDRESS });
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+
+      fillForm({ spender: MOCK_ALLOWANCE.spender });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(screen.getByLabelText("Spender address")).not.toHaveAttribute("aria-invalid");
+    });
+  });
+
+  describe("ledger expiry estimate", () => {
+    it("shows an estimated date and relative time for a ledger-based expiry", async () => {
+      vi.setSystemTime(new Date("2026-01-15T12:00:00Z"));
+      // 86,400 ledgers × 5s = 432,000s = 5 days.
+      mockGetAllowances([
+        { ...MOCK_ALLOWANCE, expirationDate: undefined, expirationLedger: 1000 + 86_400 },
+      ]);
+      await renderLoaded({ currentLedger: 1000 });
+
+      fireEvent.click(screen.getByText(/DeFi Protocol/));
+
+      const expiry = await screen.findByTestId("ledger-expiry");
+      expect(expiry).toHaveTextContent("Expires at ledger 87400");
+      expect(expiry).toHaveTextContent("~5 days from now");
+      expect(expiry).toHaveTextContent(
+        // Normalise ICU's narrow no-break spaces the way toHaveTextContent does.
+        new Date("2026-01-20T12:00:00Z").toLocaleString().replace(/\s+/g, " "),
+      );
+    });
+
+    it("shows only the ledger number when the current ledger is unknown", async () => {
+      mockGetAllowances([
+        { ...MOCK_ALLOWANCE, expirationDate: undefined, expirationLedger: 500 },
+      ]);
+      await renderLoaded();
+
+      fireEvent.click(screen.getByText(/DeFi Protocol/));
+
+      expect(await screen.findByText("Expires at ledger 500")).toBeInTheDocument();
+      expect(screen.queryByTestId("ledger-expiry")).not.toBeInTheDocument();
+      expect(screen.queryByText(/from now/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("revoke confirmation", () => {
+    async function openRevokeDialog() {
+      mockRevokeAllowance(true);
+      await renderLoaded();
+      fireEvent.click(screen.getByText(/DeFi Protocol/));
+      fireEvent.click(await screen.findByTestId("revoke-allowance-0"));
+      return screen.getByRole("dialog", { name: "Confirm Revoke" });
+    }
+
+    it("opens a confirmation modal instead of revoking immediately", async () => {
+      const dialog = await openRevokeDialog();
+
+      expect(dialog).toHaveAttribute("aria-modal", "true");
+      expect(dialog).toHaveTextContent(/cannot be undone/i);
+      expect(getClient().allowance.revokeAllowance).not.toHaveBeenCalled();
+    });
+
+    it("does not revoke when the modal is cancelled", async () => {
+      await openRevokeDialog();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(getClient().allowance.revokeAllowance).not.toHaveBeenCalled();
+    });
+
+    it("does not revoke when the backdrop is clicked", async () => {
+      const dialog = await openRevokeDialog();
+
+      fireEvent.click(dialog.parentElement!);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(getClient().allowance.revokeAllowance).not.toHaveBeenCalled();
+    });
+
+    it("revokes exactly once after explicit confirmation", async () => {
+      await openRevokeDialog();
+
+      fireEvent.click(screen.getByTestId("confirm-revoke"));
+
+      await waitFor(() => {
+        expect(getClient().allowance.revokeAllowance).toHaveBeenCalledTimes(1);
+      });
+      expect(getClient().allowance.revokeAllowance).toHaveBeenCalledWith({
+        sourceAccount: ADDRESS,
+        asset: "USDC",
+        spender: MOCK_ALLOWANCE.spender,
+      });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("helpers", () => {
+    it("validateSpender rejects empty and self addresses", () => {
+      expect(validateSpender("", ADDRESS)).toMatch(/required/i);
+      expect(validateSpender(ADDRESS, ADDRESS)).toMatch(/own address/i);
+      expect(validateSpender(MOCK_ALLOWANCE.spender, ADDRESS)).toBeNull();
+    });
+
+    it("estimateLedgerExpiry converts ledgers using 5-second close times", () => {
+      const now = Date.UTC(2026, 0, 1);
+      const { date, relative } = estimateLedgerExpiry(1720, 1000, now);
+      expect(relative).toBe("~1 hour from now");
+      expect(date.getTime()).toBe(now + 3600 * 1000);
+
+      expect(estimateLedgerExpiry(1012, 1000, now).relative).toBe("~1 minute from now");
+      expect(estimateLedgerExpiry(1006, 1000, now).relative).toBe("~30 seconds from now");
+      expect(estimateLedgerExpiry(0, 17_280, now).relative).toBe("~1 day ago");
+    });
   });
 });

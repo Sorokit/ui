@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
 
@@ -415,9 +415,9 @@ describe("SwapSimulator", () => {
     expect(container.firstChild).toHaveClass("my-custom-class");
   });
 
-  // ---- Zero Liquidity & Minimum Liquidity Threshold (#733) ----
+  // ---- Zero Liquidity & Minimum Liquidity Threshold (#733, #864) ----
 
-  describe("zero liquidity and minimum liquidity threshold (#733)", () => {
+  describe("zero liquidity and minimum liquidity threshold (#733, #864)", () => {
     it("does not render NaN or Infinity when pool reserves are zero", () => {
       render(
         <SwapSimulator
@@ -494,6 +494,608 @@ describe("SwapSimulator", () => {
       expect(btn).toBeDisabled();
       fireEvent.click(btn);
       expect(onSwap).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---- Slippage enforcement, direction inversion & chart resizing (#921) ----
+
+  describe("minimum received (#921)", () => {
+    // Constant-product quote with the simulator's 0.3% fee.
+    const quote = (amountIn: number, reserveIn: number, reserveOut: number) => {
+      const net = amountIn * (1 - 0.003);
+      return (reserveOut * net) / (reserveIn + net);
+    };
+    const fmt = (n: number) =>
+      n.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 });
+
+    it("displays amountOut * (1 - slippage / 100) as the minimum received", () => {
+      render(<SwapSimulator />);
+      const expectedOut = quote(100, 100000, 12000);
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(
+        `${fmt(expectedOut * (1 - 0.5 / 100))} USDC`,
+      );
+    });
+
+    it("recalculates the minimum received when the slippage tolerance changes", () => {
+      render(<SwapSimulator />);
+      fireEvent.change(screen.getByLabelText("Max Slippage Tolerance (%)"), {
+        target: { value: "3" },
+      });
+      const expectedOut = quote(100, 100000, 12000);
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(
+        `${fmt(expectedOut * (1 - 3 / 100))} USDC`,
+      );
+    });
+
+    it("shows a placeholder instead of a minimum when slippage is invalid", () => {
+      render(<SwapSimulator />);
+      fireEvent.change(screen.getByLabelText("Max Slippage Tolerance (%)"), {
+        target: { value: "abc" },
+      });
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent("—");
+    });
+
+    it("passes minAmountOut to onSwap when the executed output meets the minimum", async () => {
+      vi.useFakeTimers();
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      const onSwap = vi.fn();
+      render(<SwapSimulator onSwap={onSwap} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /swap assets/i }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      const expectedOut = quote(100, 100000, 12000);
+      expect(onSwap).toHaveBeenCalledTimes(1);
+      const params = onSwap.mock.calls[0][0];
+      expect(params.amountOut).toBeCloseTo(expectedOut, 10);
+      expect(params.minAmountOut).toBeCloseTo(expectedOut * (1 - 0.5 / 100), 10);
+      expect(params.amountOut).toBeGreaterThanOrEqual(params.minAmountOut);
+      vi.useRealTimers();
+    });
+
+    it("reverts the swap when the executed output falls below the minimum received", async () => {
+      vi.useFakeTimers();
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      const onSwap = vi.fn();
+      render(<SwapSimulator onSwap={onSwap} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /swap assets/i }));
+      // Liquidity drains while the swap is pending, so the pool now returns
+      // less than the minimum the user accepted.
+      fireEvent.click(screen.getByText(/low liq/i));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      expect(onSwap).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent(/swap reverted/i);
+      expect(screen.getByRole("alert")).toHaveTextContent(/minimum received/i);
+      expect(screen.queryByText(/swap completed successfully/i)).not.toBeInTheDocument();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("direction inversion (#921)", () => {
+    it("preserves the entered amount and re-quotes against the inverted reserves", () => {
+      render(<SwapSimulator />);
+      const input = screen.getByPlaceholderText("0.0") as HTMLInputElement;
+      fireEvent.change(input, { target: { value: "250" } });
+
+      fireEvent.click(screen.getByLabelText("Flip input and output assets"));
+
+      const selects = screen.getAllByRole("combobox") as HTMLSelectElement[];
+      expect(selects[0].value).toBe("USDC");
+      expect(selects[1].value).toBe("XLM");
+      expect(input.value).toBe("250");
+
+      // USDC -> XLM uses the inverted pool (12,000 USDC / 100,000 XLM).
+      const net = 250 * (1 - 0.003);
+      const expectedOut = (100000 * net) / (12000 + net);
+      expect(
+        screen.getByText(
+          expectedOut.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 }),
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/1 USDC = .* XLM/)).toBeInTheDocument();
+      expect(screen.getByTestId("swap-min-received")).toHaveTextContent(/XLM$/);
+    });
+
+    it("restores the original quote when flipped twice", () => {
+      render(<SwapSimulator />);
+      const before = screen.getByTestId("swap-min-received").textContent;
+      const flip = screen.getByLabelText("Flip input and output assets");
+      fireEvent.click(flip);
+      expect(screen.getByTestId("swap-min-received").textContent).not.toBe(before);
+      fireEvent.click(flip);
+      expect(screen.getByTestId("swap-min-received").textContent).toBe(before);
+      expect((screen.getByPlaceholderText("0.0") as HTMLInputElement).value).toBe("100");
+    });
+  });
+
+  describe("price impact chart resizing (#921)", () => {
+    type ResizeCallback = (entries: Array<{ contentRect: { width: number; height: number } }>) => void;
+    let callbacks: ResizeCallback[];
+    let observe: ReturnType<typeof vi.fn>;
+    let disconnect: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      callbacks = [];
+      observe = vi.fn();
+      disconnect = vi.fn();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(cb: ResizeCallback) {
+            callbacks.push(cb);
+          }
+          observe = observe;
+          unobserve = vi.fn();
+          disconnect = disconnect;
+        },
+      );
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const resizeTo = (width: number, height: number) => {
+      act(() => {
+        callbacks.forEach((cb) => cb([{ contentRect: { width, height } }]));
+      });
+    };
+
+    it("observes the chart container and updates the SVG viewport on resize", () => {
+      render(<SwapSimulator />);
+      const chart = screen.getByTestId("price-impact-chart");
+      expect(observe).toHaveBeenCalledWith(chart.parentElement);
+
+      resizeTo(320, 114);
+      expect(chart).toHaveAttribute("viewBox", "0 0 320 114");
+      expect(chart).toHaveAttribute("width", "320");
+      expect(chart).toHaveAttribute("height", "114");
+
+      // Orientation change.
+      resizeTo(180.4, 240.6);
+      expect(chart).toHaveAttribute("viewBox", "0 0 180 241");
+    });
+
+    it("ignores zero-size entries so a hidden chart does not collapse", () => {
+      render(<SwapSimulator />);
+      const chart = screen.getByTestId("price-impact-chart");
+      resizeTo(320, 114);
+      resizeTo(0, 0);
+      expect(chart).toHaveAttribute("viewBox", "0 0 320 114");
+    });
+
+    it("keeps the trade marker circular by plotting it in viewport coordinates", () => {
+      render(<SwapSimulator />);
+      resizeTo(400, 100);
+      const circles = screen.getByTestId("price-impact-chart").querySelectorAll("circle");
+      expect(circles.length).toBeGreaterThan(0);
+      // 100 of a 500 max size -> 20% across a 400px-wide viewport.
+      expect(Number(circles[0].getAttribute("cx"))).toBeCloseTo(80, 5);
+      expect(circles[0].closest("g[transform]")).toBeNull();
+    });
+
+    it("disconnects the observer on unmount", () => {
+      const { unmount } = render(<SwapSimulator />);
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
+    });
+  });
+
+  // ---- Extreme Price Impact Scenarios ----
+
+  describe("extreme price impact scenarios", () => {
+    it("displays high price impact warning banner when impact exceeds 15%", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 1000, toReserves: 100000 },
+          }}
+        />,
+      );
+      // With very low from reserves and high to reserves, a large swap creates extreme impact
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "500" } });
+      // Should show price impact details
+      expect(screen.getAllByText(/price impact/i).length).toBeGreaterThan(0);
+    });
+
+    it("shows critical error banner when price impact exceeds 50%", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 100, toReserves: 100000 },
+          }}
+        />,
+      );
+      // Extreme input creates massive price impact
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "10000" } });
+      // Verify high price impact badge is shown with "High" status
+      expect(screen.getByText("High")).toBeInTheDocument();
+    });
+
+    it("shows correct color coding for low price impact (< 1%)", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 1000000, toReserves: 1000000 },
+          }}
+        />,
+      );
+      // Small input on deep liquidity pool creates low impact
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "10" } });
+      // Should show "Low" badge for small price impact
+      expect(screen.getByText("Low")).toBeInTheDocument();
+    });
+
+    it("shows correct color coding for medium price impact (1-5%)", () => {
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 10000, toReserves: 10000 },
+          }}
+        />,
+      );
+      // Medium input on moderate liquidity creates medium impact (1% - 5%)
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "250" } });
+      // Should show "Medium" badge
+      expect(screen.getByText("Medium")).toBeInTheDocument();
+    });
+
+    it("shows critical red banner when slippage is exceeded with extreme impact", () => {
+      vi.mocked(useSorokit).mockReturnValue(mockConnectedState as ReturnType<typeof useSorokit>);
+      render(
+        <SwapSimulator
+          poolReserves={{
+            "XLM-USDC": { fromReserves: 500, toReserves: 50000 },
+          }}
+        />,
+      );
+      // Set a tight slippage tolerance
+      const slippageInput = screen.getByLabelText("Max Slippage Tolerance (%)");
+      fireEvent.change(slippageInput, { target: { value: "5" } });
+
+      // Set amount to create high price impact
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "2000" } });
+
+      // Should show "High Slippage Warning" banner in red
+      expect(screen.getByText(/high slippage warning/i)).toBeInTheDocument();
+      const banner = screen.getByText(/high slippage warning/i).closest("div.bg-error-dim");
+      expect(banner).toHaveClass("bg-error-dim");
+    });
+  });
+
+  // ---- Custom poolReserves Props ----
+
+  describe("custom poolReserves props", () => {
+    it("accepts and uses custom poolReserves configuration", () => {
+      const customReserves = {
+        "XLM-USDC": { fromReserves: 50000, toReserves: 6000 },
+        "USDC-XLM": { fromReserves: 6000, toReserves: 50000 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+      // Component should render without errors
+      expect(screen.getByText("Swap Simulator")).toBeInTheDocument();
+      // Price calculations should use custom reserves
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+    });
+
+    it("uses default POOL_RESERVES when custom poolReserves is not provided", () => {
+      render(<SwapSimulator />);
+      expect(screen.getByText("Swap Simulator")).toBeInTheDocument();
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+    });
+
+    it("calculates correct exchange rate with custom poolReserves", () => {
+      const customReserves = {
+        "XLM-USDC": { fromReserves: 100000, toReserves: 12000 },
+        "USDC-XLM": { fromReserves: 12000, toReserves: 100000 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+      // With custom reserves, the exchange rate calculation should reflect them
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+    });
+
+    it("applies liquidity size multiplier correctly to custom poolReserves", () => {
+      const customReserves = {
+        "XLM-USDC": { fromReserves: 10000, toReserves: 1000 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+      // Get initial price impact
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "100" } });
+      expect(screen.getByText("Price Impact:")).toBeInTheDocument();
+
+      // Switch to high liquidity
+      const highBtn = screen.getByText(/high liq/i);
+      fireEvent.click(highBtn);
+      // Price impact should decrease with higher liquidity multiplier
+      expect(screen.getByText("Price Impact:")).toBeInTheDocument();
+    });
+
+    it("handles empty or missing custom poolReserves gracefully", () => {
+      render(<SwapSimulator poolReserves={{}} />);
+      // Should still render without crashing
+      expect(screen.getByText("Swap Simulator")).toBeInTheDocument();
+      // Should fall back to default 10000 reserves
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+    });
+
+    it("correctly renders price impact curve with custom poolReserves", () => {
+      const customReserves = {
+        "XLM-USDC": { fromReserves: 5000, toReserves: 500 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+      // Click on impact chart tab (should be default)
+      expect(screen.getByText("Price Impact Curve")).toBeInTheDocument();
+      // SVG should be rendered
+      expect(screen.getByTestId("price-impact-chart")).toBeInTheDocument();
+    });
+
+    it("respects asset pair mapping in custom poolReserves", () => {
+      const customReserves = {
+        "XLM-EURC": { fromReserves: 50000, toReserves: 5500 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+      // Select the custom asset pair
+      const selects = screen.getAllByRole("combobox");
+      fireEvent.change(selects[0], { target: { value: "XLM" } });
+      fireEvent.change(selects[1], { target: { value: "EURC" } });
+      // Should display exchange rate using custom reserves
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+    });
+  });
+
+  // ---- Debounced Chart Calculations with Fake Timers ----
+
+  describe("debounced chart calculations with fake timers", () => {
+    it("debounces price impact chart recalculation on rapid input changes", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Rapidly change input without advancing time
+      fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "200" } });
+      fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "300" } });
+      fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "400" } });
+
+      // Max Size should not have changed yet
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Advance time by debounce delay (300ms)
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Now Max Size should reflect the final input (400)
+      expect(screen.getByText("Max Size: 800 XLM")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("cancels previous debounce timer when new input is received before debounce completes", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Change input
+      fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "1000" } });
+
+      // Advance time partially (150ms < 300ms)
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+
+      // Chart should not have updated yet
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Change input again, which should cancel the previous timer
+      fireEvent.change(screen.getByPlaceholderText("0.0"), { target: { value: "2000" } });
+
+      // Advance to 300ms from first change (only 150ms from second)
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+
+      // Chart should still not have updated (only 150ms elapsed since second input)
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Advance by another 150ms (total 300ms from second input)
+      act(() => {
+        vi.advanceTimersByTime(150);
+      });
+
+      // Now it should update with the second input value
+      expect(screen.getByText("Max Size: 4000 XLM")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("applies debounce to chart recalculation but not to immediate exchange rate updates", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+      const input = screen.getByPlaceholderText("0.0");
+
+      // Change input
+      fireEvent.change(input, { target: { value: "500" } });
+
+      // Exchange rate should be visible immediately (not debounced)
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+
+      // But chart Max Size should be debounced
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Change to different value
+      fireEvent.change(input, { target: { value: "1500" } });
+
+      // Exchange rate should update immediately
+      expect(screen.getByText(/exchange rate/i)).toBeInTheDocument();
+
+      // Chart Max Size should still show old value
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Advance debounce timer
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Now chart should update
+      expect(screen.getByText("Max Size: 3000 XLM")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("recalculates chart correctly after debounce with custom poolReserves", () => {
+      vi.useFakeTimers();
+      const customReserves = {
+        "XLM-USDC": { fromReserves: 100000, toReserves: 12000 },
+      };
+      render(<SwapSimulator poolReserves={customReserves} />);
+
+      const input = screen.getByPlaceholderText("0.0");
+
+      // Change input
+      fireEvent.change(input, { target: { value: "250" } });
+
+      // Before debounce, chart should show old calculation
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // Advance debounce
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // After debounce, chart should reflect new input
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("uses debounced value for price impact curve SVG rendering", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+
+      const input = screen.getByPlaceholderText("0.0");
+
+      // Set initial value
+      fireEvent.change(input, { target: { value: "100" } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Change to new value
+      fireEvent.change(input, { target: { value: "500" } });
+
+      // SVG should still show calculation based on debounced 100
+      const svgContainer = screen.getByText("Max Size: 500 XLM").closest("div");
+      expect(svgContainer).toBeInTheDocument();
+
+      // After debounce, SVG recalculates
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Now it should reflect 500
+      expect(screen.getByText("Max Size: 1000 XLM")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("clears debounce timeout on component unmount", () => {
+      vi.useFakeTimers();
+      const { unmount } = render(<SwapSimulator />);
+
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "300" } });
+
+      // Unmount before debounce completes
+      unmount();
+
+      // Should not throw or cause memory leak
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      vi.useRealTimers();
+    });
+
+    it("respects custom AMOUNT_CHART_DEBOUNCE_MS timing", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+
+      const input = screen.getByPlaceholderText("0.0");
+      fireEvent.change(input, { target: { value: "400" } });
+
+      // At 299ms, should not have updated
+      act(() => {
+        vi.advanceTimersByTime(299);
+      });
+      expect(screen.getByText("Max Size: 500 XLM")).toBeInTheDocument();
+
+      // At 300ms, should have updated
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByText("Max Size: 800 XLM")).toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("handles zero and negative input values with debounce", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+
+      const input = screen.getByPlaceholderText("0.0");
+
+      // Set to zero
+      fireEvent.change(input, { target: { value: "0" } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Exchange rate should not be shown for zero input
+      expect(screen.queryByText(/exchange rate/i)).not.toBeInTheDocument();
+
+      // Set to negative (invalid)
+      fireEvent.change(input, { target: { value: "-100" } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.queryByText(/exchange rate/i)).not.toBeInTheDocument();
+
+      vi.useRealTimers();
+    });
+
+    it("emits correct price impact curve points after debounce with varying amounts", () => {
+      vi.useFakeTimers();
+      render(<SwapSimulator />);
+
+      const input = screen.getByPlaceholderText("0.0");
+
+      // Set amount
+      fireEvent.change(input, { target: { value: "750" } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      // Price impact curve should calculate based on 750
+      expect(screen.getByText("Max Size: 1500 XLM")).toBeInTheDocument();
+
+      // Change and debounce again
+      fireEvent.change(input, { target: { value: "1250" } });
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(screen.getByText("Max Size: 2500 XLM")).toBeInTheDocument();
+
+      vi.useRealTimers();
     });
   });
 });

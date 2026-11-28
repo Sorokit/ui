@@ -15,10 +15,12 @@ export const SECTION_PATHS: Record<NavSection, string> = {
   network: "/network",
   recovery: "/recovery",
   charts: "/charts",
+  portfolio: "/portfolio",
   farming: "/farming",
   budget: "/budget",
   nfts: "/nfts",
   governance: "/governance",
+  settings: "/settings",
 };
 
 const PATH_TO_SECTION: Record<string, NavSection> = Object.fromEntries(

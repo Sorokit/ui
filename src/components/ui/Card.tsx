@@ -53,7 +53,13 @@ export const CardHeader = forwardRef<HTMLElement, BaseProps & { as?: ElementType
     return (
       <Component
         ref={ref}
-        className={cn("px-5 py-4 border-b border-line", className)}
+        // flex-wrap / gap only take effect when a consumer makes the header a
+        // flex row; they let title + actions wrap instead of overflowing on
+        // narrow (< 380px) viewports.
+        className={cn(
+          "px-4 sm:px-5 py-4 border-b border-line flex-wrap gap-x-3 gap-y-2",
+          className,
+        )}
         {...props}
       >
         {children}

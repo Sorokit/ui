@@ -222,4 +222,89 @@ describe("TransactionHistoryTable", () => {
       expect(row.className).toContain("bg-error/5");
     });
   });
+
+  it("renders an accessible copy-hash button for each transaction", async () => {
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const copyButtons = screen.getAllByLabelText("Copy transaction hash");
+    expect(copyButtons.length).toBeGreaterThan(0);
+  });
+
+  it("copies the transaction hash to the clipboard when clicked", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+      writable: true,
+    });
+
+    render(<TransactionHistoryTable />);
+    await waitFor(() => screen.getByText(/25 transactions/));
+
+    const [copyButton] = screen.getAllByLabelText("Copy transaction hash");
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledTimes(1);
+      const copiedHash = writeText.mock.calls[0][0];
+      expect(mockTransactions.some((tx) => tx.hash === copiedHash)).toBe(true);
+    });
+  });
+
+  describe("CSV Export via onExport callback", () => {
+    it("calls onExport callback with CSV content when export button clicked", async () => {
+      const mockExport = vi.fn();
+      render(<TransactionHistoryTable onExport={mockExport} />);
+      await waitFor(() => {
+        expect(screen.getByText("CSV")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("CSV"));
+      expect(mockExport).toHaveBeenCalledTimes(1);
+      expect(mockExport).toHaveBeenCalledWith(expect.stringContaining("Hash,Ledger,Date"));
+    });
+
+    it("exports CSV with correct headers", async () => {
+      const mockExport = vi.fn();
+      render(<TransactionHistoryTable onExport={mockExport} />);
+      await waitFor(() => {
+        expect(screen.getByText("CSV")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("CSV"));
+      const csv = mockExport.mock.calls[0][0];
+      expect(csv).toContain("Hash");
+      expect(csv).toContain("Ledger");
+      expect(csv).toContain("Date");
+      expect(csv).toContain("Time");
+      expect(csv).toContain("Status");
+      expect(csv).toContain("Fee (stroops)");
+      expect(csv).toContain("Operations");
+      expect(csv).toContain("Memo");
+    });
+
+    it("includes all transaction data in CSV rows", async () => {
+      const mockExport = vi.fn();
+      render(<TransactionHistoryTable onExport={mockExport} />);
+      await waitFor(() => {
+        expect(screen.getByText("CSV")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByText("CSV"));
+      const csv = mockExport.mock.calls[0][0];
+      const lines = csv.split("\n");
+
+      // Should have header + at least 20 transactions (page size)
+      expect(lines.length).toBeGreaterThan(20);
+
+      // Verify first transaction row contains expected data
+      expect(lines[1]).toContain("a0000000000000000000000000000000000000000000000000000000000000");
+      expect(lines[1]).toContain("1000000");
+      // The fixture marks every third transaction failed starting at index 0, so
+      // the first row is "Failed" and the row after it is the "Success" one.
+      expect(lines[1]).toContain("Failed");
+      expect(lines[2]).toContain("Success");
+    });
+  });
 });

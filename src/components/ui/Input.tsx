@@ -47,6 +47,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       className,
       id,
       onChange,
+      "aria-describedby": describedBy,
+      "aria-invalid": ariaInvalidProp,
       ...props
     },
     ref,
@@ -55,9 +57,17 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
     // Issue #544: derive the id from React.useId() rather than the label text,
     // which collided when two inputs shared the same label on one page.
     const inputId = id ?? generatedId;
+    const describedByMessageId = error
+      ? `${inputId}-error`
+      : hint
+        ? `${inputId}-hint`
+        : undefined;
+    const ariaDescribedBy = [describedBy, describedByMessageId]
+      .filter(Boolean)
+      .filter((value, index, values) => values.indexOf(value) === index)
+      .join(" ") || undefined;
+    const ariaInvalid = error ? true : ariaInvalidProp ?? false;
 
-    const [lastError, setLastError] = useState<string | undefined>(error);
-    const [lastHint, setLastHint] = useState<string | undefined>(hint);
     const [showPassword, setShowPassword] = useState(false);
 
     const isPassword = props.type === "password";
@@ -115,17 +125,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
       }
     }, [onChange, props.readOnly, props.value]);
 
-    useEffect(() => {
-      if (error) {
-        setLastError(error);
-      }
-    }, [error]);
-
-    useEffect(() => {
-      if (hint) {
-        setLastHint(hint);
-      }
-    }, [hint]);
 
     return (
       <div className="flex flex-col gap-1.5">
@@ -141,10 +140,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           <textarea
             ref={ref as React.Ref<HTMLTextAreaElement>}
             id={inputId}
-            aria-invalid={!!error}
-            aria-describedby={
-              error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined
-            }
+            aria-invalid={ariaInvalid}
+            aria-describedby={ariaDescribedBy}
             className={cn(
               "min-h-[72px] w-full rounded-lg border bg-surface-2 px-3.5 py-2",
               "text-[13px] text-ink placeholder:text-ink-4",
@@ -170,14 +167,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
             <input
               ref={setInputRef}
               id={inputId}
-              aria-invalid={!!error}
-              aria-describedby={
-                error
-                  ? `${inputId}-error`
-                  : hint
-                    ? `${inputId}-hint`
-                    : undefined
-              }
+              aria-invalid={ariaInvalid}
+              aria-describedby={ariaDescribedBy}
               className={cn(
                 "h-9 w-full rounded-lg border bg-surface-2",
                 "text-[13px] text-ink placeholder:text-ink-4",
@@ -252,7 +243,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               error ? "opacity-100" : "opacity-0 pointer-events-none",
             )}
           >
-            {error || lastError || ""}
+            {error || ""}
           </p>
           <p
             id={`${inputId}-hint`}
@@ -262,7 +253,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
               !error && hint ? "opacity-100" : "opacity-0 pointer-events-none",
             )}
           >
-            {!error && hint ? hint : lastHint || ""}
+            {hint || ""}
           </p>
         </div>
       </div>

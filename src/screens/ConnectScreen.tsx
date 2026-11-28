@@ -1,10 +1,14 @@
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import heroImg from "@/assets/hero.png";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
+import { useBiometric } from "@/hooks/useBiometric";
+import { useI18n } from "@/i18n";
+import { DISCONNECTED_TITLE } from "@/lib/nav-labels";
+import { cn } from "@/lib/utils";
 
 const SUPPORTED_WALLETS = [
   { name: "Freighter", initial: "F", color: "#7B61FF" },
@@ -13,9 +17,111 @@ const SUPPORTED_WALLETS = [
   { name: "Albedo", initial: "A", color: "#00B894" },
 ];
 
+/** Known `?provider=` query param values, matched case-insensitively. */
+const SUPPORTED_PROVIDER_IDS = SUPPORTED_WALLETS.map((w) => w.name.toLowerCase());
+
+/**
+ * Mobile wallets that ship an app with its own deep-link scheme, for users
+ * on a mobile browser where the desktop extensions in SUPPORTED_WALLETS
+ * can't be installed. Freighter and xBull are browser-extension-only today.
+ */
+const MOBILE_WALLET_DEEP_LINKS = [
+  { name: "Lobstr", href: "https://lobstr.co/" },
+  { name: "Albedo", href: "https://albedo.link/" },
+];
+
+/**
+ * Detects a mobile browser from the user agent. No mobile-detection utility
+ * exists elsewhere in this codebase yet (checked `src/lib/utils.ts` and
+ * every component under `src/`), so this is intentionally small and scoped
+ * to this screen rather than introducing a new shared utility module for a
+ * single call site.
+ */
+function isMobileUserAgent(userAgent: string): boolean {
+  return /android|iphone|ipad|ipod|mobile/i.test(userAgent);
+}
+
+/**
+ * Parses a raw wallet-connection error message into actionable
+ * troubleshooting guidance. Wallet extensions (Freighter, xBull, Albedo,
+ * Lobstr) don't share a single error-code standard, so this matches on the
+ * common substrings their rejection/lock/missing-extension errors use.
+ * Falls back to the raw message (still shown) when nothing matches, rather
+ * than hiding it.
+ */
+function connectionTroubleshooting(message: string): string | null {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("locked") ||
+    normalized.includes("unlock")
+  ) {
+    return "Unlock your wallet extension, then try connecting again.";
+  }
+
+  if (
+    normalized.includes("rejected") ||
+    normalized.includes("denied") ||
+    normalized.includes("cancelled") ||
+    normalized.includes("canceled") ||
+    normalized.includes("user declined")
+  ) {
+    return "The connection request was declined. Open your wallet extension and approve the connection request to continue.";
+  }
+
+  if (
+    normalized.includes("not installed") ||
+    normalized.includes("not found") ||
+    normalized.includes("no wallet")
+  ) {
+    return "No supported wallet extension was detected. Install one of the wallets below, then refresh this page.";
+  }
+
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return "The connection request timed out. Check that your wallet extension is responsive and try again.";
+  }
+
+  return null;
+}
+
 export function ConnectScreen() {
-  const { connectWallet, isConnecting, error, clearError } = useSorokit();
+  const {
+    connectWallet,
+    isConnecting,
+    error,
+    errorSeverity = "error",
+    clearError,
+  } = useSorokit();
+  const { t } = useI18n();
+  const { enabled: biometricEnabled, authenticate: authenticateBiometric } =
+    useBiometric();
+  const [biometricBusy, setBiometricBusy] = useState(false);
+  const [biometricFailed, setBiometricFailed] = useState(false);
   const connectButtonRef = useRef<HTMLButtonElement>(null);
+  const autoConnectAttempted = useRef(false);
+  const isInfo = errorSeverity === "info";
+
+  /**
+   * Biometric unlock is a local gate in front of the normal wallet connect:
+   * a successful assertion still calls connectWallet(), and any failure leaves
+   * the standard Connect Wallet button available as the fallback (#1152).
+   */
+  async function handleBiometricUnlock() {
+    setBiometricFailed(false);
+    setBiometricBusy(true);
+    try {
+      const verified = await authenticateBiometric();
+      if (!verified) {
+        setBiometricFailed(true);
+        return;
+      }
+      await connectWallet();
+    } catch {
+      setBiometricFailed(true);
+    } finally {
+      setBiometricBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!isConnecting) {
@@ -23,9 +129,42 @@ export function ConnectScreen() {
     }
   }, [isConnecting]);
 
+  // Disconnecting unmounts Dashboard (whose effect owns the per-screen titles)
+  // and mounts this screen, so reset the tab back to the disconnected title
+  // instead of leaving the last visited screen's title behind (#551).
   useEffect(() => {
-    document.title = "Connect — Sorokit";
+    document.title = DISCONNECTED_TITLE;
   }, []);
+
+  // Auto-connect from a `?provider=<name>` query param (e.g.
+  // `/connect?provider=freighter`), e.g. a deep link shared from another
+  // part of the app or a docs/marketing page (#893). Only fires once per
+  // mount and only for a recognized provider id — connectWallet() itself has
+  // no way to target a specific wallet (it connects through whichever
+  // extension clientRef.current.wallet.connect() finds), so this triggers
+  // the same connection flow as clicking "Connect Wallet" rather than
+  // pretending to select a specific provider the underlying client can't
+  // actually target yet.
+  useEffect(() => {
+    if (autoConnectAttempted.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const providerParam = params.get("provider");
+    if (!providerParam) return;
+    autoConnectAttempted.current = true;
+    if (SUPPORTED_PROVIDER_IDS.includes(providerParam.toLowerCase())) {
+      void connectWallet();
+    }
+  }, [connectWallet]);
+
+  const troubleshooting = useMemo(
+    () => (error ? connectionTroubleshooting(error) : null),
+    [error],
+  );
+
+  const showMobileDeepLinks = useMemo(
+    () => isMobileUserAgent(window.navigator.userAgent),
+    [],
+  );
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-base px-4">
@@ -71,26 +210,49 @@ export function ConnectScreen() {
         <div className="w-full rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_24px_64px_rgba(0,0,0,0.2)]">
           <div className="px-8 pt-8 pb-6 border-b border-line">
             <h2 className="text-[18px] font-semibold text-ink tracking-tight">
-              Connect Wallet
+              {t("connect.title")}
             </h2>
 
             <p className="text-[13px] text-ink-3 mt-2 leading-relaxed">
-              Connect your Stellar wallet to access the dashboard and manage
-              your assets.
+              {t("connect.subtitle")}
             </p>
           </div>
 
           <div className="px-5 py-5 flex flex-col gap-4">
             {error && (
-              <div className="flex items-start justify-between gap-3 rounded-lg bg-error-dim-muted border border-error-dim px-4 py-3">
-                <p role="alert" className="text-[13px] text-red">
-                  {error}
-                </p>
+              <div
+                data-severity={errorSeverity}
+                className={cn(
+                  "flex items-start justify-between gap-3 rounded-lg border px-4 py-3",
+                  isInfo
+                    ? "bg-warning-dim border-warning-dim"
+                    : "bg-error-dim-muted border-error-dim",
+                )}
+              >
+                <div className="flex flex-col gap-1">
+                  <p
+                    role="alert"
+                    className={cn(
+                      "text-[13px]",
+                      isInfo ? "text-warning" : "text-red",
+                    )}
+                  >
+                    {error}
+                  </p>
+                  {troubleshooting && (
+                    <p className="text-[12px] text-ink-2 leading-relaxed">
+                      {troubleshooting}
+                    </p>
+                  )}
+                </div>
 
                 <button
                   onClick={clearError}
                   aria-label="Dismiss error"
-                  className="text-red opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition-opacity"
+                  className={cn(
+                    "opacity-50 hover:opacity-100 shrink-0 mt-0.5 transition-opacity",
+                    isInfo ? "text-warning" : "text-red",
+                  )}
                 >
                   <HugeiconsIcon
                     icon={Cancel01Icon}
@@ -102,6 +264,32 @@ export function ConnectScreen() {
               </div>
             )}
 
+            {/* Biometric quick unlock (#1152) — only shown once enabled in
+                settings. Failure never blocks the wallet button below. */}
+            {biometricEnabled && (
+              <div className="flex flex-col gap-2">
+                <Button
+                  size="lg"
+                  variant="secondary"
+                  loading={biometricBusy}
+                  disabled={isConnecting}
+                  onClick={() => void handleBiometricUnlock()}
+                  className="w-full justify-center"
+                  data-testid="biometric-unlock-button"
+                >
+                  {t("connect.unlockWithBiometrics")}
+                </Button>
+                {biometricFailed && (
+                  <p role="alert" className="text-[12px] text-red text-center">
+                    {t("connect.biometricFailed")}
+                  </p>
+                )}
+                <p className="text-[11px] text-ink-4 text-center">
+                  {t("connect.biometricFallback")}
+                </p>
+              </div>
+            )}
+
             <Button
               ref={connectButtonRef}
               size="lg"
@@ -109,7 +297,7 @@ export function ConnectScreen() {
               onClick={connectWallet}
               className="w-full justify-center"
             >
-              {isConnecting ? "Connecting…" : "Connect Wallet"}
+              {isConnecting ? t("connecting") : t("connect.button")}
             </Button>
 
             {isConnecting && (
@@ -121,7 +309,7 @@ export function ConnectScreen() {
             {/* Wallet options */}
             <div className="flex flex-col gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 text-center">
-                Supported wallets
+                {t("connect.supportedWallets")}
               </p>
 
               <div className="grid grid-cols-4 gap-2">
@@ -151,9 +339,31 @@ export function ConnectScreen() {
               </div>
             </div>
 
+            {showMobileDeepLinks && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 text-center">
+                  {t("connect.mobileWallets")}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {MOBILE_WALLET_DEEP_LINKS.map((wallet) => (
+                    <Button
+                      key={wallet.name}
+                      variant="secondary"
+                      size="sm"
+                      href={wallet.href}
+                      aria-label={`Open ${wallet.name} app`}
+                      className="w-full justify-center"
+                    >
+                      {wallet.name}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <details className="group rounded-lg border border-line px-4 py-3 open:bg-surface-2">
               <summary className="text-[12px] font-medium text-ink-2 cursor-pointer select-none list-none flex items-center justify-between">
-                New to Stellar?
+                {t("connect.newToStellar")}
                 <span className="text-ink-4 transition-transform group-open:rotate-180">
                   ▾
                 </span>

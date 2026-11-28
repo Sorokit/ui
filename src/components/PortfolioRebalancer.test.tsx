@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSorokit } from "@/context/useSorokit";
 import { getClient } from "@/lib/client";
 
-import { DUST_THRESHOLD_BALANCE, PortfolioRebalancer } from "./PortfolioRebalancer";
+import { DUST_THRESHOLD_BALANCE, fetchPrices,PortfolioRebalancer } from "./PortfolioRebalancer";
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
@@ -257,10 +257,10 @@ describe("PortfolioRebalancer — allocation inputs", () => {
     mockClient();
   });
 
-  it("Equalise button distributes 100% evenly", async () => {
+  it("Distribute Evenly button distributes 100% evenly", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     // With 2 assets, each should be 50%
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -465,10 +465,10 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
     });
   });
 
-  it("Equalise distributes 100% across 5 assets (each ~20%)", async () => {
+  it("Distribute Evenly distributes 100% across 5 assets (each ~20%)", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     const inputs = screen.getAllByRole("spinbutton") as HTMLInputElement[];
     expect(inputs.length).toBe(5);
     const total = inputs.reduce((s, inp) => s + parseFloat(inp.value || "0"), 0);
@@ -477,8 +477,8 @@ describe("PortfolioRebalancer — 5-asset portfolio", () => {
 
   it("shows multiple swap suggestions for a complex rebalance", async () => {
     render(<PortfolioRebalancer />);
-    await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-    fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+    await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+    fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
     fireEvent.click(screen.getByRole("tab", { name: /preview/i }));
     // With 5 assets equalised from an imbalanced state there should be swaps
     await waitFor(() => {
@@ -653,8 +653,8 @@ describe("PortfolioRebalancer — issue #674", () => {
 
       render(<PortfolioRebalancer />);
 
-      await waitFor(() => screen.getByRole("button", { name: /equalise/i }));
-      fireEvent.click(screen.getByRole("button", { name: /equalise/i }));
+      await waitFor(() => screen.getByRole("button", { name: /distribute evenly/i }));
+      fireEvent.click(screen.getByRole("button", { name: /distribute evenly/i }));
 
       // Go to preview and then execute
       fireEvent.click(screen.getByRole("tab", { name: /execute/i }));
@@ -690,4 +690,58 @@ describe("PortfolioRebalancer — issue #674", () => {
     });
   });
 });
+
+// ─── Issue #723: injectable price provider ──────────────────────────────────
+
+describe("PortfolioRebalancer — issue #723", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSorokit({ balances: TWO_BALANCES });
+    mockClient();
+  });
+
+  it("shows the simulated-prices disclaimer when no priceProvider is supplied", async () => {
+    render(<PortfolioRebalancer />);
+    await waitFor(() => {
+      expect(screen.getByText(/prices are simulated/i)).toBeInTheDocument();
+    });
+  });
+
+  it("uses an injected priceProvider instead of STUB_PRICES and hides the disclaimer", async () => {
+    const mockPriceProvider = vi.fn().mockResolvedValue({
+      XLM: 999,
+      USDC: 1.0,
+    });
+
+    render(<PortfolioRebalancer priceProvider={mockPriceProvider} />);
+
+    await waitFor(() => {
+      expect(mockPriceProvider).toHaveBeenCalledWith(expect.arrayContaining(["XLM", "USDC"]));
+    });
+
+    // Disclaimer should NOT show since a real provider was supplied
+    expect(screen.queryByText(/prices are simulated/i)).not.toBeInTheDocument();
+
+    // Portfolio value should reflect the injected price (XLM=999), not the stub (XLM=0.11)
+    await waitFor(() => {
+      expect(screen.getByText(/portfolio value/i)).toBeInTheDocument();
+    });
+  });
+
+  it("fetchPrices() invokes custom priceProvider when supplied without relying on hardcoded values", async () => {
+    const mockProvider = vi.fn().mockResolvedValue({ XLM: 0.25, USDC: 1.02 });
+    const prices = await fetchPrices(["XLM", "USDC"], mockProvider);
+
+    expect(mockProvider).toHaveBeenCalledWith(["XLM", "USDC"]);
+    expect(prices).toEqual({ XLM: 0.25, USDC: 1.02 });
+  });
+
+  it("fetchPrices() falls back to stub prices when no custom priceProvider is given", async () => {
+    const prices = await fetchPrices(["XLM", "USDC"]);
+    expect(prices.XLM).toBe(0.11);
+    expect(prices.USDC).toBe(1.0);
+  });
+});
+
+
 

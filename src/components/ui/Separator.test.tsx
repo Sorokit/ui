@@ -47,4 +47,80 @@ describe("Separator", () => {
     const { container } = render(<Separator className="extra-class" />);
     expect(container.firstElementChild).toHaveClass("extra-class");
   });
+
+  it("exposes aria-orientation=horizontal on the unlabeled divider (#549)", () => {
+    const { container } = render(<Separator />);
+    expect(container.firstElementChild).toHaveAttribute(
+      "aria-orientation",
+      "horizontal",
+    );
+  });
+
+  it("exposes aria-orientation=horizontal on the labelled divider (#549)", () => {
+    const { container } = render(<Separator label="OR" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "separator");
+    expect(root).toHaveAttribute("aria-orientation", "horizontal");
+  });
+
+  it("draws its lines with the semantic line token, never a hex value (#549)", () => {
+    const { container } = render(<Separator label="OR" />);
+    const markup = container.innerHTML;
+
+    expect(markup).toContain("bg-line");
+    expect(markup).not.toMatch(/bg-\[#/);
+    expect(markup).not.toMatch(/#[0-9a-fA-F]{3,8}/);
+  });
+
+  it("exposes data-orientation for both orientations and defaults to horizontal (#1057)", () => {
+    const { container: h } = render(<Separator />);
+    expect(h.firstElementChild).toHaveAttribute("data-orientation", "horizontal");
+
+    const { container: v } = render(<Separator orientation="vertical" />);
+    expect(v.firstElementChild).toHaveAttribute("data-orientation", "vertical");
+    expect(v.firstElementChild).toHaveClass("w-px");
+  });
+
+  // ── Flex-container height collapse (issue #963) ──────────────────────────
+
+  it("applies self-stretch and min-h-full so a vertical separator keeps its height in a stretch flex container", () => {
+    const { container } = render(<Separator orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveClass("self-stretch");
+    expect(root).toHaveClass("min-h-full");
+  });
+
+  // ── Decorative / semantic role (issue #963) ──────────────────────────────
+
+  it("exposes role=separator and aria-orientation by default (non-decorative)", () => {
+    const { container } = render(<Separator orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "separator");
+    expect(root).toHaveAttribute("aria-orientation", "vertical");
+    expect(root).not.toHaveAttribute("aria-hidden");
+  });
+
+  it("hides a decorative horizontal separator from the accessibility tree", () => {
+    const { container } = render(<Separator decorative />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(root).not.toHaveAttribute("aria-orientation");
+  });
+
+  it("hides a decorative vertical separator from the accessibility tree while keeping its layout classes", () => {
+    const { container } = render(<Separator decorative orientation="vertical" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(root).toHaveClass("self-stretch");
+  });
+
+  it("hides a decorative labelled separator from the accessibility tree", () => {
+    const { container } = render(<Separator decorative label="OR" />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root).toHaveAttribute("role", "none");
+    expect(root).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("OR")).toBeInTheDocument();
+  });
 });

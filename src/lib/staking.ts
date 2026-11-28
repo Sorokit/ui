@@ -80,6 +80,10 @@ export interface RewardEvent {
   validatorId: string;
   /** Transaction hash for the payout */
   txHash?: string;
+  /** Historical XLM price in USD at the time of distribution */
+  priceUsd?: number;
+  /** Estimated USD value of the reward at the time of distribution */
+  usdValue?: number;
 }
 
 /** Aggregated daily reward bucket for the history chart */
@@ -154,6 +158,9 @@ export const MIN_DELEGATION_XLM = 1;
 
 /** Number of days shown in the reward history */
 export const REWARD_HISTORY_DAYS = 30;
+
+/** Default baseline XLM price in USD for historical fiat estimation */
+export const DEFAULT_XLM_PRICE_USD = 0.11;
 
 // ─── Pure utility functions ───────────────────────────────────────────────────
 
@@ -255,6 +262,39 @@ export function aggregateDailyRewards(
  */
 export function totalRewardHistoryXlm(history: DailyReward[]): number {
   return history.reduce((s, d) => s + d.totalXlm, 0);
+}
+
+/**
+ * Deterministically estimate the historical XLM price in USD for a given date.
+ * Uses a mild sinusoidal curve around `DEFAULT_XLM_PRICE_USD` when no explicit
+ * price feed is provided.
+ */
+export function estimateHistoricalXlmPriceUsd(dateStr: string): number {
+  const time = new Date(dateStr).getTime();
+  if (Number.isNaN(time)) return DEFAULT_XLM_PRICE_USD;
+  const dayIndex = Math.floor(time / 86_400_000);
+  const variance = Math.sin(dayIndex * 0.45) * 0.015;
+  return Number((DEFAULT_XLM_PRICE_USD + variance).toFixed(4));
+}
+
+/**
+ * Estimate the historical USD value of a reward event at the time of distribution.
+ */
+export function estimateRewardUsdValue(event: RewardEvent): {
+  priceUsd: number;
+  usdValue: number;
+} {
+  const amount = parseFloat(event.amount);
+  const validAmount = Number.isFinite(amount) ? amount : 0;
+  const priceUsd =
+    event.priceUsd != null && Number.isFinite(event.priceUsd)
+      ? event.priceUsd
+      : estimateHistoricalXlmPriceUsd(event.date);
+  const usdValue =
+    event.usdValue != null && Number.isFinite(event.usdValue)
+      ? event.usdValue
+      : Number((validAmount * priceUsd).toFixed(4));
+  return { priceUsd, usdValue };
 }
 
 /**
@@ -470,11 +510,16 @@ export function generateMockRewardHistory(): RewardEvent[] {
       // Simulate small daily variance (±10%)
       const base = amounts[idx];
       const jitter = base * 0.1 * (Math.sin(i * idx + 1) * 0.5 + 0.5);
+      const amount = (base + jitter).toFixed(6);
+      const priceUsd = estimateHistoricalXlmPriceUsd(dateStr);
+      const usdValue = Number((parseFloat(amount) * priceUsd).toFixed(4));
       events.push({
         id: `reward-${dateStr}-${vid}`,
         date: dateStr,
-        amount: (base + jitter).toFixed(6),
+        amount,
         validatorId: vid,
+        priceUsd,
+        usdValue,
       });
     });
   }

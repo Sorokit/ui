@@ -14,6 +14,10 @@ export interface PoolReserves {
   toReserves: number;
 }
 
+/**
+ * Minimum total liquidity required to simulate price impact (#733, #864).
+ * Below this threshold, computation is skipped to avoid Infinity/NaN.
+ */
 export const MINIMUM_LIQUIDITY_THRESHOLD = 1;
 
 export const POOL_RESERVES: Record<string, PoolReserves> = {
@@ -47,6 +51,8 @@ export interface SwapSimulatorProps {
     toAsset: string;
     amountIn: number;
     amountOut: number;
+    /** Lowest output accepted for the trade: `amountOut * (1 - slippage / 100)`. */
+    minAmountOut: number;
     priceImpact: number;
     slippage: number;
     liquiditySize: string;
@@ -70,12 +76,33 @@ export function SwapSimulator({
   const [historyRange, setHistoryRange] = useState<"7d" | "30d">("7d");
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapSuccess, setSwapSuccess] = useState<boolean | null>(null);
+  const [swapError, setSwapError] = useState<string | null>(null);
   const [debouncedAmountInStr, setDebouncedAmountInStr] = useState(amountInStr);
 
   // SVG Chart Hover States
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const historyTooltipId = useId();
   const historyPointRefs = useRef<Array<SVGRectElement | null>>([]);
+
+  // Price-impact chart viewport, measured from its container so the SVG keeps
+  // correct proportions across window resizes and orientation changes.
+  const [impactChartEl, setImpactChartEl] = useState<HTMLDivElement | null>(null);
+  const [impactChartSize, setImpactChartSize] = useState({ width: 100, height: 100 });
+
+  useEffect(() => {
+    if (!impactChartEl || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      setImpactChartSize((prev) =>
+        prev.width === width && prev.height === height ? prev : { width, height },
+      );
+    });
+    observer.observe(impactChartEl);
+    return () => observer.disconnect();
+  }, [impactChartEl]);
 
   useEffect(() => {
     const timerId = window.setTimeout(() => {
@@ -101,10 +128,14 @@ export function SwapSimulator({
     }
   };
 
+  // Inverting the pair keeps the entered amount; the output is re-quoted
+  // against the inverted pool reserves by the memos below.
   const handleFlipAssets = () => {
     const temp = fromAsset;
     setFromAsset(toAsset);
     setToAsset(temp);
+    setSwapSuccess(null);
+    setSwapError(null);
   };
 
   // Convert numbers safely
@@ -181,6 +212,20 @@ export function SwapSimulator({
     return Number.isFinite(impact) ? Math.max(0, impact * 100) : 0;
   }, [hasInsufficientLiquidity, amountIn, executionPrice, spotPrice]);
 
+  // Minimum received under the user's slippage tolerance. The swap is rejected
+  // if the executed output would fall below it.
+  const minReceived = useMemo(() => {
+    if (parsedSlippage === null || hasInsufficientLiquidity) return null;
+    return amountOut * (1 - parsedSlippage / 100);
+  }, [amountOut, parsedSlippage, hasInsufficientLiquidity]);
+
+  // Latest pool state, read when the simulated confirmation lands so the
+  // executed output reflects reserves at execution time, not submission time.
+  const latestPoolRef = useRef({ fromAsset, toAsset, reservesFrom, reservesTo, hasInsufficientLiquidity });
+  useEffect(() => {
+    latestPoolRef.current = { fromAsset, toAsset, reservesFrom, reservesTo, hasInsufficientLiquidity };
+  }, [fromAsset, toAsset, reservesFrom, reservesTo, hasInsufficientLiquidity]);
+
   // USD Values
   const fromPriceUsd = USD_PRICES[fromAsset] || 1.0;
   const toPriceUsd = USD_PRICES[toAsset] || 1.0;
@@ -255,15 +300,36 @@ export function SwapSimulator({
       await connectWallet();
       return;
     }
-    if (amountIn <= 0 || parsedSlippage === null) return;
+    if (amountIn <= 0 || parsedSlippage === null || minReceived === null) return;
 
+    const minAmountOut = minReceived;
     setIsSwapping(true);
     setSwapSuccess(null);
+    setSwapError(null);
 
     // Simulate blockchain confirmation lag
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
+    // Re-quote against the pool as it is now: if reserves moved while the swap
+    // was pending, the executed output may drop below the minimum received.
+    const pool = latestPoolRef.current;
+    const samePair = pool.fromAsset === fromAsset && pool.toAsset === toAsset;
+    const execFrom = samePair ? pool.reservesFrom : reservesFrom;
+    const execTo = samePair ? pool.reservesTo : reservesTo;
+    const executedOut =
+      samePair && pool.hasInsufficientLiquidity
+        ? 0
+        : (execTo * netAmountIn) / (execFrom + netAmountIn);
+
     setIsSwapping(false);
+
+    if (!Number.isFinite(executedOut) || executedOut < minAmountOut) {
+      setSwapError(
+        `Swap reverted: output would be below the minimum received of ${minAmountOut.toFixed(4)} ${toAsset}.`,
+      );
+      return;
+    }
+
     setSwapSuccess(true);
 
     if (onSwap) {
@@ -271,7 +337,8 @@ export function SwapSimulator({
         fromAsset,
         toAsset,
         amountIn,
-        amountOut,
+        amountOut: executedOut,
+        minAmountOut,
         priceImpact,
         slippage: parsedSlippage,
         liquiditySize,
@@ -416,6 +483,14 @@ export function SwapSimulator({
                   )}
                 </div>
                 <div className="flex justify-between items-center text-[12px]">
+                  <span className="text-ink-3">Minimum Received:</span>
+                  <span className="font-semibold text-ink" data-testid="swap-min-received">
+                    {minReceived === null
+                      ? "—"
+                      : `${minReceived.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 7 })} ${toAsset}`}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[12px]">
                   <span className="text-ink-3">Fee (0.3%):</span>
                   <span className="text-ink-2 font-medium">
                     {(amountIn * feeRate).toFixed(4)} {fromAsset}
@@ -497,6 +572,15 @@ export function SwapSimulator({
                     Estimated price impact of {priceImpact.toFixed(2)}% exceeds your slippage tolerance of {parsedSlippage}%. The transaction will likely fail or incur heavy losses.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {swapError && (
+              <div
+                role="alert"
+                className="bg-error-dim border border-error-dim-strong rounded-xl p-3 text-[12px] text-red"
+              >
+                {swapError}
               </div>
             )}
 
@@ -611,12 +695,25 @@ export function SwapSimulator({
                     Insufficient liquidity
                   </div>
                 ) : (
-                  <div className="relative flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px]">
-                  <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                  <div
+                    ref={setImpactChartEl}
+                    className="relative flex-1 bg-surface-2 border border-line-2 rounded-lg p-2 h-[130px]"
+                  >
+                  <svg
+                    className="w-full h-full"
+                    width={impactChartSize.width}
+                    height={impactChartSize.height}
+                    viewBox={`0 0 ${impactChartSize.width} ${impactChartSize.height}`}
+                    preserveAspectRatio="none"
+                    data-testid="price-impact-chart"
+                  >
+                    {/* Curve geometry is plotted on a 0–100 grid and scaled to the
+                        measured viewport; strokes stay crisp at any size. */}
+                    <g transform={`scale(${impactChartSize.width / 100} ${impactChartSize.height / 100})`}>
                     {/* Grid Lines */}
-                    <line x1="0" y1="25" x2="100" y2="25" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" />
-                    <line x1="0" y1="50" x2="100" y2="50" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" />
-                    <line x1="0" y1="75" x2="100" y2="75" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" />
+                    <line x1="0" y1="25" x2="100" y2="25" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" vectorEffect="non-scaling-stroke" />
+                    <line x1="0" y1="50" x2="100" y2="50" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" vectorEffect="non-scaling-stroke" />
+                    <line x1="0" y1="75" x2="100" y2="75" stroke="var(--color-line)" strokeWidth="0.5" strokeDasharray="3" vectorEffect="non-scaling-stroke" />
 
                     {/* Plot Line */}
                     <path
@@ -635,6 +732,7 @@ export function SwapSimulator({
                       fill="none"
                       stroke="var(--color-brand)"
                       strokeWidth="2"
+                      vectorEffect="non-scaling-stroke"
                     />
 
                     {/* Gradient Fill Area */}
@@ -661,51 +759,42 @@ export function SwapSimulator({
                         <stop offset="100%" stopColor="transparent" />
                       </linearGradient>
                     </defs>
+                    </g>
 
-                    {/* Current trade point — follows the debounced curve, not each keystroke */}
-                    {debouncedAmountIn > 0 && (
-                      <circle
-                        cx={(() => {
-                          const maxVal = Math.max(debouncedAmountIn * 2, 500);
-                          return (debouncedAmountIn / maxVal) * 100;
-                        })()}
-                        cy={(() => {
-                          const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
-                          const chartImpact = priceImpactCurvePoints.reduce((nearest, point) =>
-                            Math.abs(point.x - debouncedAmountIn) < Math.abs(nearest.x - debouncedAmountIn)
-                              ? point
-                              : nearest,
-                          ).y;
-                          return 100 - (chartImpact / maxY) * 90;
-                        })()}
-                        r="3.5"
-                        fill="var(--color-brand)"
-                        stroke="var(--color-base)"
-                        strokeWidth="1.5"
-                        className="animate-ping origin-center"
-                      />
-                    )}
-                    {debouncedAmountIn > 0 && (
-                      <circle
-                        cx={(() => {
-                          const maxVal = Math.max(debouncedAmountIn * 2, 500);
-                          return (debouncedAmountIn / maxVal) * 100;
-                        })()}
-                        cy={(() => {
-                          const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
-                          const chartImpact = priceImpactCurvePoints.reduce((nearest, point) =>
-                            Math.abs(point.x - debouncedAmountIn) < Math.abs(nearest.x - debouncedAmountIn)
-                              ? point
-                              : nearest,
-                          ).y;
-                          return 100 - (chartImpact / maxY) * 90;
-                        })()}
-                        r="3.5"
-                        fill="var(--color-brand)"
-                        stroke="var(--color-base)"
-                        strokeWidth="1.5"
-                      />
-                    )}
+                    {/* Current trade point — follows the debounced curve, not each keystroke.
+                        Drawn outside the scaled group so it stays circular. */}
+                    {debouncedAmountIn > 0 && priceImpactCurvePoints.length > 0 && (() => {
+                      const maxVal = Math.max(debouncedAmountIn * 2, 500);
+                      const maxY = Math.max(...priceImpactCurvePoints.map((p) => p.y), 1.0);
+                      const chartImpact = priceImpactCurvePoints.reduce((nearest, point) =>
+                        Math.abs(point.x - debouncedAmountIn) < Math.abs(nearest.x - debouncedAmountIn)
+                          ? point
+                          : nearest,
+                      ).y;
+                      const cx = ((debouncedAmountIn / maxVal) * 100 * impactChartSize.width) / 100;
+                      const cy = ((100 - (chartImpact / maxY) * 90) * impactChartSize.height) / 100;
+                      return (
+                        <>
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r="3.5"
+                            fill="var(--color-brand)"
+                            stroke="var(--color-base)"
+                            strokeWidth="1.5"
+                            className="animate-ping origin-center"
+                          />
+                          <circle
+                            cx={cx}
+                            cy={cy}
+                            r="3.5"
+                            fill="var(--color-brand)"
+                            stroke="var(--color-base)"
+                            strokeWidth="1.5"
+                          />
+                        </>
+                      );
+                    })()}
                   </svg>
                   <div className="absolute bottom-1 right-2 text-[9px] text-ink-3">
                     Size &rarr;

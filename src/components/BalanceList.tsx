@@ -6,12 +6,15 @@ import { Input } from "@/components/ui/Input";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
 import type { Balance } from "@/lib/client";
+import { usePreferences } from "@/lib/preferences";
 import { cn, safeFormat } from "@/lib/utils";
 
 type SortMode = "default" | "balance-desc" | "alpha";
 
 function getAssetCode(balance: Balance) {
-  return balance.assetType === "native" ? "XLM" : balance.assetCode ?? balance.asset;
+  return balance.assetType === "native"
+    ? "XLM"
+    : (balance.assetCode ?? balance.asset);
 }
 
 /**
@@ -109,7 +112,8 @@ const AssetRow = memo(function AssetRow({
       className={cn(
         "flex items-center justify-between px-5 py-4 border-b border-line last:border-0",
         isZeroBalance && "opacity-50",
-        hasClickHandler && "cursor-pointer hover:bg-surface-2 transition-colors",
+        hasClickHandler &&
+          "cursor-pointer hover:bg-surface-2 transition-colors",
       )}
     >
       <AssetBadge balance={b} showIssuerSuffix={showIssuerSuffix} />
@@ -135,11 +139,10 @@ export interface BalanceListProps {
   detailRef?: React.RefObject<HTMLElement | null>;
   /** When true, renders an approximate XLM-equivalent portfolio total in the header. */
   showTotal?: boolean;
-  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a USD-equivalent figure. */
+  /** Price of 1 XLM (e.g. in USD). Used alongside `showTotal` to show a fiat-equivalent figure. */
   xlmPrice?: number;
-  /**
-   * Fiat currency used to format the XLM-equivalent total (issue #665).
-   * Defaults to USD; EUR and GBP are also supported.
+  /** Fiat currency used to format the XLM-equivalent total (issue #665).
+   * Defaults to the display currency chosen in Settings (USD, EUR or GBP).
    */
   currency?: string;
 }
@@ -155,15 +158,19 @@ export function BalanceList({
   detailRef,
   showTotal,
   xlmPrice,
-  currency = "USD",
+  currency,
 }: BalanceListProps) {
+  const preferredCurrency = usePreferences().currency;
+  const displayCurrency = currency ?? preferredCurrency;
   const { balances, isLoadingAccount, isConnected, network } = useSorokit();
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<SortMode>("default");
+  // Issue #665: let users hide zero-balance trustlines.
   const [hideZero, setHideZero] = useState(false);
 
   const isTestnet = network?.name === "testnet";
-  const showFriendbot = isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
+  const showFriendbot =
+    isTestnet && isConnected && !isLoadingAccount && balances.length === 0;
 
   const skeletonCount = balances.length > 0 ? balances.length : 3;
 
@@ -212,7 +219,11 @@ export function BalanceList({
 
   const cycleSort = () => {
     setSortMode((m) =>
-      m === "default" ? "balance-desc" : m === "balance-desc" ? "alpha" : "default",
+      m === "default"
+        ? "balance-desc"
+        : m === "balance-desc"
+          ? "alpha"
+          : "default",
     );
   };
 
@@ -226,7 +237,7 @@ export function BalanceList({
             <p className="text-[11px] text-ink-3 mt-0.5">
               ~{xlmTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })} XLM
               {typeof xlmPrice === "number"
-                ? ` (~${CURRENCY_SYMBOLS[currency] ?? `${currency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
+                ? ` (~${CURRENCY_SYMBOLS[displayCurrency] ?? `${displayCurrency} `}${(xlmTotal * xlmPrice).toLocaleString(undefined, { maximumFractionDigits: 2 })})`
                 : ""}
             </p>
           )}
@@ -234,11 +245,11 @@ export function BalanceList({
         {isConnected && !isLoadingAccount && (
           <div className="flex items-center gap-2">
             <button
-              type="button"
               onClick={() => setHideZero((v) => !v)}
               aria-pressed={hideZero}
               title={hideZero ? "Show zero balances" : "Hide zero balances"}
               className="text-[11px] text-ink-3 hover:text-ink-2 transition-colors px-2 py-1 rounded-md hover:bg-surface-2"
+              type="button"
             >
               {hideZero ? "Show zero" : "Hide zero"}
             </button>

@@ -1,15 +1,34 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode, useEffect, useRef, useState } from "react";
-import { beforeEach,describe, expect, it, vi } from "vitest";
+import { renderToString } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderWithProvider } from "@/__tests__/utils";
+import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
 import { getClient } from "@/lib/client";
+import { createMockClient, MOCK_ADDRESS } from "@/lib/mock-client";
 
 import { SorokitProvider } from "./SorokitProvider";
 import { useSorokit } from "./useSorokit";
 
+const WALLET_GLOBALS = [
+  "freighter",
+  "isFreighter",
+  "xbull",
+  "xBull",
+  "albedo",
+  "lobstr",
+] as const;
+
+const DetectedWalletsProbe = () => {
+  const { detectedWallets } = useSorokit();
+  return (
+    <div data-testid="detected-wallets">{(detectedWallets ?? []).join(",")}</div>
+  );
+};
+
 const TestComponent = () => {
-  const { address, account, balances, connectWallet, disconnectWallet, switchNetwork, refreshAccount, isLoadingAccount, error, errorHistory } = useSorokit();
+  const { address, account, balances, connectWallet, disconnectWallet, switchNetwork, refreshAccount, clearCustomNetworks, customNetworks, isLoadingAccount, isDisconnecting, isHardware, error, walletError, errorHistory } = useSorokit();
 
   return (
     <div>
@@ -17,11 +36,16 @@ const TestComponent = () => {
       <div data-testid="account">{account ? account.sequence : "none"}</div>
       <div data-testid="balances">{balances.length}</div>
       <div data-testid="error">{error || "none"}</div>
+      <div data-testid="walletError">{walletError || "none"}</div>
       <div data-testid="isLoadingAccount">{isLoadingAccount ? "true" : "false"}</div>
+      <div data-testid="isDisconnecting">{isDisconnecting ? "true" : "false"}</div>
+      <div data-testid="isHardware">{isHardware ? "true" : "false"}</div>
       <div data-testid="errorHistoryCount">{errorHistory.length}</div>
+      <div data-testid="customNetworks">{customNetworks?.map((net) => net.name).join(",")}</div>
       <button onClick={() => connectWallet()}>Connect</button>
       <button onClick={() => disconnectWallet()}>Disconnect</button>
       <button onClick={() => switchNetwork("testnet")}>Switch</button>
+      <button onClick={() => clearCustomNetworks?.()}>Reset to Defaults</button>
       <button onClick={() => refreshAccount()}>Refresh</button>
     </div>
   );
@@ -39,6 +63,18 @@ const CallbackRefTestComponent = ({
 }) => {
   const { connectWallet, disconnectWallet, switchNetwork, refreshAccount } = useSorokit();
   onCapture({ connectWallet, disconnectWallet, switchNetwork, refreshAccount });
+  return null;
+};
+
+const ReportErrorCaptureProbe = ({
+  onCapture,
+}: {
+  onCapture: (
+    reportError: NonNullable<ReturnType<typeof useSorokit>["reportError"]>,
+  ) => void;
+}) => {
+  const { reportError } = useSorokit();
+  if (reportError) onCapture(reportError);
   return null;
 };
 
@@ -81,6 +117,59 @@ describe("SorokitProvider", () => {
         switchNetwork: vi.fn().mockResolvedValue({ data: { name: "testnet" }, error: null }),
       },
     } as unknown as ReturnType<typeof getClient>;
+  });
+
+  afterEach(() => {
+    // Wallet globals are set directly on `window`, so a test that injects one
+    // would otherwise leak into the next test's detection snapshot.
+    for (const key of WALLET_GLOBALS) {
+      delete (window as unknown as Record<string, unknown>)[key];
+    }
+  });
+
+  // #845 — the provider is the single source of truth for hardware state. These
+  // cover the contract the button now relies on: isHardware is exposed, it is
+  // set during connectWallet, and it does not outlive the session on disconnect.
+  describe("isHardware (#845)", () => {
+    afterEach(() => {
+      delete (window as unknown as Record<string, unknown>).freighter;
+      delete (window as unknown as Record<string, unknown>).xBull;
+    });
+
+    it("defaults to false before any connection", () => {
+      renderWithProvider(<TestComponent />, { client: mockClient });
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
+
+    it("is set during connectWallet and stays false for a software wallet", async () => {
+      (window as unknown as Record<string, unknown>).freighter = {};
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      // detectWalletName() returns "Freighter" — a software wallet.
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
+
+    it("does not stay true after disconnect (#845)", async () => {
+      (window as unknown as Record<string, unknown>).freighter = {};
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // The flag is derived from the wallet name, so once there is no wallet
+      // there is no hardware state to report.
+      expect(screen.getByTestId("address")).toHaveTextContent("none");
+      expect(screen.getByTestId("isHardware")).toHaveTextContent("false");
+    });
   });
 
   it("disconnectWallet clears address, account, balances, and error", async () => {
@@ -157,6 +246,136 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).toHaveTextContent("Failed to fetch balances");
       expect(screen.getByTestId("account")).toHaveTextContent("100");
     });
+  });
+
+  it("preserves successful account data when only the balances refresh fails", async () => {
+    renderWithProvider(<TestComponent />, { client: mockClient });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+    await waitFor(() => {
+      expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("balances")).toHaveTextContent("1");
+
+    mockClient.account.getAccount = vi.fn().mockResolvedValue({
+      data: { sequence: "101" },
+      error: null,
+    });
+    mockClient.account.getBalances = vi.fn().mockResolvedValue({
+      data: null,
+      error: "Balance refresh failed",
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("error")).toHaveTextContent("Balance refresh failed");
+      expect(screen.getByTestId("account")).toHaveTextContent("101");
+      expect(screen.getByTestId("balances")).toHaveTextContent("1");
+      expect(screen.getByTestId("errorHistoryCount")).toHaveTextContent("1");
+    });
+  });
+
+  it("warns when an unknown error source falls back to the account error slot", async () => {
+    let reportError:
+      | NonNullable<ReturnType<typeof useSorokit>["reportError"]>
+      | undefined;
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      renderWithProvider(
+        <>
+          <TestComponent />
+          <ReportErrorCaptureProbe
+            onCapture={(fn) => {
+              reportError = fn;
+            }}
+          />
+        </>,
+        { client: mockClient },
+      );
+
+      await act(async () => {
+        reportError?.("RPC endpoint unavailable", "rpc");
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        'SorokitProvider: unknown error source "rpc"; defaulting to account error.',
+        "RPC endpoint unavailable",
+      );
+      expect(screen.getByTestId("error")).toHaveTextContent("RPC endpoint unavailable");
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not start a refresh from a callback captured after unmount", async () => {
+    let refreshAccount: (() => Promise<void>) | undefined;
+    const { unmount } = renderWithProvider(
+      <>
+        <TestComponent />
+        <CallbackRefTestComponent
+          onCapture={({ refreshAccount: captured }) => {
+            refreshAccount = captured as () => Promise<void>;
+          }}
+        />
+      </>,
+      { client: mockClient },
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+
+    const getAccountSpy = vi.fn();
+    mockClient.account.getAccount = getAccountSpy;
+    unmount();
+
+    await act(async () => {
+      await refreshAccount?.();
+    });
+
+    expect(getAccountSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not report an error when an in-flight refresh rejects after unmount", async () => {
+    let rejectAccount: ((reason?: unknown) => void) | undefined;
+    const onError = vi.fn();
+    const { unmount } = renderWithProvider(<TestComponent />, {
+      client: mockClient,
+      onError,
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("Connect"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("false");
+    });
+
+    mockClient.account.getAccount = vi.fn(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectAccount = reject;
+        }),
+    );
+    act(() => {
+      fireEvent.click(screen.getByText("Refresh"));
+    });
+    expect(screen.getByTestId("isLoadingAccount")).toHaveTextContent("true");
+
+    unmount();
+    await act(async () => {
+      rejectAccount?.(new Error("late failure"));
+    });
+
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("clears error from previous session on reconnect", async () => {
@@ -324,6 +543,27 @@ describe("SorokitProvider", () => {
 
     beforeEach(() => {
       window.localStorage.clear();
+    });
+
+    it("removes persisted custom networks when resetting to defaults", () => {
+      window.localStorage.setItem(
+        "sorokit_custom_networks",
+        JSON.stringify([
+          {
+            name: "Local Dev",
+            rpcUrl: "https://rpc.example.com",
+            horizonUrl: "https://horizon.example.com",
+            passphrase: "Local Dev Network",
+          },
+        ]),
+      );
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      expect(screen.getByTestId("customNetworks")).toHaveTextContent("Local Dev");
+      fireEvent.click(screen.getByText("Reset to Defaults"));
+
+      expect(window.localStorage.getItem("sorokit_custom_networks")).toBeNull();
+      expect(screen.getByTestId("customNetworks")).toBeEmptyDOMElement();
     });
 
     it("persists the selected network across reloads", async () => {
@@ -912,6 +1152,92 @@ describe("SorokitProvider", () => {
       );
     });
 
+    // #720 — regression test. `disconnectWallet()` resets `walletError` to null
+    // and only then reports the failure (SorokitProvider.tsx:268-274). The
+    // existing tests above assert the error survives, but none of them assert it
+    // is still present *after* `isDisconnecting` flips back to false — which is
+    // the window in which a consumer's `clearError()` (run off the
+    // `isDisconnecting` toggle) would wipe it. This pins the ordering so a
+    // future refactor that moves the report before the reset, or into the
+    // `finally` block, fails loudly.
+    it("keeps the disconnect error visible after isDisconnecting returns to false (#720)", async () => {
+      mockClient.wallet.disconnect = vi
+        .fn()
+        .mockRejectedValue(new Error("Wallet extension unavailable"));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      });
+
+      // Start from a clean slate so a passing assertion below can only come
+      // from this failure, not from a leftover connect error.
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // The in-flight flag has settled...
+      expect(screen.getByTestId("isDisconnecting")).toHaveTextContent("false");
+
+      // ...and the error is still readable through the merged `error` a
+      // consumer renders, not only on the wallet-specific slot.
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent(
+          "Wallet extension unavailable",
+        );
+      });
+      expect(screen.getByTestId("error")).not.toHaveTextContent("none");
+      expect(screen.getByTestId("walletError")).toHaveTextContent(
+        "Wallet extension unavailable",
+      );
+    });
+
+    // #852 — regression test. A throwing disconnect() adapter must leave context.error
+    // non-null, populate walletError with the exception message, and settle isDisconnecting to false.
+    it("asserts disconnect error is visible after isDisconnecting resets (#852)", async () => {
+      const disconnectErrorMessage = "Wallet adapter disconnected with error";
+      mockClient.wallet.disconnect = vi
+        .fn()
+        .mockRejectedValue(new Error(disconnectErrorMessage));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("address")).toHaveTextContent("GABC");
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      // isDisconnecting is false after failure
+      expect(screen.getByTestId("isDisconnecting")).toHaveTextContent("false");
+
+      // context.error is non-null and contains the error message
+      await waitFor(() => {
+        expect(screen.getByTestId("error")).toHaveTextContent(
+          disconnectErrorMessage,
+        );
+      });
+      expect(screen.getByTestId("error")).not.toHaveTextContent("none");
+
+      // Error string from the exception is in walletError
+      expect(screen.getByTestId("walletError")).toHaveTextContent(
+        disconnectErrorMessage,
+      );
+    });
+
     it("points getClient() at the provider's client on mount", async () => {
       await act(async () => {
         renderWithProvider(<TestComponent />, { client: mockClient });
@@ -998,6 +1324,109 @@ describe("SorokitProvider", () => {
       expect(capturedClient).toBe(switchedClient);
     });
 
+    it("cancels registered polling watchers on switchNetwork and across consecutive network switches (#847)", async () => {
+      const cancel1 = vi.fn();
+      const cancel2 = vi.fn();
+
+      const WatcherComponent = () => {
+        const { registerWatcher, switchNetwork } = useSorokit();
+        useEffect(() => {
+          const deregister1 = registerWatcher?.(cancel1);
+          const deregister2 = registerWatcher?.(cancel2);
+          return () => {
+            deregister1?.();
+            deregister2?.();
+          };
+        }, [registerWatcher]);
+
+        return (
+          <div>
+            <button onClick={() => switchNetwork("testnet")}>Switch 1</button>
+            <button onClick={() => switchNetwork("public")}>Switch 2</button>
+          </div>
+        );
+      };
+
+      await act(async () => {
+        render(
+          <SorokitProvider client={mockClient}>
+            <WatcherComponent />
+          </SorokitProvider>,
+        );
+      });
+
+      expect(cancel1).not.toHaveBeenCalled();
+      expect(cancel2).not.toHaveBeenCalled();
+
+      // First network switch
+      await act(async () => {
+        fireEvent.click(screen.getByText("Switch 1"));
+      });
+
+      expect(cancel1).toHaveBeenCalledTimes(1);
+      expect(cancel2).toHaveBeenCalledTimes(1);
+
+      // Second network switch — watchers must still be called so polling doesn't survive
+      await act(async () => {
+        fireEvent.click(screen.getByText("Switch 2"));
+      });
+
+      expect(cancel1).toHaveBeenCalledTimes(2);
+      expect(cancel2).toHaveBeenCalledTimes(2);
+    });
+
+    it("deregisters watcher cancel callback on unmount (#847)", async () => {
+      const cancel = vi.fn();
+
+      const WatcherComponent = () => {
+        const { registerWatcher } = useSorokit();
+        useEffect(() => {
+          const deregister = registerWatcher?.(cancel);
+          return () => {
+            deregister?.();
+          };
+        }, [registerWatcher]);
+        return null;
+      };
+
+      const Harness = () => {
+        const [mounted, setMounted] = useState(true);
+        const { resetTransactionWatchers } = useSorokit();
+        return (
+          <div>
+            {mounted && <WatcherComponent />}
+            <button onClick={() => setMounted(false)}>Unmount</button>
+            <button onClick={() => resetTransactionWatchers?.()}>Reset</button>
+          </div>
+        );
+      };
+
+      await act(async () => {
+        render(
+          <SorokitProvider client={mockClient}>
+            <Harness />
+          </SorokitProvider>,
+        );
+      });
+
+      // Reset while mounted calls cancel
+      await act(async () => {
+        fireEvent.click(screen.getByText("Reset"));
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+
+      // Unmount watcher
+      await act(async () => {
+        fireEvent.click(screen.getByText("Unmount"));
+      });
+
+      // Reset after unmount does NOT call cancel again
+      await act(async () => {
+        fireEvent.click(screen.getByText("Reset"));
+      });
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
+
     it("fires onNetworkChange with the new network after a successful switch", async () => {
       const onNetworkChange = vi.fn();
 
@@ -1047,6 +1476,533 @@ describe("SorokitProvider", () => {
       expect(screen.getByTestId("error")).toHaveTextContent(
         "Invalid network: nope",
       );
+    });
+
+    it("reports an error and rejects when adding a custom network with a built-in name", async () => {
+      const onError = vi.fn();
+      const TestComponent = () => {
+        const { addCustomNetwork, error } = useSorokit();
+        return (
+          <div>
+            <button
+              onClick={() =>
+                addCustomNetwork?.({
+                  name: "testnet",
+                  rpcUrl: "http://localhost:8000",
+                  passphrase: "test",
+                  horizonUrl: "http://localhost:8000",
+                  status: "online",
+                }).catch(() => {})
+              }
+            >
+              Add Custom
+            </button>
+            <div data-testid="error">{error}</div>
+          </div>
+        );
+      };
+
+      await act(async () => {
+        render(
+          <SorokitProvider client={mockClient} onError={onError}>
+            <TestComponent />
+          </SorokitProvider>,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Add Custom"));
+      });
+
+      expect(onError).toHaveBeenCalledWith(
+        'Cannot add custom network with built-in name "testnet".',
+        "network",
+      );
+      expect(screen.getByTestId("error")).toHaveTextContent(
+        'Cannot add custom network with built-in name "testnet".',
+      );
+    });
+  });
+
+  describe("SSR safety (#724)", () => {
+    it("renders without throwing when window is unavailable (SSR/Node.js)", () => {
+      vi.stubGlobal("window", undefined);
+      try {
+        expect(() =>
+          renderToString(
+            <SorokitProvider client={mockClient}>
+              <div>ssr-child</div>
+            </SorokitProvider>,
+          ),
+        ).not.toThrow();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("initializes customNetworks to [] when window is unavailable", () => {
+      const Probe = () => {
+        const { customNetworks } = useSorokit();
+        return <div data-testid="count">{customNetworks.length}</div>;
+      };
+
+      vi.stubGlobal("window", undefined);
+      let html: string;
+      try {
+        html = renderToString(
+          <SorokitProvider client={mockClient}>
+            <Probe />
+          </SorokitProvider>,
+        );
+      } finally {
+        vi.unstubAllGlobals();
+      }
+
+      expect(html).toContain("0");
+    });
+  });
+
+  describe("errorHistory and clearError (#766)", () => {
+    const ErrorHistoryComponent = () => {
+      const {
+        connectWallet,
+        disconnectWallet,
+        clearError,
+        error,
+        errorHistory,
+      } = useSorokit();
+
+      return (
+        <div>
+          <div data-testid="error">{error || "none"}</div>
+          <div data-testid="errorHistory">{JSON.stringify(errorHistory)}</div>
+          <button onClick={() => connectWallet()}>Connect</button>
+          <button onClick={() => disconnectWallet()}>Disconnect</button>
+          <button onClick={() => clearError()}>Clear Error</button>
+        </div>
+      );
+    };
+
+    it("accumulates multiple sequential errors in errorHistory in order", async () => {
+      mockClient.wallet.connect = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: "First wallet error" })
+        .mockResolvedValueOnce({ data: null, error: "Second wallet error" });
+
+      renderWithProvider(<ErrorHistoryComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent(
+        JSON.stringify(["First wallet error"]),
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent(
+        JSON.stringify(["First wallet error", "Second wallet error"]),
+      );
+    });
+
+    it("disconnectWallet resets errorHistory to []", async () => {
+      mockClient.wallet.connect = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: "Connection error" });
+
+      renderWithProvider(<ErrorHistoryComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent(
+        JSON.stringify(["Connection error"]),
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Disconnect"));
+      });
+
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent("[]");
+    });
+
+    it("clearError does not reset errorHistory", async () => {
+      mockClient.wallet.connect = vi
+        .fn()
+        .mockResolvedValueOnce({ data: null, error: "Some error" });
+
+      renderWithProvider(<ErrorHistoryComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("Some error");
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent(
+        JSON.stringify(["Some error"]),
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Clear Error"));
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+      expect(screen.getByTestId("errorHistory")).toHaveTextContent(
+        JSON.stringify(["Some error"]),
+      );
+    });
+  });
+
+  describe("delayed wallet-extension detection (#954)", () => {
+    it("detects an extension already injected before mount", () => {
+      (window as unknown as Record<string, unknown>).lobstr = {};
+
+      renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
+
+      expect(screen.getByTestId("detected-wallets")).toHaveTextContent("lobstr");
+    });
+
+    it("detects an extension injected after mount when it fires stellar#initialized", async () => {
+      renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
+      expect(screen.getByTestId("detected-wallets")).toHaveTextContent("");
+
+      await act(async () => {
+        (window as unknown as Record<string, unknown>).freighter = {};
+        window.dispatchEvent(new Event("stellar#initialized"));
+      });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("detected-wallets")).toHaveTextContent(
+          "freighter",
+        ),
+      );
+    });
+
+    it("polls briefly for an extension that injects without firing an event", async () => {
+      vi.useFakeTimers();
+      renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
+      expect(screen.getByTestId("detected-wallets")).toHaveTextContent("");
+
+      await act(async () => {
+        (window as unknown as Record<string, unknown>).albedo = {};
+        vi.advanceTimersByTime(200);
+      });
+
+      expect(screen.getByTestId("detected-wallets")).toHaveTextContent("albedo");
+    });
+
+    it("stops polling once the detection window elapses", async () => {
+      vi.useFakeTimers();
+      const setSpy = vi.spyOn(window, "setInterval");
+      try {
+        renderWithProvider(<DetectedWalletsProbe />, { client: mockClient });
+
+        expect(setSpy).toHaveBeenCalled();
+
+        await act(async () => {
+          vi.advanceTimersByTime(200 * 12);
+        });
+
+        // Injecting after the poll window is up is not detected without an event.
+        await act(async () => {
+          (window as unknown as Record<string, unknown>).xbull = {};
+          vi.advanceTimersByTime(200 * 12);
+        });
+
+        expect(screen.getByTestId("detected-wallets")).toHaveTextContent("");
+      } finally {
+        setSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("network switch cancellation (#954)", () => {
+    it("cancels in-flight account requests on a switch without surfacing an error", async () => {
+      let rejectBalances: ((reason?: unknown) => void) | undefined;
+      mockClient.account.getAccount = vi.fn(() => new Promise(() => {}));
+      mockClient.account.getBalances = vi.fn(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectBalances = reject;
+          }),
+      );
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      // Make sure the account query actually started before the switch lands.
+      await waitFor(() =>
+        expect(mockClient.account.getBalances).toHaveBeenCalled(),
+      );
+
+      // A switch lands while the account query is still in flight.
+      await act(async () => {
+        fireEvent.click(screen.getByText("Switch"));
+      });
+      expect(mockClient.network.switchNetwork).toHaveBeenCalled();
+
+      // Reject the superseded requests; the provider must swallow these rather
+      // than let them become unhandled promise rejections.
+      await act(async () => {
+        rejectBalances?.(new Error("aborted"));
+      });
+
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+      expect(screen.getByTestId("address")).toHaveTextContent("none");
+    });
+
+    it("surfaces a genuine rejection for the current query", async () => {
+      mockClient.account.getAccount = vi
+        .fn()
+        .mockRejectedValue(new Error("rpc unavailable"));
+
+      renderWithProvider(<TestComponent />, { client: mockClient });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("error")).toHaveTextContent("rpc unavailable"),
+      );
+    });
+  });
+
+  describe("headless mock client injection (#954)", () => {
+    it("uses an injected mock client when no wallet extension is present", async () => {
+      const client = createMockClient();
+
+      await act(async () => {
+        renderWithProvider(<TestComponent />, { client });
+      });
+
+      expect(getClient()).toBe(client);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Connect"));
+      });
+
+      await waitFor(() =>
+        expect(screen.getByTestId("address")).toHaveTextContent(MOCK_ADDRESS),
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("account")).toHaveTextContent("123456789"),
+      );
+      expect(screen.getByTestId("balances")).toHaveTextContent("1");
+      expect(screen.getByTestId("error")).toHaveTextContent("none");
+    });
+
+    it("re-points an injected mock client factory at the new network on switch", async () => {
+      const headlessClient = createMockClient();
+      const switchedClient = createMockClient();
+      const createClientForNetwork = vi.fn().mockReturnValue(switchedClient);
+
+      await act(async () => {
+        render(
+          <SorokitProvider
+            client={headlessClient}
+            createClientForNetwork={createClientForNetwork}
+          >
+            <TestComponent />
+          </SorokitProvider>,
+        );
+      });
+
+      expect(getClient()).toBe(headlessClient);
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Switch"));
+      });
+
+      expect(createClientForNetwork).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "testnet" }),
+      );
+      expect(getClient()).toBe(switchedClient);
+    });
+  });
+
+  describe("initial network status validation (#1105)", () => {
+    const StatusProbe = () => {
+      const { network, networkStatus, networkStatusWarning, error } =
+        useSorokit();
+      return (
+        <div>
+          <div data-testid="network">{network?.name ?? "none"}</div>
+          <div data-testid="network-status">{networkStatus ?? "none"}</div>
+          <div data-testid="network-warning">
+            {networkStatusWarning ?? "none"}
+          </div>
+          <div data-testid="error">{error ?? "none"}</div>
+        </div>
+      );
+    };
+
+    const networkClient = (status?: string) =>
+      ({
+        ...mockClient,
+        network: {
+          getNetwork: vi
+            .fn()
+            .mockResolvedValue({
+              data: { name: "mainnet", status },
+              error: null,
+            }),
+          switchNetwork: vi.fn().mockImplementation(async (param) => ({
+            data: {
+              name: typeof param === "string" ? param : param.name,
+              status: "online",
+            },
+            error: null,
+          })),
+        },
+      }) as unknown as ReturnType<typeof getClient>;
+
+    beforeEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("does not warn when the network status is online", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("online"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent("online");
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("warns when the initial network is degraded", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("degraded"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "degraded",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent(
+        /degraded/i,
+      );
+      expect(screen.getByTestId("error")).toHaveTextContent(/degraded/i);
+      expect(onError).toHaveBeenCalledWith(
+        expect.stringMatching(/degraded/i),
+        "network",
+      );
+    });
+
+    it("warns when the initial network is offline", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient("offline"),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "offline",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent(/offline/i);
+      expect(onError).toHaveBeenCalledWith(
+        expect.stringMatching(/offline/i),
+        "network",
+      );
+    });
+
+    it("does not warn when the network reports no status", async () => {
+      const onError = vi.fn();
+      renderWithProvider(<StatusProbe />, {
+        client: networkClient(undefined),
+        onError,
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status")).toHaveTextContent(
+          "unknown",
+        );
+      });
+      expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+      expect(onError).not.toHaveBeenCalled();
+    });
+
+    it("shows a banner warning with switch options for a degraded network", async () => {
+      const client = networkClient("degraded");
+      renderWithProvider(
+        <>
+          <StatusProbe />
+          <NetworkStatusBanner />
+        </>,
+        { client },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-status-banner")).toBeInTheDocument();
+      });
+      expect(screen.getByTestId("network-status-banner")).toHaveAttribute(
+        "data-status",
+        "degraded",
+      );
+      expect(screen.getByRole("alert")).toHaveTextContent(/degraded/i);
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Switch to Testnet" }),
+        );
+      });
+
+      expect(client.network.switchNetwork).toHaveBeenCalledWith("testnet");
+      await waitFor(() => {
+        expect(screen.getByTestId("network")).toHaveTextContent("testnet");
+        expect(
+          screen.queryByTestId("network-status-banner"),
+        ).not.toBeInTheDocument();
+      });
+    });
+
+    it("clears the init warning after switching to an online network", async () => {
+      const client = networkClient("offline");
+      renderWithProvider(
+        <>
+          <StatusProbe />
+          <NetworkStatusBanner />
+        </>,
+        { client },
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("network-warning")).toHaveTextContent(
+          /offline/i,
+        );
+      });
+
+      await act(async () => {
+        fireEvent.click(
+          screen.getByRole("button", { name: "Switch to Testnet" }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(client.network.switchNetwork).toHaveBeenCalledWith("testnet");
+        expect(screen.getByTestId("network-warning")).toHaveTextContent("none");
+        expect(
+          screen.queryByTestId("network-status-banner"),
+        ).not.toBeInTheDocument();
+      });
     });
   });
 
@@ -1200,3 +2156,4 @@ describe("SorokitProvider", () => {
     });
   });
 });
+

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/home/edohwares/Desktop/Room/drips/ui/setup_git.py", line 23, in <module>
+    subprocess.run(['git', 'checkout', '-b', 'fix/swap-execution-tracker-923'],
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                   capture_output=True, stderr=subprocess.DEVNULL)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib64/python3.13/subprocess.py", line 551, in run
+    raise ValueError('stdout and stderr arguments may not be used '
+                     'with capture_output.')
+ValueError: stdout and stderr arguments may not be used with capture_output.

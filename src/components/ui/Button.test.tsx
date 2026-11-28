@@ -35,6 +35,15 @@ describe("Button component", () => {
       const button = screen.getByRole("button", { name: /destructive/i });
       expect(button).toHaveClass("bg-error-dim", "text-red");
     });
+
+    it("supports the outline variant", () => {
+      render(<Button variant="outline">Outline</Button>);
+      expect(screen.getByRole("button", { name: "Outline" })).toHaveClass(
+        "bg-transparent",
+        "text-ink",
+        "border",
+      );
+    });
   });
 
   describe("sizes", () => {
@@ -58,10 +67,12 @@ describe("Button component", () => {
   });
 
   describe("loading state", () => {
-    it("shows a spinner element and aria-busy when loading={true}", () => {
+    it("shows a spinner element, aria-busy, and announces loading via aria-label when loading={true}", () => {
       render(<Button loading>Submit</Button>);
-      const button = screen.getByRole("button");
+      const button = screen.getByRole("button", { name: "Loading" });
       expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button).toHaveAttribute("aria-label", "Loading");
+      expect(button).toHaveAttribute("aria-disabled", "true");
       expect(button).toBeDisabled();
       expect(screen.getByText("Loading")).toBeInTheDocument();
       // Spinner span has animate-spin class
@@ -75,6 +86,55 @@ describe("Button component", () => {
       expect(screen.getByText("Loading")).toBeInTheDocument();
     });
 
+    it("preserves custom aria-label when loading={true}", () => {
+      render(
+        <Button loading aria-label="Saving changes">
+          Save
+        </Button>,
+      );
+      const button = screen.getByRole("button", { name: "Saving changes" });
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button).toHaveAttribute("aria-label", "Saving changes");
+    });
+
+    it("sets aria-busy='false' when loading={false}", () => {
+      render(<Button loading={false}>Submit</Button>);
+      const button = screen.getByRole("button", { name: "Submit" });
+      expect(button).toHaveAttribute("aria-busy", "false");
+      expect(button).not.toHaveAttribute("aria-label");
+    });
+
+    it("omits aria-busy and aria-label when loading is undefined", () => {
+      render(<Button>Submit</Button>);
+      const button = screen.getByRole("button", { name: "Submit" });
+      expect(button).not.toHaveAttribute("aria-busy");
+      expect(button).not.toHaveAttribute("aria-label");
+    });
+
+    it("applies aria-busy and aria-label to links with loading={true}", () => {
+      const { container } = render(
+        <Button href="https://stellar.org" loading>
+          Docs Link
+        </Button>,
+      );
+      const link = container.querySelector("a");
+      expect(link).toHaveAttribute("aria-busy", "true");
+      expect(link).toHaveAttribute("aria-label", "Loading");
+      expect(link).toHaveAttribute("aria-disabled", "true");
+    });
+
+    it("applies aria-busy and aria-label to slotted elements with asChild and loading={true}", () => {
+      render(
+        <Button asChild loading>
+          <a href="#custom">Custom</a>
+        </Button>,
+      );
+      const slotted = screen.getByRole("link", { name: "Loading" });
+      expect(slotted).toHaveAttribute("aria-busy", "true");
+      expect(slotted).toHaveAttribute("aria-label", "Loading");
+      expect(slotted).toHaveAttribute("aria-disabled", "true");
+    });
+
     it("prevents onClick firing when loading={true}", async () => {
       const handleClick = vi.fn();
       render(
@@ -84,6 +144,35 @@ describe("Button component", () => {
       );
       const button = screen.getByRole("button");
       await userEvent.click(button);
+      expect(handleClick).not.toHaveBeenCalled();
+    });
+
+    it("blocks Enter and Space keyboard activation while loading", () => {
+      const handleClick = vi.fn();
+      const handleKeyDown = vi.fn();
+      render(
+        <Button
+          loading
+          size="sm"
+          variant="outline"
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+          aria-label="Loading save"
+        >
+          Save
+        </Button>,
+      );
+      const button = screen.getByRole("button", { name: "Loading save" });
+
+      expect(button).toBeDisabled();
+      expect(button).toHaveAttribute("aria-disabled", "true");
+      expect(button).toHaveAttribute("aria-busy", "true");
+      expect(button).toHaveClass("h-8", "px-3.5", "border", "bg-transparent");
+
+      button.focus();
+      expect(fireEvent.keyDown(button, { key: "Enter" })).toBe(false);
+      expect(fireEvent.keyDown(button, { key: " " })).toBe(false);
+      expect(handleKeyDown).not.toHaveBeenCalled();
       expect(handleClick).not.toHaveBeenCalled();
     });
   });

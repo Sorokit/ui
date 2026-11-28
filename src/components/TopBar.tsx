@@ -1,25 +1,88 @@
 import { Cancel01Icon,Menu01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Bell, Moon, Sun, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { NetworkSwitcher } from "@/components/NetworkSwitcher";
+import { NotificationHistory } from "@/components/NotificationHistory";
 import type { NavSection } from "@/components/Sidebar";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { useOptionalToast } from "@/context/ToastContext";
 import { useSorokit } from "@/context/useSorokit";
+import { type PendingActionItem,usePendingActions } from "@/hooks/usePendingActions";
 import { SCREEN_LABELS } from "@/lib/nav-labels";
 
 const LABELS = SCREEN_LABELS;
+
+export interface TopBarProps {
+  active: NavSection;
+  onMenuToggle: () => void;
+  sidebarOpen?: boolean;
+  onNavigate?: (section: NavSection) => void;
+  pendingActions?: PendingActionItem[];
+}
 
 export function TopBar({
   active,
   onMenuToggle,
   sidebarOpen,
-}: {
-  active: NavSection;
-  onMenuToggle: () => void;
-  sidebarOpen?: boolean;
-}) {
+  onNavigate,
+  pendingActions: propPendingActions,
+}: TopBarProps) {
   const { error, clearError } = useSorokit();
+  const toastContext = useOptionalToast();
+  const notifications = toastContext?.history ?? [];
+  const unreadCount = toastContext?.unreadHistoryCount ?? 0;
+  const recordNotification = toastContext?.recordNotification;
+  const lastRecordedError = useRef<string | null>(null);
+  const { pendingActions: hookPendingActions } = usePendingActions();
+  const activePendingActions = propPendingActions ?? hookPendingActions;
+  const totalBadgeCount = activePendingActions.length + unreadCount;
   const { title, sub } = LABELS[active];
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const isFirstRender = useRef(true);
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    const storedTheme = localStorage.getItem("sorokit-theme");
+    if (storedTheme === "light" || storedTheme === "dark") return storedTheme;
+    return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  });
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("sorokit-theme", theme);
+  }, [theme]);
+
+  // Banner errors have no toast, so copy them into the notification history.
+  useEffect(() => {
+    if (error && error !== lastRecordedError.current) {
+      recordNotification?.({ type: "error", title: error });
+    }
+    lastRecordedError.current = error;
+  }, [error, recordNotification]);
+
+  const toggleTheme = () => {
+    setTheme((current) => (current === "dark" ? "light" : "dark"));
+  };
+
+  const openNotifications = () => {
+    toastContext?.markAllRead();
+    setNotificationsOpen(true);
+  };
+
+  // Move focus to the heading when the active section changes so screen
+  // readers announce the new context. Focus is used instead of an aria-live
+  // region to avoid announcing the change twice. Skipped on first render so
+  // mounting the dashboard doesn't steal focus.
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    headingRef.current?.focus({ preventScroll: true });
+  }, [active]);
 
   return (
     <div className="shrink-0">
@@ -46,7 +109,7 @@ export function TopBar({
         </div>
       )}
       <header className="flex items-center justify-between px-4 sm:px-6 h-auto min-h-[60px] border-b border-line bg-surface shrink-0">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <button
             onClick={onMenuToggle}
             className="lg:hidden flex items-center justify-center w-8 h-8 rounded-md hover:bg-surface-2 transition-colors text-ink-2"
@@ -61,10 +124,22 @@ export function TopBar({
               strokeWidth={1.5}
             />
           </button>
-          <div>
-            <h1 className="text-[15px] font-semibold text-ink leading-none">
-              {title}
-            </h1>
+          <div className="min-w-0">
+            <Tooltip content={title}>
+              <div
+                tabIndex={0}
+                title={title}
+                className="max-w-[55vw] truncate outline-none focus-visible:ring-1 focus-visible:ring-brand sm:max-w-[420px]"
+              >
+                <h1
+                  ref={headingRef}
+                  tabIndex={-1}
+                  className="truncate text-[15px] font-semibold text-ink leading-none"
+                >
+                  {title}
+                </h1>
+              </div>
+            </Tooltip>
             <p className="text-[11px] text-ink-3 mt-0.5 hidden sm:block">
               {sub}
             </p>
@@ -73,6 +148,111 @@ export function TopBar({
         <div className="flex items-center gap-2.5">
           <NetworkSwitcher />
           <WalletConnectButton />
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <Dialog.Root open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+            <Dialog.Trigger asChild>
+              <button
+                type="button"
+                onClick={openNotifications}
+                aria-label={totalBadgeCount ? `Notifications, ${totalBadgeCount} unread` : "Notifications"}
+                title="Notifications"
+                data-testid="notifications-bell"
+                className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                <Bell size={16} />
+                {totalBadgeCount > 0 && (
+                  <span
+                    aria-hidden="true"
+                    data-testid="notifications-badge"
+                    className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red px-1 text-[9px] font-semibold leading-none text-white"
+                  >
+                    {totalBadgeCount > 99 ? "99+" : totalBadgeCount}
+                  </span>
+                )}
+              </button>
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
+              <Dialog.Content className="fixed right-4 top-[68px] z-50 w-[min(380px,calc(100vw-2rem))] rounded-md border border-line bg-surface p-4 text-ink shadow-xl">
+                <div className="flex items-center justify-between gap-3 border-b border-line pb-3">
+                  <Dialog.Title className="text-sm font-semibold">Notifications</Dialog.Title>
+                  <Dialog.Close asChild>
+                    <button
+                      type="button"
+                      aria-label="Close notifications"
+                      className="flex h-7 w-7 items-center justify-center rounded text-ink-3 hover:bg-surface-2 hover:text-ink"
+                    >
+                      <X size={15} />
+                    </button>
+                  </Dialog.Close>
+                </div>
+
+                <div className="max-h-[65vh] overflow-y-auto divide-y divide-line">
+                  {/* Pending Actions section (#1144) */}
+                  <div className="py-3 first:pt-2" data-testid="pending-actions-section">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-3">
+                        Pending Actions ({activePendingActions.length})
+                      </span>
+                    </div>
+                    {activePendingActions.length > 0 ? (
+                      <ul className="flex flex-col gap-1.5" data-testid="pending-actions-list">
+                        {activePendingActions.map((action) => (
+                          <li key={action.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onNavigate?.(action.targetScreen);
+                                setNotificationsOpen(false);
+                              }}
+                              className="w-full text-left p-2.5 rounded-lg border border-line bg-surface-2 hover:bg-surface-3 transition-colors flex items-start justify-between gap-2 cursor-pointer group"
+                              data-testid={`pending-action-item-${action.id}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[13px] font-medium text-ink group-hover:text-brand">
+                                    {action.title}
+                                  </span>
+                                  {action.count !== undefined && (
+                                    <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-brand-dim text-brand">
+                                      {action.count}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-ink-3 mt-0.5 truncate">
+                                  {action.description}
+                                </p>
+                              </div>
+                              <span className="text-[11px] font-medium text-brand shrink-0 mt-0.5">
+                                View →
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[12px] text-ink-3 py-1">No pending actions</p>
+                    )}
+                  </div>
+
+                  {/* Toast/Recent Notifications section */}
+                  <NotificationHistory
+                    notifications={notifications}
+                    onDismiss={(id) => toastContext?.dismissNotification(id)}
+                    onClear={() => toastContext?.clearNotifications()}
+                  />
+                </div>
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
         </div>
       </header>
     </div>

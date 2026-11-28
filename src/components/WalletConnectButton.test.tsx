@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSorokit } from "@/context/useSorokit";
@@ -10,6 +10,16 @@ import { WalletConnectButton } from "./WalletConnectButton";
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
+
+function getWalletButton(name: RegExp | string) {
+  const container =
+    screen.queryByRole("radiogroup", { name: /available wallets/i }) ??
+    screen.getByRole("grid", { name: /available wallets/i });
+  return (
+    within(container).queryByRole("radio", { name }) ??
+    within(container).getByRole("button", { name })
+  );
+}
 
 describe("WalletConnectButton", () => {
   const mockConnect = vi.fn();
@@ -27,6 +37,7 @@ describe("WalletConnectButton", () => {
       get client() { return getClient(); },
       address: null,
       walletName: null,
+      isHardware: false,
       isConnected: false,
       isConnecting: false,
       isLoading: false,
@@ -100,7 +111,7 @@ describe("WalletConnectButton", () => {
         ).toBeInTheDocument(),
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Freighter" }));
+      fireEvent.click(getWalletButton(/Freighter/i));
       expect(mockConnect).toHaveBeenCalledTimes(1);
     });
   });
@@ -184,7 +195,7 @@ describe("WalletConnectButton", () => {
       expect(statusDot).toBeInTheDocument();
     });
 
-    it("calls onOpenModal when address pill is clicked and the prop is provided", () => {
+    it("calls onOpenModal when address pill is clicked and skips DropdownMenu entirely", () => {
       const mockOnOpenModal = vi.fn();
       vi.mocked(useSorokit).mockReturnValue(
         mockUseSorokit({
@@ -198,11 +209,22 @@ describe("WalletConnectButton", () => {
         name: `Wallet connected: ${fullAddress}. Click to manage.`,
       });
 
+      // Plain button: should not have DropdownMenu trigger attributes
+      expect(addressPill).not.toHaveAttribute("aria-haspopup");
+      expect(addressPill).not.toHaveAttribute("aria-expanded");
+
       fireEvent.click(addressPill);
       expect(mockOnOpenModal).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+
+      // Repeated clicks invoke onOpenModal without Radix state confusion
+      fireEvent.click(addressPill);
+      expect(mockOnOpenModal).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
 
-    it("does not crash and toggles dropdown when address pill is clicked without onOpenModal", () => {
+    it("renders DropdownMenu and toggles dropdown flow when onOpenModal is absent", () => {
       vi.mocked(useSorokit).mockReturnValue(
         mockUseSorokit({
           isConnected: true,
@@ -216,16 +238,19 @@ describe("WalletConnectButton", () => {
         name: `Wallet connected: ${fullAddress}. Click to manage.`,
       });
 
-      expect(() => {
-        fireEvent.click(addressPill);
-      }).not.toThrow();
+      expect(addressPill).toHaveAttribute("aria-haspopup", "menu");
+      expect(addressPill).toHaveAttribute("aria-expanded", "false");
 
-      // Dropdown with disconnect button appears
+      // Clicking opens the dropdown menu
+      fireEvent.click(addressPill);
+      expect(addressPill).toHaveAttribute("aria-expanded", "true");
+
       const disconnectBtn = screen.getByRole("menuitem", { name: /disconnect/i });
       expect(disconnectBtn).toBeInTheDocument();
 
       // Clicking again closes the dropdown
       fireEvent.click(addressPill);
+      expect(addressPill).toHaveAttribute("aria-expanded", "false");
       expect(
         screen.queryByRole("menuitem", { name: /disconnect/i }),
       ).not.toBeInTheDocument();
@@ -326,12 +351,49 @@ describe("WalletConnectButton", () => {
         mockUseSorokit({
           isConnected: true,
           address: fullAddress,
-          walletName: "Ledger",
+          walletName: "Ledger Nano X",
+          isHardware: true,
         }),
       );
 
       render(<WalletConnectButton />);
       expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // #845 — "Ledger Nano X" is the acceptance-criteria case: a name that does
+    // not contain the bare word "Ledger" at position 0, and one the button must
+    // not be re-deriving itself. `isHardware` comes from context only, so if the
+    // provider says true the badge shows regardless of the exact name.
+    it("shows the badge for a hardware wallet named 'Ledger Nano X' (#845)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Ledger Nano X",
+          isHardware: true,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.getByTestId("hardware-badge")).toHaveTextContent("Ledger");
+    });
+
+    // The regression the issue is really about: the button used to fall back to
+    // string-matching `walletName`, so a consumer that set `isHardware: false`
+    // for a hardware-named wallet would still get a badge. Context is now the
+    // only input, so the two can no longer disagree.
+    it("does not show the badge for a software wallet (#845)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+          walletName: "Freighter",
+          isHardware: false,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      expect(screen.queryByTestId("hardware-badge")).toBeNull();
     });
 
     it("purges cached wallet session keys from localStorage on disconnect", async () => {
@@ -375,6 +437,238 @@ describe("WalletConnectButton", () => {
       expect(screen.getByTestId("connection-error-alert")).toHaveTextContent(
         "Connection rejected by user",
       );
+    });
+
+    it("stops click event bubbling to parent containers when clicked in disconnected state (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton />
+        </div>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("stops click event bubbling to parent containers when clicked in connected state (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton />
+        </div>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /wallet connected/i }),
+      );
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("stops click event bubbling when onOpenModal is provided (#887)", () => {
+      const mockOnOpen = vi.fn();
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        }),
+      );
+
+      const parentClick = vi.fn();
+      render(
+        <div onClick={parentClick}>
+          <WalletConnectButton onOpenModal={mockOnOpen} />
+        </div>,
+      );
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /wallet connected/i }),
+      );
+      expect(mockOnOpen).toHaveBeenCalledTimes(1);
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("has accessible attributes aria-haspopup='dialog' and aria-expanded when disconnected (#887)", () => {
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: false,
+        }),
+      );
+
+      render(<WalletConnectButton />);
+      const btn = screen.getByRole("button", { name: "Connect Wallet" });
+      expect(btn).toHaveAttribute("aria-haspopup", "dialog");
+      expect(btn).toHaveAttribute("aria-expanded", "false");
+
+      fireEvent.click(btn);
+      expect(btn).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("renders compact address on mobile (<360px) and standard address on larger viewports (#887)", () => {
+      const fullAddr = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      vi.mocked(useSorokit).mockReturnValue(
+        mockUseSorokit({
+          isConnected: true,
+          address: fullAddr,
+        }),
+      );
+
+      const { container } = render(<WalletConnectButton />);
+      const compactSpan = container.querySelector("[data-address-compact]");
+      const standardSpan = container.querySelector("[data-address]");
+
+      expect(compactSpan).toBeInTheDocument();
+      expect(compactSpan).toHaveTextContent("GAB...XYZ");
+      expect(standardSpan).toBeInTheDocument();
+      expect(standardSpan).toHaveTextContent("GABC12...WXYZ");
+    });
+  });
+
+  describe("State Transition Integration Flow (#1066)", () => {
+    it("transitions through idle -> modal -> connecting -> connected", async () => {
+      const fullAddress = "GABC1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      let currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        address: null,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+
+      vi.mocked(useSorokit).mockImplementation(() => currentState);
+
+      const { rerender } = render(<WalletConnectButton />);
+
+      // 1. Idle state renders "Connect Wallet"
+      const connectBtn = screen.getByRole("button", { name: "Connect Wallet" });
+      expect(connectBtn).toBeInTheDocument();
+      expect(connectBtn).not.toBeDisabled();
+
+      // 2. Click opens wallet selection modal
+      fireEvent.click(connectBtn);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog", { name: /connect a wallet/i }),
+        ).toBeInTheDocument(),
+      );
+
+      // 3. Selecting a wallet triggers connectWallet and transitions to connecting
+      fireEvent.click(getWalletButton(/Freighter/i));
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: true,
+        address: null,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      const connectingBtn = screen.getByRole("button", {
+        name: /connecting…/i,
+        hidden: true,
+      });
+      expect(connectingBtn).toBeDisabled();
+      expect(connectingBtn).toHaveAttribute("aria-busy", "true");
+
+      // 4. After connect, button shows truncated address and modal closes
+      currentState = mockUseSorokit({
+        isConnected: true,
+        isConnecting: false,
+        address: fullAddress,
+        connectWallet: mockConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: /connect a wallet/i }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.getByText(truncateAddress(fullAddress))).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", {
+          name: `Wallet connected: ${fullAddress}. Click to manage.`,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    it("transitions through idle -> modal -> connecting -> error when connect fails", async () => {
+      const failingConnect = vi.fn().mockRejectedValue(new Error("User declined"));
+      let currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        address: null,
+        error: null,
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+
+      vi.mocked(useSorokit).mockImplementation(() => currentState);
+
+      const { rerender } = render(<WalletConnectButton />);
+
+      // 1. Idle
+      fireEvent.click(screen.getByRole("button", { name: "Connect Wallet" }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog", { name: /connect a wallet/i }),
+        ).toBeInTheDocument(),
+      );
+
+      // 2. Select wallet -> connecting
+      fireEvent.click(getWalletButton(/Freighter/i));
+      expect(failingConnect).toHaveBeenCalledTimes(1);
+
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: true,
+        error: null,
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+      expect(
+        screen.getByRole("button", { name: /connecting…/i, hidden: true }),
+      ).toBeDisabled();
+
+      // 3. Error during connect shows error state inside modal, then inline alert after closing modal
+      currentState = mockUseSorokit({
+        isConnected: false,
+        isConnecting: false,
+        error: "User declined",
+        connectWallet: failingConnect,
+        clearError: mockClearError,
+      });
+      rerender(<WalletConnectButton />);
+
+      await waitFor(() =>
+        expect(screen.getByText("User declined")).toBeInTheDocument(),
+      );
+
+      fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+
+      expect(screen.getByTestId("connection-error-alert")).toHaveTextContent(
+        "User declined",
+      );
+      expect(
+        screen.getByRole("button", { name: "Connect Wallet" }),
+      ).toBeInTheDocument();
     });
   });
 });

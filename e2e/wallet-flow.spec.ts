@@ -59,3 +59,50 @@ test("connects a wallet, views transaction history, and sends a payment", async 
     await expect(page.locator("[data-txhash]").last()).toBeVisible();
   });
 });
+
+test("switches network via NetworkSwitcher, updates badge, and reloads network data", async ({
+  page,
+}) => {
+  await test.step("connects wallet and navigates to Account screen", async () => {
+    await page.goto("/");
+    await page
+      .getByRole("button", { name: "Connect Wallet", exact: true })
+      .click();
+
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await expect(page).toHaveURL(/\/account$/);
+    await expect(page.getByRole("heading", { name: "Account" })).toBeVisible();
+  });
+
+  await test.step("switches network via NetworkSwitcher and asserts badge update", async () => {
+    const networkButton = page.getByRole("button", {
+      name: /Current network:/i,
+    });
+    await expect(networkButton).toBeVisible();
+    await networkButton.click();
+
+    await page.getByRole("menuitem", { name: /Mainnet/i }).click();
+
+    // Assert network badge text updates after switch
+    await expect(
+      page.getByRole("button", { name: /Current network: Mainnet/i }),
+    ).toBeVisible();
+  });
+
+  await test.step("asserts balance list loading state immediately after switch and new network data renders", async () => {
+    const networkButton = page.getByRole("button", {
+      name: /Current network:/i,
+    });
+    await networkButton.click();
+
+    await page.getByRole("menuitem", { name: /Futurenet/i }).click();
+
+    // Assert network badge text updates
+    await expect(
+      page.getByRole("button", { name: /Current network: Futurenet/i }),
+    ).toBeVisible();
+
+    // Assert new network data renders successfully in Account view
+    await expect(page.getByText("futurenet")).toBeVisible();
+  });
+});

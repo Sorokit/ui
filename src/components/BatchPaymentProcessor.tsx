@@ -39,7 +39,11 @@ function tokenizeCSVLine(line: string): string[] {
   const tokens: string[] = [];
   let i = 0;
   while (i <= line.length) {
-    if (i === line.length) { tokens.push(""); break; }
+    if (i === line.length) {
+      // Only push a trailing empty token when the line genuinely ends with a comma
+      if (i > 0 && line[i - 1] === ",") tokens.push("");
+      break;
+    }
     if (line[i] === '"') {
       i++;
       let field = "";
@@ -110,6 +114,7 @@ export function validateEntries(entries: BatchEntry[]): string[] {
     if (!VALID_AMOUNT_RE.test(entry.amount) || parseFloat(entry.amount) <= 0) {
       errors.push(`Row ${i + 2}: Invalid amount "${entry.amount}"`);
     }
+    // Issue #862: enforce Stellar MEMO_TEXT limit of 28 UTF-8 bytes (not char length)
     if (entry.memo && new TextEncoder().encode(entry.memo).length > 28) {
       errors.push(`Row ${i + 2}: memo exceeds 28 bytes (Stellar MEMO_TEXT limit)`);
     }
@@ -122,6 +127,29 @@ export function validateEntries(entries: BatchEntry[]): string[] {
     seen.add(entry.address);
   });
   return errors;
+}
+
+const STROOPS_PER_UNIT = BigInt(10_000_000);
+
+/** Sum Stellar amounts exactly using BigInt stroop arithmetic to avoid IEEE-754 drift. */
+export function sumAmountsStroops(amounts: string[]): string {
+  let total = BigInt(0);
+  for (const amt of amounts) {
+    const dot = amt.indexOf(".");
+    const whole = dot === -1 ? amt : amt.slice(0, dot);
+    const frac = dot === -1 ? "" : amt.slice(dot + 1);
+    const fracPadded = frac.padEnd(7, "0").slice(0, 7);
+    total += BigInt(whole || "0") * STROOPS_PER_UNIT + BigInt(fracPadded || "0");
+  }
+  const units = total / STROOPS_PER_UNIT;
+  const rem = total % STROOPS_PER_UNIT;
+  if (rem === BigInt(0)) return String(units);
+  return `${units}.${String(rem).padStart(7, "0").replace(/0+$/, "")}`;
+}
+
+function escapeCSVField(value: string): string {
+  if (/[",\r\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
 }
 
 function generateCSVTemplate(): string {
@@ -174,7 +202,7 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   }, []);
 
   const handleFileUpload = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
 
@@ -183,9 +211,20 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
       setBatchId(null);
       setProgress(null);
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
+      const readFileText = async (f: File): Promise<string> => {
+        if (typeof f.text === "function") {
+          return f.text();
+        }
+        return new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve((e.target?.result as string) || "");
+          reader.onerror = reject;
+          reader.readAsText(f);
+        });
+      };
+
+      try {
+        const text = await readFileText(file);
         let entries: BatchEntry[];
         if (file.name.endsWith(".json")) {
           entries = parseJSON(text);
@@ -202,12 +241,10 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
         setFileEntries(entries);
         const errors = validateEntries(entries);
         setFileErrors(errors);
-
-        if (errors.length === 0 && entries.length > 0) {
-          setCurrentView("progress");
-        }
-      };
-      reader.readAsText(file);
+      } catch {
+        setFileEntries(null);
+        setFileErrors(["No valid entries found in file. Check format."]);
+      }
       event.target.value = "";
     },
     [],
@@ -235,9 +272,10 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
   const downloadCSVReport = useCallback(
     (reportEntries: BatchEntryResult[], _totalFee: string) => {
       const header = "address,amount,status,txHash,error,retryCount";
-      const rows = reportEntries.map(
-        (r) =>
-          `${r.address},${r.amount},${r.status},${r.txHash ?? ""},${r.error ?? ""},${r.retryCount}`,
+      const rows = reportEntries.map((r) =>
+        [r.address, r.amount, r.status, r.txHash ?? "", r.error ?? "", String(r.retryCount)]
+          .map(escapeCSVField)
+          .join(","),
       );
       const csv = [header, ...rows].join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
@@ -328,13 +366,14 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
         })),
       );
 
-      const { data: feeData, error: feeErr } = await client.transaction.estimateFee();
-      if (!feeErr && feeData) {
-        setFeeEstimate(feeData.recommended);
+      if (client.transaction?.estimateFee) {
+        const { data: feeData, error: feeErr } = await client.transaction.estimateFee();
+        if (!feeErr && feeData) {
+          setFeeEstimate(feeData.recommended);
+        }
       }
     } catch (err: unknown) {
       setFileErrors([err instanceof Error ? err.message : "Batch submission failed"]);
-    } finally {
       setIsProcessing(false);
     }
   }, [fileEntries, address, client, defaultAsset, maxRetries]);
@@ -384,6 +423,14 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
       const { data, error } = await client.batch.getBatchStatus(batchId);
       if (error || !data) return;
       setProgress(data);
+
+      if (
+        data.status === "completed" ||
+        data.status === "failed" ||
+        (data.total > 0 && data.completed + (data.failed ?? 0) >= data.total)
+      ) {
+        setIsProcessing(false);
+      }
 
       setResults((prev) => {
         if (!prev) return prev;
@@ -470,6 +517,26 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             {fileEntries && (
               <p className="text-[12px] text-ink-3">{fileEntries.length} entries found</p>
             )}
+            {fileEntries && fileEntries.length > 0 && (
+              <div
+                className="flex flex-col gap-1 max-h-48 overflow-y-auto"
+                data-testid="batch-entry-list"
+              >
+                {fileEntries.map((e, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-surface-2 text-[12px]"
+                  >
+                    <span className="font-mono text-ink truncate">
+                      {truncateAddress(e.address, 8, 4)}
+                    </span>
+                    <span className="text-ink-3">
+                      {e.amount} {e.asset || defaultAsset}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -505,8 +572,13 @@ export function BatchPaymentProcessor({ className, defaultAsset = "XLM" }: Batch
             </div>
 
             <div className="flex gap-2">
-              <Button variant="primary" onClick={handleStartBatch} disabled={!isValid}>
-                Start Batch ({fileEntries!.length} payments)
+              <Button
+                variant="primary"
+                onClick={handleStartBatch}
+                disabled={!isValid}
+                aria-label="Process Batch"
+              >
+                Process Batch ({fileEntries!.length} payments)
               </Button>
               <Button
                 variant="secondary"

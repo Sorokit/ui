@@ -2,6 +2,7 @@ import { Loading01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useRef, useState } from "react";
 
+import { RateLimitSettings } from "@/components/RateLimitIndicator";
 import { Badge } from "@/components/ui/Badge";
 import { InfoCell } from "@/components/ui/InfoCell";
 import { useSorokit } from "@/context/useSorokit";
@@ -46,8 +47,17 @@ const NETWORKS: {
 ];
 
 export function NetworkScreen() {
-  const { network, switchNetwork } = useSorokit();
+  // #537 — `isSwitchingNetwork` is the provider-wide in-flight flag. It
+  // defaults to `false` so tests that mock a partial context keep working.
+  const {
+    network,
+    switchNetwork,
+    isSwitchingNetwork = false,
+    customNetworks = [],
+    clearCustomNetworks,
+  } = useSorokit();
   const [switching, setSwitching] = useState<string | null>(null);
+  const [resetError, setResetError] = useState("");
   const activeCardRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -58,6 +68,10 @@ export function NetworkScreen() {
 
   async function handleSwitchNetwork(networkName: string) {
     if (network?.name === networkName) return;
+    // #537 — a switch started from the other surface (NetworkSwitcher) sets
+    // the provider flag; ignore clicks while it is in flight so the two
+    // components can never fire overlapping `switchNetwork` calls.
+    if (isSwitchingNetwork) return;
     setSwitching(networkName);
     try {
       await switchNetwork(networkName);
@@ -66,8 +80,23 @@ export function NetworkScreen() {
     }
   }
 
+  function handleResetToDefaults() {
+    if (!clearCustomNetworks) return;
+    try {
+      clearCustomNetworks();
+      setResetError("");
+    } catch (error) {
+      setResetError(
+        error instanceof Error
+          ? error.message
+          : "Failed to clear custom networks",
+      );
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
+      <RateLimitSettings />
       {network && (
         <div className="rounded-xl border border-line bg-surface overflow-hidden">
           <div className="px-6 py-4 border-b border-line">
@@ -133,7 +162,8 @@ export function NetworkScreen() {
               onClick={() => {
                 if (!isActive) handleSwitchNetwork(net.name);
               }}
-              disabled={isActive || isSwitching}
+              disabled={isActive || isSwitching || isSwitchingNetwork}
+              aria-busy={isSwitching}
               className={cn(
                 "w-full text-left rounded-xl border px-6 py-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand active:bg-surface-3",
                 isActive
@@ -163,6 +193,10 @@ export function NetworkScreen() {
                     className="text-brand animate-spin"
                     strokeWidth={1.5}
                   />
+                ) : isSwitchingNetwork ? (
+                  // #537 — a switch is in flight from another surface: dim the
+                  // option so the disabled state is visible while it settles.
+                  <span className="h-5 w-5 rounded-full bg-ink-3/40" aria-hidden="true" />
                 ) : (
                   isActive && (
                     <Badge variant={net.badge} dot>
@@ -175,6 +209,23 @@ export function NetworkScreen() {
           );
         })}
       </div>
+
+      {customNetworks.length > 0 && (
+        <div className="flex flex-col items-start gap-2">
+          <button
+            type="button"
+            onClick={handleResetToDefaults}
+            className="rounded-lg border border-line px-4 py-2 text-[13px] font-medium text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            Reset to Defaults
+          </button>
+          {resetError && (
+            <p role="alert" className="text-[12px] text-red">
+              {resetError}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -36,13 +36,20 @@ import {
   Cancel01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import { AddressDisplay } from "@/components/AddressDisplay";
 import { AssetBadge } from "@/components/AssetBadge";
 import { Button } from "@/components/ui/Button";
 import { AssetRowSkeleton } from "@/components/ui/Skeleton";
 import { useSorokit } from "@/context/useSorokit";
+import { useBiometric } from "@/hooks/useBiometric";
+import {
+  isLocale,
+  LOCALE_LABELS,
+  SUPPORTED_LOCALES,
+  useI18n,
+} from "@/i18n";
 import { type Transaction } from "@/lib/client";
 import { cn } from "@/lib/utils";
 
@@ -79,8 +86,18 @@ export function AccountSidebar({
     if (typeof localStorage === "undefined") return false;
     return localStorage.getItem(COLLAPSED_STORAGE_KEY) === "true";
   });
+  const { locale, setLocale, t } = useI18n();
+  const {
+    supported: biometricSupported,
+    enabled: biometricEnabled,
+    enable: enableBiometric,
+    disable: disableBiometric,
+  } = useBiometric();
+  const [biometricError, setBiometricError] = useState(false);
   const [recentTxs, setRecentTxs] = useState<Transaction[]>([]);
   const [txLoading, setTxLoading] = useState(false);
+  const [activeBalanceIndex, setActiveBalanceIndex] = useState(0);
+  const balanceItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     if (typeof localStorage === "undefined") return;
@@ -123,12 +140,50 @@ export function AccountSidebar({
   // Escape closes the sidebar.
   useEffect(() => {
     if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
+    function handleKeyDown(e: globalThis.KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
+
+  // Clamp the active balance-listbox index in render rather than an effect
+  // (no cascading re-render) so it always stays in range as the balance list
+  // changes shape, e.g. after a refresh drops an asset with a zero balance.
+  const clampedActiveBalanceIndex = Math.min(
+    activeBalanceIndex,
+    Math.max(0, balances.length - 1),
+  );
+
+  /**
+   * Standard ARIA `listbox` keyboard navigation: ArrowDown/ArrowUp move the
+   * active descendant, Enter "selects" it (triggers a balance refresh scoped
+   * to that asset's row is out of scope without a per-asset refresh API, so
+   * Enter re-triggers the same refreshAccount() the "Refresh balances" button
+   * uses, scoped to acting on the highlighted item for parity with a real
+   * selection).
+   */
+  function handleBalanceListKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (balances.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActiveBalanceIndex((i) => {
+        const next = (i + 1) % balances.length;
+        balanceItemRefs.current[next]?.focus();
+        return next;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActiveBalanceIndex((i) => {
+        const next = (i - 1 + balances.length) % balances.length;
+        balanceItemRefs.current[next]?.focus();
+        return next;
+      });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      void refreshAccount();
+    }
+  }
 
   if (!open) return null;
 
@@ -219,7 +274,10 @@ export function AccountSidebar({
                 </div>
               ) : balances.length === 0 ? (
                 !collapsed && (
-                  <p className="text-[12px] text-ink-3">No assets found</p>
+                  <p role="status" className="text-[12px] text-ink-3">
+                    No linked accounts. Fund this address or connect another
+                    wallet to see balances here.
+                  </p>
                 )
               ) : collapsed ? (
                 <div className="flex flex-col items-center gap-2">
@@ -234,9 +292,30 @@ export function AccountSidebar({
                   ))}
                 </div>
               ) : (
-                <div className="flex flex-col gap-3">
-                  {balances.map((b) => (
-                    <div key={b.asset} className="flex items-center justify-between">
+                <div
+                  role="listbox"
+                  aria-label="Account balances"
+                  aria-activedescendant={`balance-item-${clampedActiveBalanceIndex}`}
+                  tabIndex={0}
+                  onKeyDown={handleBalanceListKeyDown}
+                  className="flex flex-col gap-3 outline-none"
+                >
+                  {balances.map((b, i) => (
+                    <div
+                      key={b.asset}
+                      id={`balance-item-${i}`}
+                      ref={(el) => {
+                        balanceItemRefs.current[i] = el;
+                      }}
+                      role="option"
+                      aria-selected={i === clampedActiveBalanceIndex}
+                      tabIndex={-1}
+                      onClick={() => setActiveBalanceIndex(i)}
+                      className={cn(
+                        "flex items-center justify-between rounded-md px-1 -mx-1 py-0.5",
+                        i === clampedActiveBalanceIndex && "bg-surface-2",
+                      )}
+                    >
                       <AssetBadge balance={b} size="sm" showIssuer={false} />
                       <span className="text-[12px] font-semibold tabular-nums text-ink">
                         {parseFloat(b.balance).toLocaleString(undefined, {
@@ -277,21 +356,80 @@ export function AccountSidebar({
                 {/* Settings quick links */}
                 <div className="px-4 py-3 border-t border-line flex flex-col gap-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-4 mb-1">
-                    Settings
+                    {t("settings.title")}
                   </p>
                   {network && (
                     <div className="flex items-center justify-between text-[12px] text-ink-2">
-                      <span>Network</span>
+                      <span>{t("settings.network")}</span>
                       <span className="capitalize">{network.name}</span>
                     </div>
                   )}
+
+                  {/* Language selector (#1157) */}
+                  <div className="flex items-center justify-between text-[12px] text-ink-2">
+                    <label htmlFor="sorokit-language-select">
+                      {t("settings.language")}
+                    </label>
+                    <select
+                      id="sorokit-language-select"
+                      aria-label={t("settings.language")}
+                      value={locale}
+                      onChange={(event) => {
+                        if (isLocale(event.target.value)) {
+                          setLocale(event.target.value);
+                        }
+                      }}
+                      className="rounded-md border border-line bg-surface px-2 py-1 text-[12px] text-ink"
+                    >
+                      {SUPPORTED_LOCALES.map((code) => (
+                        <option key={code} value={code}>
+                          {LOCALE_LABELS[code]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Biometric quick unlock toggle (#1152) */}
+                  <div className="flex items-center justify-between text-[12px] text-ink-2">
+                    <label htmlFor="sorokit-biometric-toggle">
+                      {t("settings.biometricUnlock")}
+                    </label>
+                    <input
+                      id="sorokit-biometric-toggle"
+                      type="checkbox"
+                      checked={biometricEnabled}
+                      disabled={!biometricSupported}
+                      onChange={(event) => {
+                        setBiometricError(false);
+                        if (event.target.checked) {
+                          void enableBiometric().then((ok) => {
+                            if (!ok) setBiometricError(true);
+                          });
+                        } else {
+                          disableBiometric();
+                        }
+                      }}
+                      className="accent-brand"
+                    />
+                  </div>
+                  {!biometricSupported && (
+                    <p className="text-[11px] text-ink-4">
+                      {t("settings.biometricUnsupported")}
+                    </p>
+                  )}
+                  {biometricError && (
+                    <p role="alert" className="text-[11px] text-red">
+                      {t("settings.biometricError")}
+                    </p>
+                  )}
+
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={() => void refreshAccount()}
                     disabled={isLoadingAccount}
                   >
-                    Refresh balances
+                    {t("settings.refreshBalances")}
                   </Button>
                   <Button
                     variant="destructive"
@@ -303,7 +441,7 @@ export function AccountSidebar({
                       onClose();
                     }}
                   >
-                    Disconnect
+                    {t("settings.disconnect")}
                   </Button>
                 </div>
               </>

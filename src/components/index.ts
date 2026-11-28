@@ -41,7 +41,13 @@ export { InfoCell } from "./ui/InfoCell";
 export { Input } from "./ui/Input";
 export { LabelledValue } from "./ui/LabelledValue";
 export { Separator } from "./ui/Separator";
-export { AssetRowSkeleton, Skeleton, SkeletonCard, SkeletonRow } from "./ui/Skeleton";
+export {
+  AssetRowSkeleton,
+  Skeleton,
+  SkeletonCard,
+  SkeletonRow,
+  SkeletonTable,
+} from "./ui/Skeleton";
 
 // Error handling
 export { ErrorBoundary } from "./ErrorBoundary";
@@ -50,7 +56,16 @@ export { ErrorBoundary } from "./ErrorBoundary";
 export { AccountCard, AccountCardCompact } from "./AccountCard";
 export type { AccountSidebarProps } from "./AccountSidebar";
 export { AccountSidebar } from "./AccountSidebar";
+export {
+  AccountSummaryCard,
+  computeAccountHealth,
+} from "./AccountSummaryCard";
 export { BalanceList } from "./BalanceList";
+export { KeystoreBackup } from "./KeystoreBackup";
+export type { OfflineBadgeProps } from "./OfflineBadge";
+export { OfflineBadge } from "./OfflineBadge";
+export type { RateLimitIndicatorProps } from "./RateLimitIndicator";
+export { RateLimitIndicator, RateLimitSettings } from "./RateLimitIndicator";
 export { WalletConnectButton } from "./WalletConnectButton";
 export type { WalletConnectModalProps, WalletOption } from "./WalletConnectModal";
 export {
@@ -79,6 +94,8 @@ export { AddressDisplay } from "./AddressDisplay";
 // Network
 export type { BannerConfig, NetworkBannerProps } from "./NetworkBanner";
 export { BANNER_CONFIG, NetworkBanner } from "./NetworkBanner";
+export type { NetworkStatusBannerProps } from "./NetworkStatusBanner";
+export { NetworkStatusBanner } from "./NetworkStatusBanner";
 export { NetworkSwitcher } from "./NetworkSwitcher";
 
 // Allowances
@@ -108,6 +125,8 @@ export {
   SOROBAN_PROTOCOL_LIMITS,
 } from "./GasOptimizer";
 export { MultiSigTransactionBuilder } from "./MultiSigTransactionBuilder";
+export type { RecentTransactionsWidgetProps } from "./RecentTransactionsWidget";
+export { RecentTransactionsWidget } from "./RecentTransactionsWidget";
 export type {
   TransactionConfirmModalProps,
   TransactionFeeBreakdown,
@@ -123,8 +142,37 @@ export type {
   TransactionHistoryTableProps,
 } from "./TransactionHistoryTable";
 export { TransactionHistoryTable } from "./TransactionHistoryTable";
-export { TransactionPanel } from "./TransactionPanel";
+export type {
+  ScheduledTransaction,
+  TransactionTemplate,
+} from "./TransactionPanel";
+export {
+  loadScheduledTransactions,
+  loadTemplates,
+  saveScheduledTransactions,
+  saveTemplates,
+  SCHEDULED_TX_STORAGE_KEY,
+  TEMPLATES_STORAGE_KEY,
+  TransactionPanel,
+} from "./TransactionPanel";
 export { TransactionStatusTracker } from "./TransactionStatusTracker";
+
+// Price Alerts
+export type {
+  AlertCondition,
+  PriceAlert,
+  PriceAlertHistoryItem,
+  PriceAlertManagerProps,
+} from "./PriceAlertManager";
+export {
+  loadPriceAlertHistory,
+  loadPriceAlerts,
+  PRICE_ALERT_HISTORY_STORAGE_KEY,
+  PRICE_ALERTS_STORAGE_KEY,
+  PriceAlertManager,
+  savePriceAlertHistory,
+  savePriceAlerts,
+} from "./PriceAlertManager";
 
 // Soroban
 export { ContractEventFeed } from "./ContractEventFeed";
@@ -145,13 +193,28 @@ export type { DelegationRowProps } from "./DelegationRow";
 export { DelegationRow } from "./DelegationRow";
 export { RebalancerHistory } from "./RebalancerHistory";
 export type { RewardHistoryProps } from "./RewardHistory";
-export { RewardHistory } from "./RewardHistory";
+export { generateRewardHistoryCsv, RewardHistory } from "./RewardHistory";
 export type { RewardsPanelProps } from "./RewardsPanel";
 export { RewardsPanel } from "./RewardsPanel";
 export type { StakingDashboardProps } from "./StakingDashboard";
 export { StakingDashboard } from "./StakingDashboard";
 export { SwapExecutionTracker } from "./SwapExecutionTracker";
-export { SwapRoute } from "./SwapRoute";
+export type {
+  NormalizedHop,
+  RouteHop,
+  RouteValidationResult,
+  SwapRouteProps,
+} from "./SwapRoute";
+export {
+  detectCircularRoutes,
+  formatFeeTier,
+  formatPoolDepth,
+  getIntermediateHops,
+  getSwapPath,
+  isCircularRoute,
+  SwapRoute,
+  validateSwapRoute,
+} from "./SwapRoute";
 export type { PieChartProps, PieSlice } from "./ui/PieChart";
 export { PieChart } from "./ui/PieChart";
 export type { ValidatorCardProps } from "./ValidatorCard";
@@ -210,8 +273,11 @@ export type {
 export {
   aggregateDailyRewards,
   createDefaultFilter,
+  DEFAULT_XLM_PRICE_USD,
   DELEGATION_BASE_FEE_STROOPS,
   estimateDelegationFeeXlm,
+  estimateHistoricalXlmPriceUsd,
+  estimateRewardUsdValue,
   filterValidators,
   /** @alias formatPct from staking lib */
   formatPct as formatStakingPct,
@@ -252,12 +318,22 @@ export { GovernanceDashboard } from "./GovernanceDashboard";
 // Account Balance Chart
 export { AccountBalanceChart } from "./AccountBalanceChart";
 
+// TopBar & Notification Center
+export type { TopBarProps } from "./TopBar";
+export { TopBar } from "./TopBar";
+
 // Providers and hooks
 export { SorokitProvider } from "../context/SorokitProvider";
 export { useSorokit } from "../context/useSorokit";
+export type { PendingActionItem } from "../hooks/usePendingActions";
+export {
+  loadStoredPendingActions,
+  saveStoredPendingActions,
+  usePendingActions,
+} from "../hooks/usePendingActions";
 
 // Types
-export type { Toast, ToastType } from "../context/ToastContext";
+export type { NotificationEntry, Toast, ToastType } from "../context/ToastContext";
 export { ToastProvider, useToast } from "../context/ToastContext";
 export type {
   AccountData,
@@ -282,3 +358,34 @@ export type {
 export { ToastContainer } from "./ui/Toast";
 export type { TooltipProps } from "./ui/Tooltip";
 export { Tooltip } from "./ui/Tooltip";
+
+// Hardware wallet support (#1153)
+export type { HardwareWalletBadgeProps } from "./HardwareWalletBadge";
+export { HardwareWalletBadge } from "./HardwareWalletBadge";
+export { HARDWARE_HIGH_VALUE_THRESHOLD_STROOPS } from "./TransactionConfirmModal";
+
+// Localization (#1157)
+export type { I18nProviderProps, I18nValue } from "../i18n";
+export type { Locale, TranslationKey, Translations } from "../i18n";
+export { I18nContext, I18nProvider, useI18n } from "../i18n";
+export {
+  DEFAULT_LOCALE,
+  isLocale,
+  LOCALE_LABELS,
+  LOCALE_STORAGE_KEY,
+  SUPPORTED_LOCALES,
+  translations,
+} from "../i18n";
+
+// Biometric quick unlock (#1152)
+export type { BiometricState } from "../hooks/useBiometric";
+export { useBiometric } from "../hooks/useBiometric";
+export {
+  authenticateBiometric,
+  BIOMETRIC_CREDENTIAL_KEY,
+  BIOMETRIC_ENABLED_KEY,
+  disableBiometric,
+  isBiometricEnabled,
+  isBiometricSupported,
+  registerBiometric,
+} from "../lib/biometric";

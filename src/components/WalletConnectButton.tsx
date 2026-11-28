@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { useSorokit } from "@/context/useSorokit";
 import { useOutsideClick } from "@/hooks/useOutsideClick";
-import { truncateAddress } from "@/lib/utils";
+import { useI18n } from "@/i18n";
+import { truncateAddress, truncateAddressResponsive } from "@/lib/utils";
 
+import { HardwareWalletBadge } from "./HardwareWalletBadge";
 import { WalletConnectModal } from "./WalletConnectModal";
 
 export interface WalletConnectButtonProps {
@@ -23,11 +25,13 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     walletName,
     isHardware,
     error,
+    errorSeverity = "error",
     clearError,
     disconnectWallet,
     isDisconnecting,
     network,
   } = useSorokit();
+  const { t } = useI18n();
   const [connectModalOpen, setConnectModalOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -42,14 +46,10 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
     }
   }, [isConnected]);
 
-  const isHardwareWallet =
-    Boolean(isHardware) ||
-    Boolean(
-      walletName &&
-        (walletName.toLowerCase().includes("ledger") ||
-          walletName.toLowerCase().includes("hardware") ||
-          walletName.toLowerCase().includes("webusb")),
-    );
+  // #845 — read straight from context. The provider owns hardware detection;
+  // re-deriving it here from `walletName` was duplicated logic that could drift
+  // from the provider's own answer.
+  const isHardwareWallet = isHardware;
 
   const handleDisconnect = async () => {
     try {
@@ -84,94 +84,111 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
   };
 
   if (isConnected && address) {
-    const handleClick = () => {
-      if (onOpenModal) {
-        onOpenModal();
-      } else {
-        setDropdownOpen((prev) => !prev);
-      }
-    };
+    if (onOpenModal) {
+      return (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenModal();
+          }}
+          className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
+          aria-label={`Wallet connected: ${address}. ${t("wallet.manage")}`}
+        >
+          <span className="w-2 h-2 rounded-full bg-green shrink-0" />
+          <span
+            data-address-compact
+            className="inline sm:hidden font-mono text-[11px] truncate"
+          >
+            {truncateAddressResponsive(address, { compact: true })}
+          </span>
+          <span data-address className="hidden sm:inline">
+            {truncateAddress(address)}
+          </span>
+          {isHardwareWallet && (
+            <HardwareWalletBadge walletName={walletName} />
+          )}
+        </button>
+      );
+    }
 
     return (
-      <DropdownMenu.Root open={onOpenModal ? false : dropdownOpen} onOpenChange={onOpenModal ? undefined : setDropdownOpen}>
+      <DropdownMenu.Root open={dropdownOpen} onOpenChange={setDropdownOpen}>
         <DropdownMenu.Trigger asChild>
           <button
             type="button"
-            onClick={handleClick}
-            className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-            aria-label={`Wallet connected: ${address}. Click to manage.`}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDropdownOpen((prev) => !prev);
+            }}
+            className="inline-flex items-center gap-1.5 sm:gap-2 h-8 px-2 sm:px-3.5 rounded-lg bg-surface-2 border border-line hover:border-line-2 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand max-w-full"
+            aria-label={`Wallet connected: ${address}. ${t("wallet.manage")}`}
             aria-haspopup="menu"
-            aria-expanded={onOpenModal ? undefined : dropdownOpen}
+            aria-expanded={dropdownOpen}
           >
             <span className="w-2 h-2 rounded-full bg-green shrink-0" />
+            <span
+              data-address-compact
+              className="inline sm:hidden font-mono text-[11px] truncate"
+            >
+              {truncateAddressResponsive(address, { compact: true })}
+            </span>
             <span data-address className="hidden sm:inline">
               {truncateAddress(address)}
             </span>
             {isHardwareWallet && (
-              <span
-                data-testid="hardware-badge"
-                className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30"
-              >
-                {walletName && walletName.toLowerCase().includes("ledger")
-                  ? "Ledger"
-                  : "Hardware"}
-              </span>
+              <HardwareWalletBadge walletName={walletName} />
             )}
           </button>
         </DropdownMenu.Trigger>
 
-        {!onOpenModal && (
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              ref={menuRef}
-              align="end"
-              sideOffset={6}
-              onPointerDownOutside={() => setDropdownOpen(false)}
-              className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-top-1 duration-200"
-            >
-              {/* Wallet info header */}
-              <div className="px-3 py-2 border-b border-line mb-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-[12px] font-medium text-ink truncate font-mono">
-                    {truncateAddress(address)}
-                  </p>
-                  {isHardwareWallet && (
-                    <span
-                      data-testid="hardware-badge-dropdown"
-                      className="text-[9px] font-medium px-1 py-0.2 rounded bg-purple-500/15 text-purple-400"
-                    >
-                      {walletName && walletName.toLowerCase().includes("ledger")
-                        ? "Ledger"
-                        : "Hardware"}
-                    </span>
-                  )}
-                </div>
-                {network && (
-                  <p className="text-[10px] text-ink-4 mt-0.5 capitalize">
-                    {network.name}
-                  </p>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            ref={menuRef}
+            align="end"
+            sideOffset={6}
+            onPointerDownOutside={() => setDropdownOpen(false)}
+            className="z-50 min-w-[180px] rounded-xl border border-line bg-surface p-1.5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] animate-in fade-in slide-in-from-top-1 duration-200"
+          >
+            {/* Wallet info header */}
+            <div className="px-3 py-2 border-b border-line mb-1">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12px] font-medium text-ink truncate font-mono">
+                  {truncateAddress(address)}
+                </p>
+                {isHardwareWallet && (
+                  <HardwareWalletBadge
+                    walletName={walletName}
+                    compact
+                    testId="hardware-badge-dropdown"
+                  />
                 )}
               </div>
+              {network && (
+                <p className="text-[10px] text-ink-4 mt-0.5 capitalize">
+                  {network.name}
+                </p>
+              )}
+            </div>
 
-              {/* Disconnect action */}
-              <DropdownMenu.Item
-                onSelect={() => {
-                  void handleDisconnect();
-                }}
-                disabled={isDisconnecting}
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-red hover:bg-error-dim-muted transition-colors cursor-pointer outline-none focus:bg-error-dim-muted disabled:opacity-50"
-              >
-                <HugeiconsIcon
-                  icon={Logout04Icon}
-                  size={14}
-                  color="currentColor"
-                  strokeWidth={2}
-                />
-                {isDisconnecting ? "Disconnecting…" : "Disconnect"}
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        )}
+            {/* Disconnect action */}
+            <DropdownMenu.Item
+              onSelect={() => {
+                void handleDisconnect();
+              }}
+              disabled={isDisconnecting}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] text-red hover:bg-error-dim-muted transition-colors cursor-pointer outline-none focus:bg-error-dim-muted disabled:opacity-50"
+            >
+              <HugeiconsIcon
+                icon={Logout04Icon}
+                size={14}
+                color="currentColor"
+                strokeWidth={2}
+              />
+              {isDisconnecting ? t("wallet.disconnecting") : t("wallet.disconnect")}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
       </DropdownMenu.Root>
     );
   }
@@ -181,12 +198,17 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
       <Button
         size="md"
         loading={isConnecting}
-        onClick={() => setConnectModalOpen(true)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setConnectModalOpen(true);
+        }}
         className="px-2.5 sm:px-4"
-        aria-label={isConnecting ? "Connecting…" : "Connect Wallet"}
+        aria-label={isConnecting ? t("wallet.connecting") : t("wallet.connect")}
+        aria-haspopup="dialog"
+        aria-expanded={connectModalOpen}
       >
         <span className="hidden sm:inline">
-          {isConnecting ? "Connecting…" : "Connect Wallet"}
+          {isConnecting ? t("wallet.connecting") : t("wallet.connect")}
         </span>
         <span className="sm:hidden">{isConnecting ? "…" : "Connect"}</span>
       </Button>
@@ -194,12 +216,22 @@ export function WalletConnectButton({ onOpenModal }: WalletConnectButtonProps = 
         <div
           role="alert"
           data-testid="connection-error-alert"
-          className="absolute top-[calc(100%+8px)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border border-error-dim rounded-lg shadow-lg text-red text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200"
+          data-severity={errorSeverity}
+          className={`absolute top-[calc(100%+8px)] right-0 z-50 flex items-center gap-2 px-3 py-1.5 bg-surface border rounded-lg shadow-lg text-[11px] whitespace-nowrap animate-in fade-in slide-in-from-top-1 duration-200 ${
+            errorSeverity === "info"
+              ? "border-warning-dim text-warning"
+              : "border-error-dim text-red"
+          }`}
         >
           <span>{error}</span>
           <button
-            onClick={clearError}
-            className="text-red opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              clearError();
+            }}
+            className={`opacity-50 hover:opacity-100 transition-opacity cursor-pointer flex items-center justify-center shrink-0 ${
+              errorSeverity === "info" ? "text-warning" : "text-red"
+            }`}
             aria-label="Clear error"
           >
             <HugeiconsIcon

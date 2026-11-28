@@ -1,14 +1,14 @@
 import "react-json-view-lite/dist/index.css";
 
-import { type ReactNode,useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { JsonView } from "react-json-view-lite";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 
-type DebuggerState = "idle" | "loading" | "success" | "error";
+export type DebuggerState = "idle" | "loading" | "success" | "error";
 
-interface DebuggerEntry {
+export interface DebuggerEntry {
   contractId: string;
   method: string;
   args: unknown[];
@@ -34,7 +34,7 @@ interface DebuggerEntry {
   timestamp: string;
 }
 
-interface ContractInteractionDebuggerProps {
+export interface ContractInteractionDebuggerProps {
   contractId: string;
   method: string;
   args?: unknown[];
@@ -44,6 +44,10 @@ interface ContractInteractionDebuggerProps {
   error?: string | null;
   stateBefore?: unknown;
   stateAfter?: unknown;
+  history?: DebuggerEntry[];
+  onHistoryChange?: (history: DebuggerEntry[]) => void;
+  /** Called with a past invocation-history entry to repopulate the builder form. */
+  onLoadEntry?: (entry: DebuggerEntry) => void;
 }
 
 interface DiffEntry {
@@ -57,12 +61,15 @@ interface DiffEntry {
 const DEBUG_HISTORY_KEY = "sorokit-soroban-debug-history";
 const DEBUG_HISTORY_LIMIT = 10;
 
-// Issue #668: Soroban VM diagnostics can include ANSI colour escapes which
-// render as garbled characters (e.g. `\u001b[31m`). Strip them before display.
+/**
+ * Soroban VM diagnostics are sometimes returned with raw ANSI colour codes
+ * (e.g. `\u001b[31m`). Strip them so they render as readable text instead of
+ * garbled escape sequences (issue #668).
+ */
 // eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;]*m/g;
 
-function stripAnsi(value: string): string {
+export function stripAnsi(value: string): string {
   return value.replace(ANSI_ESCAPE_PATTERN, "");
 }
 
@@ -79,19 +86,29 @@ function formatTimestamp(value: string): string {
   });
 }
 
-function readDebugHistory(): DebuggerEntry[] {
+export function readDebugHistory(): DebuggerEntry[] {
   try {
     const raw = window.sessionStorage.getItem(DEBUG_HISTORY_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is DebuggerEntry => typeof entry === "object") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter(
+          (entry): entry is DebuggerEntry => typeof entry === "object",
+        )
+      : [];
   } catch {
     return [];
   }
 }
 
-function addDebugHistory(entry: DebuggerEntry, current: DebuggerEntry[]): DebuggerEntry[] {
-  const next = [entry, ...current.filter((item) => item.timestamp !== entry.timestamp)].slice(0, DEBUG_HISTORY_LIMIT);
+export function addDebugHistory(
+  entry: DebuggerEntry,
+  current: DebuggerEntry[],
+): DebuggerEntry[] {
+  const next = [
+    entry,
+    ...current.filter((item) => item.timestamp !== entry.timestamp),
+  ].slice(0, DEBUG_HISTORY_LIMIT);
   try {
     window.sessionStorage.setItem(DEBUG_HISTORY_KEY, JSON.stringify(next));
   } catch {
@@ -101,7 +118,8 @@ function addDebugHistory(entry: DebuggerEntry, current: DebuggerEntry[]): Debugg
 }
 
 function copyToClipboard(value: string) {
-  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) return Promise.resolve();
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText)
+    return Promise.resolve();
   return navigator.clipboard.writeText(value);
 }
 
@@ -129,7 +147,11 @@ function formatSnapshot(value: unknown): string {
   }
 }
 
-function collectDiffEntries(before: unknown, after: unknown, basePath = ""): DiffEntry[] {
+function collectDiffEntries(
+  before: unknown,
+  after: unknown,
+  basePath = "",
+): DiffEntry[] {
   if (before === after) return [];
 
   if (Array.isArray(before) && Array.isArray(after)) {
@@ -140,7 +162,12 @@ function collectDiffEntries(before: unknown, after: unknown, basePath = ""): Dif
       const beforeValue = before[index];
       const afterValue = after[index];
       if (beforeValue === afterValue) continue;
-      if (Array.isArray(beforeValue) || Array.isArray(afterValue) || isPlainObject(beforeValue) || isPlainObject(afterValue)) {
+      if (
+        Array.isArray(beforeValue) ||
+        Array.isArray(afterValue) ||
+        isPlainObject(beforeValue) ||
+        isPlainObject(afterValue)
+      ) {
         entries.push(...collectDiffEntries(beforeValue, afterValue, path));
       } else {
         entries.push({
@@ -157,13 +184,20 @@ function collectDiffEntries(before: unknown, after: unknown, basePath = ""): Dif
 
   if (isPlainObject(before) && isPlainObject(after)) {
     const entries: DiffEntry[] = [];
-    const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+    const keys = Array.from(
+      new Set([...Object.keys(before), ...Object.keys(after)]),
+    );
     for (const key of keys) {
       const path = basePath ? `${basePath}.${key}` : key;
       const beforeValue = before[key];
       const afterValue = after[key];
       if (beforeValue === afterValue) continue;
-      if (Array.isArray(beforeValue) || Array.isArray(afterValue) || isPlainObject(beforeValue) || isPlainObject(afterValue)) {
+      if (
+        Array.isArray(beforeValue) ||
+        Array.isArray(afterValue) ||
+        isPlainObject(beforeValue) ||
+        isPlainObject(afterValue)
+      ) {
         entries.push(...collectDiffEntries(beforeValue, afterValue, path));
       } else {
         entries.push({
@@ -178,13 +212,77 @@ function collectDiffEntries(before: unknown, after: unknown, basePath = ""): Dif
     return entries;
   }
 
-  return [{
-    path: basePath || "root",
-    beforeValue: before,
-    afterValue: after,
-    beforeType: describeValue(before),
-    afterType: describeValue(after),
-  }];
+  return [
+    {
+      path: basePath || "root",
+      beforeValue: before,
+      afterValue: after,
+      beforeType: describeValue(before),
+      afterType: describeValue(after),
+    },
+  ];
+}
+
+export function createDebuggerEntry(
+  props: Omit<ContractInteractionDebuggerProps, "history" | "onHistoryChange">,
+): DebuggerEntry {
+  const preparedCall = JSON.stringify(
+    {
+      contractId: props.contractId,
+      method: props.method,
+      args: props.args || [],
+    },
+    null,
+    2,
+  );
+  const simulation = {
+    gasEstimate: 123456,
+    gasXlm: "0.00123456",
+    baseFee: "100000",
+    totalCostXlm: "0.00133456",
+  };
+  const attempts = [
+    {
+      id: "attempt-1",
+      timestamp: new Date().toISOString(),
+      retryCount: 0,
+      status:
+        props.state === "success"
+          ? "submitted"
+          : props.state === "error"
+            ? "failed"
+            : "pending",
+      hash: props.txHash ?? undefined,
+    },
+  ];
+  return {
+    contractId: props.contractId,
+    method: props.method,
+    args: props.args || [],
+    preparedCall,
+    simulation,
+    attempts,
+    result:
+      props.txHash || props.result
+        ? {
+            txHash: props.txHash ?? undefined,
+            status:
+              props.state === "success"
+                ? "submitted"
+                : props.state === "error"
+                  ? "failed"
+                  : "pending",
+            summary: props.result
+              ? stripAnsi(
+                  typeof props.result === "string"
+                    ? props.result
+                    : JSON.stringify(props.result),
+                )
+              : undefined,
+          }
+        : null,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 export function ContractInteractionDebugger({
@@ -197,10 +295,12 @@ export function ContractInteractionDebugger({
   error,
   stateBefore,
   stateAfter,
+  history = [],
+  onHistoryChange,
+  onLoadEntry,
 }: ContractInteractionDebuggerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [history, setHistory] = useState<DebuggerEntry[]>(() => readDebugHistory());
 
   const preparedCall = useMemo(() => {
     return JSON.stringify({ contractId, method, args }, null, 2);
@@ -217,7 +317,18 @@ export function ContractInteractionDebugger({
 
   const attempts = useMemo(() => {
     return [
-      { id: "attempt-1", timestamp: new Date().toISOString(), retryCount: 0, status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending", hash: txHash ?? undefined },
+      {
+        id: "attempt-1",
+        timestamp: new Date().toISOString(),
+        retryCount: 0,
+        status:
+          state === "success"
+            ? "submitted"
+            : state === "error"
+              ? "failed"
+              : "pending",
+        hash: txHash ?? undefined,
+      },
     ];
   }, [state, txHash]);
 
@@ -226,58 +337,39 @@ export function ContractInteractionDebugger({
     return collectDiffEntries(stateBefore, stateAfter);
   }, [stateAfter, stateBefore]);
 
-  useEffect(() => {
-    if (!contractId || !method) return;
-    const entry: DebuggerEntry = {
-      contractId,
-      method,
-      args,
-      preparedCall,
-      simulation,
-      attempts,
-      result: txHash || result
-        ? {
-            txHash: txHash ?? undefined,
-            status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-            summary: result
-              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
-              : undefined,
-          }
-        : null,
-      timestamp: new Date().toISOString(),
-    };
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHistory((current) => addDebugHistory(entry, current));
-  }, [args, attempts, contractId, method, preparedCall, result, simulation, state, txHash]);
-
   const handleCopy = async (key: string, value: string) => {
     await copyToClipboard(value);
     setCopiedKey(key);
     if (contractId && method) {
-      const entry: DebuggerEntry = {
+      const entry = createDebuggerEntry({
         contractId,
         method,
         args,
-        preparedCall,
-        simulation,
-        attempts,
-        result: txHash || result
-          ? {
-              txHash: txHash ?? undefined,
-              status: state === "success" ? "submitted" : state === "error" ? "failed" : "pending",
-              summary: result
-              ? stripAnsi(typeof result === "string" ? result : JSON.stringify(result))
-              : undefined,
-            }
-          : null,
-        timestamp: new Date().toISOString(),
-      };
-      setHistory((current) => addDebugHistory(entry, current));
+        state,
+        result,
+        txHash,
+        error,
+        stateBefore,
+        stateAfter,
+      });
+      // Persist first: an optional call would skip `addDebugHistory` entirely
+      // when no `onHistoryChange` handler is supplied, silently losing the entry.
+      const nextHistory = addDebugHistory(entry, history);
+      onHistoryChange?.(nextHistory);
     }
-    window.setTimeout(() => setCopiedKey((current) => (current === key ? null : current)), 1600);
+    window.setTimeout(
+      () => setCopiedKey((current) => (current === key ? null : current)),
+      1600,
+    );
   };
 
-  const buildSection = (title: string, description: string, children: ReactNode, copyLabel?: string, copyValue?: string) => (
+  const buildSection = (
+    title: string,
+    description: string,
+    children: ReactNode,
+    copyLabel?: string,
+    copyValue?: string,
+  ) => (
     <section className="rounded-lg border border-line bg-surface-2 p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -285,12 +377,17 @@ export function ContractInteractionDebugger({
           <p className="mt-1 text-[12px] text-ink-3">{description}</p>
         </div>
         {copyLabel && copyValue ? (
-          <Button variant="secondary" size="sm" onClick={() => void handleCopy(copyLabel, copyValue)}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleCopy(copyLabel, copyValue)}
+          >
             {copiedKey === copyLabel ? "Copied" : "Copy"}
           </Button>
         ) : null}
       </div>
-      <div className="mt-3 overflow-x-auto [scrollbar-width:thin]">{children}</div>
+      <div className="mt-3 min-w-0 overflow-x-auto">{children}</div>
     </section>
   );
 
@@ -298,10 +395,19 @@ export function ContractInteractionDebugger({
     <div className="mt-6 rounded-xl border border-line bg-surface overflow-hidden">
       <div className="flex items-center justify-between border-b border-line px-5 py-4">
         <div>
-          <h3 className="text-[14px] font-semibold text-ink">Contract Interaction Debugger</h3>
-          <p className="mt-0.5 text-[12px] text-ink-3">Inspect prepared calls, simulations, retries, and results.</p>
+          <h3 className="text-[14px] font-semibold text-ink">
+            Contract Interaction Debugger
+          </h3>
+          <p className="mt-0.5 text-[12px] text-ink-3">
+            Inspect prepared calls, simulations, retries, and results.
+          </p>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => setIsOpen((prev) => !prev)}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setIsOpen((prev) => !prev)}
+        >
           {isOpen ? "Hide debugger" : "Show debugger"}
         </Button>
       </div>
@@ -311,74 +417,125 @@ export function ContractInteractionDebugger({
           {buildSection(
             "Prepared contract call",
             "The contract invocation payload prepared for submission.",
-            <div className="rounded-lg border border-line bg-surface p-3">
-              <JsonView data={{ contractId, method, args }} shouldExpandNode={() => true} />
+            <div className="rounded-lg border border-line bg-surface p-3 overflow-x-auto">
+              <JsonView
+                data={{ contractId, method, args }}
+                shouldExpandNode={() => true}
+              />
             </div>,
             "prepared-call",
             preparedCall,
           )}
 
-          {stateBefore !== undefined || stateAfter !== undefined ? (
-            buildSection(
-              "State diff",
-              "Before and after snapshots for state-changing contract operations.",
-              <div className="flex flex-col gap-4">
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-lg border border-line bg-surface p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[12px] font-semibold text-ink">Pre-invocation snapshot</p>
-                      <Button variant="secondary" size="sm" onClick={() => void handleCopy("state-before", formatSnapshot(stateBefore))}>
-                        {copiedKey === "state-before" ? "Copied" : "Copy"}
-                      </Button>
+          {stateBefore !== undefined || stateAfter !== undefined
+            ? buildSection(
+                "State diff",
+                "Before and after snapshots for state-changing contract operations.",
+                <div className="flex flex-col gap-4">
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border border-line bg-surface p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[12px] font-semibold text-ink">
+                          Pre-invocation snapshot
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            void handleCopy(
+                              "state-before",
+                              formatSnapshot(stateBefore),
+                            )
+                          }
+                        >
+                          {copiedKey === "state-before" ? "Copied" : "Copy"}
+                        </Button>
+                      </div>
+                      <div className="mt-3 overflow-x-auto rounded-md border border-line bg-surface-2 p-3">
+                        <pre className="text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">
+                          {formatSnapshot(stateBefore)}
+                        </pre>
+                      </div>
                     </div>
-                    <div className="mt-3 overflow-x-auto rounded-md border border-line bg-surface-2 p-3">
-                      <pre className="text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">{formatSnapshot(stateBefore)}</pre>
+                    <div className="rounded-lg border border-line bg-surface p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[12px] font-semibold text-ink">
+                          Post-invocation snapshot
+                        </p>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            void handleCopy(
+                              "state-after",
+                              formatSnapshot(stateAfter),
+                            )
+                          }
+                        >
+                          {copiedKey === "state-after" ? "Copied" : "Copy"}
+                        </Button>
+                      </div>
+                      <div className="mt-3 overflow-x-auto rounded-md border border-line bg-surface-2 p-3">
+                        <pre className="text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">
+                          {formatSnapshot(stateAfter)}
+                        </pre>
+                      </div>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-line bg-surface p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[12px] font-semibold text-ink">Post-invocation snapshot</p>
-                      <Button variant="secondary" size="sm" onClick={() => void handleCopy("state-after", formatSnapshot(stateAfter))}>
-                        {copiedKey === "state-after" ? "Copied" : "Copy"}
-                      </Button>
-                    </div>
-                    <div className="mt-3 overflow-x-auto rounded-md border border-line bg-surface-2 p-3">
-                      <pre className="text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">{formatSnapshot(stateAfter)}</pre>
-                    </div>
-                  </div>
-                </div>
 
-                <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="text-[12px] font-semibold text-ink">Changed fields</p>
-                  {stateDiffEntries.length > 0 ? (
-                    <div className="mt-3 flex flex-col gap-2">
-                      {stateDiffEntries.map((entry) => (
-                        <details key={entry.path} className="rounded-lg border border-line bg-surface-2 p-3">
-                          <summary className="cursor-pointer text-[13px] font-semibold text-ink">
-                            {entry.path} · {entry.beforeType} → {entry.afterType}
-                          </summary>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            <div className="rounded-md border border-line bg-surface p-3">
-                              <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">Before</p>
-                              <pre className="mt-2 text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">{formatSnapshot(entry.beforeValue)}</pre>
+                  <div className="rounded-lg border border-line bg-surface p-3">
+                    <p className="text-[12px] font-semibold text-ink">
+                      Changed fields
+                    </p>
+                    {stateDiffEntries.length > 0 ? (
+                      <div className="mt-3 flex flex-col gap-2">
+                        {stateDiffEntries.map((entry) => (
+                          <details
+                            key={entry.path}
+                            className="rounded-lg border border-line bg-surface-2 p-3"
+                          >
+                            <summary className="cursor-pointer text-[13px] font-semibold text-ink">
+                              {entry.path} · {entry.beforeType} →{" "}
+                              {entry.afterType}
+                            </summary>
+                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                              <div className="rounded-md border border-line bg-surface p-3">
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                                  Before
+                                </p>
+                                <pre className="mt-2 text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">
+                                  {formatSnapshot(entry.beforeValue)}
+                                </pre>
+                              </div>
+                              <div className="rounded-md border border-line bg-surface p-3">
+                                <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                                  After
+                                </p>
+                                <pre className="mt-2 text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">
+                                  {formatSnapshot(entry.afterValue)}
+                                </pre>
+                              </div>
                             </div>
-                            <div className="rounded-md border border-line bg-surface p-3">
-                              <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">After</p>
-                              <pre className="mt-2 text-[12px] font-mono text-ink-2 whitespace-pre-wrap break-all">{formatSnapshot(entry.afterValue)}</pre>
-                            </div>
-                          </div>
-                        </details>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[12px] text-ink-3">No state differences detected.</p>
-                  )}
-                </div>
-              </div>,
-              "state-diff",
-              JSON.stringify({ before: stateBefore, after: stateAfter }, null, 2),
-            )
-          ) : null}
+                          </details>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[12px] text-ink-3">
+                        No state differences detected.
+                      </p>
+                    )}
+                  </div>
+                </div>,
+                "state-diff",
+                JSON.stringify(
+                  { before: stateBefore, after: stateAfter },
+                  null,
+                  2,
+                ),
+              )
+            : null}
 
           {buildSection(
             "Simulation result",
@@ -386,17 +543,30 @@ export function ContractInteractionDebugger({
             <div className="flex flex-col gap-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">Gas estimate</p>
-                  <p className="mt-1 text-[13px] font-semibold text-ink">{simulation?.gasEstimate.toLocaleString()} stroops</p>
+                  <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    Gas estimate
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold text-ink">
+                    {simulation?.gasEstimate.toLocaleString()} stroops
+                  </p>
                 </div>
                 <div className="rounded-lg border border-line bg-surface p-3">
-                  <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">Gas in XLM</p>
-                  <p className="mt-1 text-[13px] font-semibold text-ink">{simulation?.gasXlm} XLM</p>
+                  <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                    Gas in XLM
+                  </p>
+                  <p className="mt-1 text-[13px] font-semibold text-ink">
+                    {simulation?.gasXlm} XLM
+                  </p>
                 </div>
               </div>
               <div className="rounded-lg border border-line bg-surface p-3">
-                <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">Cost breakdown</p>
-                <p className="mt-1 text-[13px] text-ink-2">Base fee: {simulation?.baseFee} stroops · Total cost: {simulation?.totalCostXlm} XLM</p>
+                <p className="text-[11px] uppercase tracking-[0.08em] text-ink-4">
+                  Cost breakdown
+                </p>
+                <p className="mt-1 text-[13px] text-ink-2">
+                  Base fee: {simulation?.baseFee} stroops · Total cost:{" "}
+                  {simulation?.totalCostXlm} XLM
+                </p>
               </div>
             </div>,
             "simulation-result",
@@ -408,15 +578,32 @@ export function ContractInteractionDebugger({
             "Every submission attempt with timestamps and retry counts.",
             <div className="flex flex-col gap-2">
               {attempts.map((attempt) => (
-                <div key={attempt.id} className="rounded-lg border border-line bg-surface p-3">
+                <div
+                  key={attempt.id}
+                  className="rounded-lg border border-line bg-surface p-3"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-[13px] font-semibold text-ink">{attempt.status}</p>
-                      <p className="text-[12px] text-ink-3">{formatTimestamp(attempt.timestamp)}</p>
+                      <p className="text-[13px] font-semibold text-ink">
+                        {attempt.status}
+                      </p>
+                      <p className="text-[12px] text-ink-3">
+                        {formatTimestamp(attempt.timestamp)}
+                      </p>
                     </div>
-                    <Badge variant={attempt.status === "submitted" ? "success" : "warning"}>Retry {attempt.retryCount}</Badge>
+                    <Badge
+                      variant={
+                        attempt.status === "submitted" ? "success" : "warning"
+                      }
+                    >
+                      Retry {attempt.retryCount}
+                    </Badge>
                   </div>
-                  {attempt.hash ? <p className="mt-2 text-[12px] text-ink-2">Hash: {attempt.hash}</p> : null}
+                  {attempt.hash ? (
+                    <p className="mt-2 text-[12px] text-ink-2">
+                      Hash: {attempt.hash}
+                    </p>
+                  ) : null}
                 </div>
               ))}
             </div>,
@@ -445,14 +632,35 @@ export function ContractInteractionDebugger({
 
           {history.length > 0 ? (
             <section className="rounded-lg border border-line bg-surface-2 p-4">
-              <h4 className="text-[13px] font-semibold text-ink">Recent invocations</h4>
+              <h4 className="text-[13px] font-semibold text-ink">
+                Recent invocations
+              </h4>
               <div className="mt-3 flex flex-col gap-2">
                 {history.map((entry) => (
-                  <div key={`${entry.timestamp}-${entry.contractId}`} className="rounded-lg border border-line bg-surface p-3 text-[12px] text-ink-2">
+                  <div
+                    key={`${entry.timestamp}-${entry.contractId}`}
+                    className="rounded-lg border border-line bg-surface p-3 text-[12px] text-ink-2"
+                  >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-semibold">{entry.contractId} · {entry.method}</span>
-                      <span className="text-ink-3">{formatTimestamp(entry.timestamp)}</span>
+                      <span className="font-semibold">
+                        {entry.contractId} · {entry.method}
+                      </span>
+                      <span className="text-ink-3">
+                        {formatTimestamp(entry.timestamp)}
+                      </span>
                     </div>
+                    {onLoadEntry && (
+                      <div className="mt-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onLoadEntry(entry)}
+                        >
+                          Load into form
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

@@ -28,13 +28,17 @@ describe("NetworkScreen", () => {
     expect(container).toMatchSnapshot();
   });
   let switchNetwork: ReturnType<typeof vi.fn>;
+  let clearCustomNetworks: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     switchNetwork = vi.fn();
+    clearCustomNetworks = vi.fn();
     vi.mocked(useSorokit).mockReturnValue({
       network: TESTNET_NETWORK,
       switchNetwork,
+      customNetworks: [],
+      clearCustomNetworks,
     } as unknown as ReturnType<typeof useSorokit>);
 
     // jsdom does not implement scrollIntoView
@@ -86,6 +90,27 @@ describe("NetworkScreen", () => {
     expect(screen.getByText("Localnet")).toBeInTheDocument();
   });
 
+  it("clears all custom networks when resetting to defaults", () => {
+    vi.mocked(useSorokit).mockReturnValue({
+      network: TESTNET_NETWORK,
+      switchNetwork,
+      customNetworks: [
+        {
+          name: "Local Dev",
+          rpcUrl: "https://rpc.example.com",
+          horizonUrl: "https://horizon.example.com",
+          passphrase: "Local Dev Network",
+        },
+      ],
+      clearCustomNetworks,
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(<NetworkScreen />);
+    fireEvent.click(screen.getByRole("button", { name: "Reset to Defaults" }));
+
+    expect(clearCustomNetworks).toHaveBeenCalledTimes(1);
+  });
+
   it("does not render the active info panel when network is null", () => {
     vi.mocked(useSorokit).mockReturnValue({
       network: null,
@@ -132,5 +157,50 @@ describe("NetworkScreen", () => {
     await act(async () => {
       resolveSwitch!({ data: { name: "mainnet" }, error: null });
     });
+  });
+
+  // #753 Verify estimateFee is not called twice when both FeeEstimator and GasOptimizer are rendered
+  it("verifies the client fee method isn't called twice per tick when components are rendered together (#753)", async () => {
+    vi.useFakeTimers();
+    // Render both with a polling interval
+    const { FeeEstimator } = await import("@/components/FeeEstimator");
+    const { GasOptimizer } = await import("@/components/GasOptimizer");
+    // We need to mock the client properly to test this
+    const estimateFee = vi.fn().mockResolvedValue({ data: { baseFee: "100", recommended: "200" } });
+    vi.mocked(useSorokit).mockReturnValue({
+      client: {
+        transaction: {
+          estimateFee,
+          estimateDetailedFee: vi.fn().mockResolvedValue({ data: { breakdown: [], totalGasUnits: 0, scenarios: [] } }),
+          getFeeScenarios: vi.fn().mockResolvedValue({ data: [] }),
+        },
+        network: {
+          getGasPrice: vi.fn().mockResolvedValue({ data: {} }),
+        }
+      },
+    } as unknown as ReturnType<typeof useSorokit>);
+
+    render(
+      <div>
+        <FeeEstimator refreshInterval={5000} />
+        <GasOptimizer refreshInterval={5000} />
+      </div>
+    );
+
+    // Initial mount calls
+    await vi.runOnlyPendingTimersAsync();
+    
+    const initialCount = estimateFee.mock.calls.length;
+    
+    // Advance 1 tick (5000ms)
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    
+    // estimateFee should only increase by 1, even though both have refreshInterval=5000
+    // Because they share useFeeData
+    expect(estimateFee.mock.calls.length).toBeLessThanOrEqual(initialCount + 1);
+    
+    vi.useRealTimers();
   });
 });

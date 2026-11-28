@@ -13,7 +13,7 @@ export interface TransactionParams {
   asset: string;
   /** Issuer account for a non-native asset. Omitted (or undefined) for XLM. */
   assetIssuer?: string;
-  memoType: "none" | "text" | "id";
+  memoType: "none" | "text" | "id" | "hash" | "return";
   memo?: string;
 }
 
@@ -53,11 +53,21 @@ export type FeeScenario = {
   savings: string;
 };
 
+/** Soroban resources a simulated transaction consumed (from simulateTransaction). */
+export type SorobanResourceUsage = {
+  cpuInstructions?: number;
+  memoryBytes?: number;
+  readBytes?: number;
+  writeBytes?: number;
+};
+
 export type GasEstimate = {
   totalGasUnits: number;
   breakdown: OperationGasBreakdown[];
   scenarios: FeeScenario[];
   customMultiplier: number;
+  /** Simulated resource usage; absent for classic (non-Soroban) operations. */
+  resources?: SorobanResourceUsage;
 };
 
 export type SorokitClient = {
@@ -290,6 +300,14 @@ export type Transaction = {
   operationType?: string;
   type?: string;
   contractId?: string;
+  /** Recipient of a payment, when the backend reports one (searchable, #1159). */
+  destination?: string;
+  /** Sender of a payment, when the backend reports one. */
+  source?: string;
+  /** Payment amount as a decimal string, when the backend reports one. */
+  amount?: string;
+  /** Asset code of the payment, when the backend reports one. */
+  asset?: string;
 };
 
 export type ClaimableBalance = {
@@ -403,6 +421,10 @@ export type NftMetadata = {
   name: string;
   description?: string;
   image?: string;
+  /** Audio/video asset URL (e.g. `animation_url` in token metadata) */
+  animationUrl?: string;
+  /** MIME type of the primary media asset, e.g. `video/mp4`, `audio/mpeg` */
+  mimeType?: string;
   externalUrl?: string;
   attributes: NftAttribute[];
 };

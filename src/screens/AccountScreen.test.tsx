@@ -361,4 +361,125 @@ describe("AccountScreen", () => {
       }
     });
   });
+
+  describe("account summary card (#1095)", () => {
+    const ADDRESS =
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+    const MOCK_ACCOUNT_DATA = {
+      address: ADDRESS,
+      sequence: "987654321",
+      subentryCount: 4,
+    };
+
+    it("renders the summary card at the top of the screen when connected with an account", () => {
+      mockContext({
+        isConnected: true,
+        account: MOCK_ACCOUNT_DATA,
+        balances: [
+          { asset: "XLM", balance: "100.0000000", assetType: "native" },
+          {
+            asset: "USDC",
+            balance: "50.0000000",
+            assetType: "credit_alphanum4",
+            assetCode: "USDC",
+          },
+        ],
+      });
+
+      render(<AccountScreen />);
+
+      const summaryCard = screen.getByTestId("account-summary-card");
+      expect(summaryCard).toBeInTheDocument();
+      expect(screen.getByText("Account Summary")).toBeInTheDocument();
+    });
+
+    it("displays sequence number, signer count, reserve impact, and trustline count", () => {
+      mockContext({
+        isConnected: true,
+        account: MOCK_ACCOUNT_DATA,
+        balances: [
+          { asset: "XLM", balance: "50.0000000", assetType: "native" },
+          {
+            asset: "USDC",
+            balance: "10.0000000",
+            assetType: "credit_alphanum4",
+            assetCode: "USDC",
+          },
+          {
+            asset: "EURC",
+            balance: "5.0000000",
+            assetType: "credit_alphanum4",
+            assetCode: "EURC",
+          },
+        ],
+      });
+
+      render(<AccountScreen />);
+
+      expect(screen.getByTestId("summary-sequence")).toHaveTextContent(
+        "987654321",
+      );
+      expect(screen.getByTestId("summary-signers")).toHaveTextContent("1");
+      // 4 subentries * 0.5 XLM = 2.00 XLM
+      expect(screen.getByTestId("summary-reserve")).toHaveTextContent("2.00 XLM");
+      // 2 non-native balances = 2 trustlines
+      expect(screen.getByTestId("summary-trustlines")).toHaveTextContent("2");
+    });
+
+    it("displays color-coded health status for green (Healthy), yellow (Attention), and red (At Risk)", () => {
+      // 1. Green / Healthy
+      mockContext({
+        isConnected: true,
+        account: MOCK_ACCOUNT_DATA,
+        balances: [
+          { asset: "XLM", balance: "100.0000000", assetType: "native" },
+        ],
+      });
+
+      const { rerender } = render(<AccountScreen />);
+      let healthEl = screen.getByTestId("summary-health-status");
+      expect(healthEl).toHaveAttribute("data-health", "green");
+      expect(healthEl).toHaveTextContent("Healthy");
+
+      // 2. Yellow / Attention (low available balance)
+      // subentryCount 4 -> reserve = 4*0.5 + 1.0 = 3.0 XLM. Balance 4.0 -> available 1.0 (< 2.0)
+      mockContext({
+        isConnected: true,
+        account: MOCK_ACCOUNT_DATA,
+        balances: [
+          { asset: "XLM", balance: "4.0000000", assetType: "native" },
+        ],
+      });
+      rerender(<AccountScreen />);
+      healthEl = screen.getByTestId("summary-health-status");
+      expect(healthEl).toHaveAttribute("data-health", "yellow");
+      expect(healthEl).toHaveTextContent("Attention");
+
+      // 3. Red / At Risk (under reserve)
+      mockContext({
+        isConnected: true,
+        account: MOCK_ACCOUNT_DATA,
+        balances: [
+          { asset: "XLM", balance: "1.0000000", assetType: "native" },
+        ],
+      });
+      rerender(<AccountScreen />);
+      healthEl = screen.getByTestId("summary-health-status");
+      expect(healthEl).toHaveAttribute("data-health", "red");
+      expect(healthEl).toHaveTextContent("At Risk");
+    });
+
+    it("does not render the summary card when disconnected or account is null", () => {
+      mockContext({
+        isConnected: false,
+        account: null,
+      });
+
+      render(<AccountScreen />);
+
+      expect(
+        screen.queryByTestId("account-summary-card"),
+      ).not.toBeInTheDocument();
+    });
+  });
 });

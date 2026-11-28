@@ -7,7 +7,7 @@ import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
   {
-    ignores: ['dist'],
+    ignores: ['dist', '.kilo'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

@@ -7,6 +7,12 @@ import { getClient } from "@/lib/client";
 
 import { TransactionPanel } from "./TransactionPanel";
 
+const toastMock = vi.hoisted(() => ({ success: vi.fn() }));
+
+vi.mock("@/context/ToastContext", () => ({
+  useOptionalToast: () => toastMock,
+}));
+
 vi.mock("@/context/useSorokit", () => ({
   useSorokit: vi.fn(),
 }));
@@ -62,7 +68,7 @@ function mockGetClient(
 
 /** Clicks the Send button (label varies by selected asset), waits for the confirmation modal, then confirms. */
 async function reviewAndConfirm() {
-  fireEvent.click(screen.getByRole("button", { name: /^Send (XLM|USDC)/ }));
+  fireEvent.click(screen.getByTestId("submit-transaction"));
   await screen.findByRole("dialog", { name: /confirm transaction/i });
   // act()-wrapped: submitTransaction's state updates can land before this
   // call returns when the mocked API resolves immediately (no artificial
@@ -91,7 +97,7 @@ describe("TransactionPanel", () => {
 
     fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
     fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Send (XLM|USDC)/ }));
+    fireEvent.click(screen.getByTestId("submit-transaction"));
 
     const dialog = await screen.findByRole("dialog", { name: /confirm transaction/i });
     expect(dialog).toHaveTextContent("Payment — 1 operation");
@@ -109,7 +115,7 @@ describe("TransactionPanel", () => {
 
     const form = document.querySelector("form");
     expect(form).not.toBeNull();
-    const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+    const sendButton = screen.getByTestId("submit-transaction");
     expect(sendButton).toHaveAttribute("type", "submit");
     expect(sendButton).toHaveAttribute("form", form!.id);
   });
@@ -142,6 +148,27 @@ describe("TransactionPanel", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(mockSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Destination Address")).toHaveValue(VALID_DEST);
+  });
+
+  it("shows a success toast with the transaction hash after submit (#1060)", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({ data: { hash: "toasthash1", ledger: 7 }, error: null }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+    await reviewAndConfirm();
+
+    await waitFor(() => {
+      expect(toastMock.success).toHaveBeenCalledWith(
+        "Transaction sent",
+        expect.objectContaining({
+          message: expect.stringContaining("toasthash1"),
+          duration: 5000,
+        }),
+      );
+    });
   });
 
   it("handles loading, success, and error states", async () => {
@@ -187,7 +214,55 @@ describe("TransactionPanel", () => {
     await reviewAndConfirm();
 
     expect(await screen.findByText("Transaction failed")).toBeInTheDocument();
-    expect(screen.getByText("Submission rejected by network")).toBeInTheDocument();
+    expect(screen.getByText("Something went wrong while invoking the contract. Please try again.")).toBeInTheDocument();
+  });
+
+  it("shows a friendly message for tx_bad_seq instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon submit failed: tx_bad_seq (bad sequence)",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText("Your account sequence is out of date. Refresh and try again."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/tx_bad_seq/)).not.toBeInTheDocument();
+  });
+
+  it("shows a friendly trustline message for op_no_trust instead of the raw result code", async () => {
+    mockGetClient(
+      vi.fn().mockResolvedValue({
+        data: null,
+        error: "Horizon error: op_no_trust — account has no trustline",
+      }),
+    );
+    render(<TransactionPanel />);
+
+    fireEvent.change(screen.getByLabelText("Destination Address"), {
+      target: { value: VALID_DEST },
+    });
+    fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+      target: { value: "10" },
+    });
+    await reviewAndConfirm();
+
+    expect(
+      await screen.findByText(
+        "The destination account does not trust this asset. Ask them to add a trustline, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/op_no_trust/)).not.toBeInTheDocument();
   });
 
   it("shows validation error for invalid destination address", async () => {
@@ -211,7 +286,7 @@ describe("TransactionPanel", () => {
 
     // Type valid address
     fireEvent.change(destInput, { target: { value: VALID_DEST } });
-    expect(screen.getByText("Stellar address must be 56 characters")).toHaveClass("opacity-0");
+    expect(screen.queryByText("Stellar address must be 56 characters")).not.toBeInTheDocument();
     expect(submitBtn).not.toBeDisabled();
   });
 
@@ -374,9 +449,7 @@ describe("TransactionPanel", () => {
 
     // Type valid amount
     fireEvent.change(amountInput, { target: { value: "0.0000001" } });
-    expect(screen.getByText("Minimum amount is 0.0000001 XLM")).toHaveClass(
-      "opacity-0",
-    );
+    expect(screen.queryByText("Minimum amount is 0.0000001 XLM")).not.toBeInTheDocument();
     expect(submitBtn).not.toBeDisabled();
   });
 
@@ -403,7 +476,7 @@ describe("TransactionPanel", () => {
 
     // Type amount within balance
     fireEvent.change(amountInput, { target: { value: "5" } });
-    expect(screen.getByText("Insufficient balance")).toHaveClass("opacity-0");
+    expect(screen.queryByText("Insufficient balance")).not.toBeInTheDocument();
     expect(submitBtn).not.toBeDisabled();
   });
 
@@ -730,6 +803,29 @@ describe("TransactionPanel", () => {
       expect(sendBtn).toBeDisabled();
     });
 
+    it("accepts 7 decimal places and rejects 8 decimal places", () => {
+      render(<TransactionPanel />);
+
+      const sendBtn = screen.getByTestId("submit-transaction");
+      fireEvent.change(screen.getByLabelText("Destination Address"), {
+        target: { value: VALID_DEST },
+      });
+
+      // 7 decimals accepted
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "1.1234567" },
+      });
+      expect(screen.queryByText(/Amount cannot exceed 7 decimal places/i)).not.toBeInTheDocument();
+      expect(sendBtn).not.toBeDisabled();
+
+      // 8 decimals rejected
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), {
+        target: { value: "1.12345678" },
+      });
+      expect(screen.getByText(/Amount cannot exceed 7 decimal places/i)).toBeInTheDocument();
+      expect(sendBtn).toBeDisabled();
+    });
+
     it("AC3: Successful submit renders the transaction hash in the success panel", async () => {
       const TX_HASH = "abc123def456abc123def456abc123def456abc123def456abc123def456";
       const mockSubmit = vi
@@ -772,7 +868,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
 
       expect(await screen.findByText("Transaction failed")).toBeInTheDocument();
-      expect(screen.getByText(ERROR_MSG)).toBeInTheDocument();
+      expect(screen.getByText("Insufficient balance to submit this transaction. Add more XLM and try again.")).toBeInTheDocument();
     });
 
     it("AC5: clicking 'New Transaction' after success resets the form back to idle state", async () => {
@@ -974,7 +1070,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
       await screen.findByText("Transaction failed");
 
-      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Insufficient balance"); });
+      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Insufficient balance to submit this transaction. Add more XLM and try again."); });
       expect(onSuccess).not.toHaveBeenCalled();
     });
 
@@ -993,7 +1089,7 @@ describe("TransactionPanel", () => {
       await reviewAndConfirm();
       await screen.findByText("Transaction failed");
 
-      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Network unreachable"); });
+      await waitFor(() => { expect(onError).toHaveBeenCalledWith("Something went wrong while invoking the contract. Please try again."); });
       expect(onSuccess).not.toHaveBeenCalled();
     });
 
@@ -1196,6 +1292,443 @@ describe("TransactionPanel", () => {
         expect(link).toHaveAccessibleName(expect.stringContaining("txhash123"));
         expect(link).toHaveAccessibleName(expect.stringMatching(/opens in a new tab/i));
       }
+    });
+  });
+
+  // ── double-submit protection (#895) ────────────────────────────────────────
+  // Rapid clicks on Send can both fire before React re-renders the button into
+  // its loading/disabled visual state, since that state update only takes
+  // effect on the next render. A synchronous ref guard (isSubmittingRef) must
+  // block the second click immediately, independent of any state update.
+  //
+  // Dispatching the two clicks via separate fireEvent.click() calls does NOT
+  // reproduce this race: each fireEvent.click() is individually wrapped in
+  // act(), which flushes React's state update (and the resulting `disabled`
+  // DOM attribute) before the call returns, so the second fireEvent.click()
+  // lands on an already-disabled native button and never reaches the handler
+  // regardless of isSubmittingRef. To faithfully simulate two physical clicks
+  // landing before React commits, both native click events are dispatched
+  // inside a single act() call so React only flushes once both handlers have
+  // already run synchronously.
+  describe("double-submit protection (#895)", () => {
+    function clickTwiceBeforeReactFlushes(button: HTMLElement) {
+      act(() => {
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      });
+    }
+
+    it("only triggers one fee simulation when Send is clicked twice in rapid succession (previewMode)", async () => {
+      const feeImpl = vi.fn().mockResolvedValue({ data: DEFAULT_FEE, error: null });
+      mockGetClient(
+        vi.fn().mockResolvedValue({ data: { hash: "h1", ledger: 1 }, error: null }),
+        feeImpl,
+      );
+      render(<TransactionPanel />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      // Both clicks are dispatched before React has a chance to flush the
+      // first buildPreview() call's state update and re-render the button.
+      // Without the synchronous ref guard, both clicks would each call
+      // estimateFee() once (the initial on-mount call plus one per
+      // buildPreview), i.e. 3 total instead of 2.
+      const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      clickTwiceBeforeReactFlushes(sendButton);
+
+      await screen.findByRole("dialog", { name: /confirm transaction/i });
+
+      // One call on mount (balance-warning fee fetch) + exactly one from
+      // buildPreview(), never two, despite the double click.
+      expect(feeImpl).toHaveBeenCalledTimes(2);
+    });
+
+    it("only submits once when Send is double-clicked in rapid succession (previewMode=false)", async () => {
+      const mockSubmit = vi.fn().mockImplementation(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(
+              () => resolve({ data: { hash: "txhash123", ledger: 100 }, error: null }),
+              20,
+            ),
+          ),
+      );
+      mockGetClient(mockSubmit);
+      vi.mocked(useSorokit).mockReturnValue({
+        address: "GABC",
+        isConnected: true,
+        network: { name: "testnet", passphrase: "x", rpcUrl: "x", horizonUrl: "x" },
+        balances: [{ asset: "XLM", balance: "100" }],
+        client: getClient(),
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      render(<TransactionPanel previewMode={false} />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      const sendButton = screen.getByRole("button", { name: /^Send (XLM|USDC)/ });
+      // Both clicks dispatched before React has rendered the button into its
+      // disabled/loading state.
+      clickTwiceBeforeReactFlushes(sendButton);
+
+      await screen.findByText(/Transaction submitted/i);
+
+      expect(mockSubmit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Multi-Send feature (#1147) ──────────────────────────────────────────
+  describe("Multi-Send feature (#1147)", () => {
+    it("switches to Multi-Send mode when the tab is clicked", () => {
+      render(<TransactionPanel />);
+      expect(screen.queryByTestId("multi-send-table")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("tab-multi-send"));
+      expect(screen.getByTestId("multi-send-table")).toBeInTheDocument();
+      expect(screen.getByText("Multi-Recipient Payments")).toBeInTheDocument();
+    });
+
+    it("allows adding and removing recipient rows", () => {
+      render(<TransactionPanel defaultMode="multi" />);
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(2);
+
+      fireEvent.click(screen.getByTestId("add-recipient-row"));
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(3);
+
+      fireEvent.click(screen.getByTestId("multi-send-remove-2"));
+      expect(screen.getAllByPlaceholderText("G...").length).toBe(2);
+    });
+
+    it("executes batch submit and tracks progress across multiple recipients", async () => {
+      const mockSubmit = vi.fn().mockResolvedValue({
+        data: { hash: "batch-tx-hash", ledger: 101, successful: true },
+        error: null,
+      });
+      mockGetClient(mockSubmit);
+
+      render(<TransactionPanel defaultMode="multi" />);
+
+      const destInputs = screen.getAllByPlaceholderText("G...");
+      const amountInputs = screen.getAllByPlaceholderText("0.00");
+
+      fireEvent.change(destInputs[0], { target: { value: VALID_DEST } });
+      fireEvent.change(amountInputs[0], { target: { value: "10" } });
+
+      const secondDest = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+      fireEvent.change(destInputs[1], { target: { value: secondDest } });
+      fireEvent.change(amountInputs[1], { target: { value: "20" } });
+
+      const submitBtn = screen.getByTestId("submit-batch");
+      expect(submitBtn).not.toBeDisabled();
+
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalledTimes(2);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("batch-all-success-alert")).toBeInTheDocument();
+        expect(screen.getAllByText("Sent").length).toBe(2);
+      });
+    });
+
+    it("handles partial failure gracefully and allows retrying failed rows", async () => {
+      let callCount = 0;
+      const mockSubmit = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 2) {
+          return Promise.resolve({
+            data: null,
+            error: "Destination account does not exist",
+          });
+        }
+        return Promise.resolve({
+          data: { hash: `batch-tx-${callCount}`, ledger: 102, successful: true },
+          error: null,
+        });
+      });
+      mockGetClient(mockSubmit);
+
+      render(<TransactionPanel defaultMode="multi" />);
+
+      const destInputs = screen.getAllByPlaceholderText("G...");
+      const amountInputs = screen.getAllByPlaceholderText("0.00");
+
+      fireEvent.change(destInputs[0], { target: { value: VALID_DEST } });
+      fireEvent.change(amountInputs[0], { target: { value: "5" } });
+
+      const secondDest = "GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ";
+      fireEvent.change(destInputs[1], { target: { value: secondDest } });
+      fireEvent.change(amountInputs[1], { target: { value: "15" } });
+
+      fireEvent.click(screen.getByTestId("submit-batch"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("batch-partial-failure-alert")).toBeInTheDocument();
+      });
+
+      expect(screen.getByText("Sent")).toBeInTheDocument();
+      expect(screen.getByText("Failed")).toBeInTheDocument();
+
+      // Retry failed batch button appears
+      const retryBtn = screen.getByTestId("retry-failed-batch");
+      expect(retryBtn).toBeInTheDocument();
+
+      // Now make second submission succeed on retry
+      mockSubmit.mockResolvedValueOnce({
+        data: { hash: "batch-tx-retry", ledger: 103, successful: true },
+        error: null,
+      });
+
+      fireEvent.click(retryBtn);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalledTimes(3);
+      });
+    });
+  });
+
+  // ── Network switch mid-transaction (#1166) ──────────────────────────────
+  describe("network switch mid-transaction (#1166)", () => {
+    it("cancels and resets in-flight transaction when network switches", async () => {
+      let resolveSubmit: (val: unknown) => void;
+      const pendingSubmit = new Promise((resolve) => {
+        resolveSubmit = resolve;
+      });
+      const mockSubmit = vi.fn().mockReturnValue(pendingSubmit);
+      mockGetClient(mockSubmit);
+
+      const sorokitMock = {
+        address: "GABC",
+        isConnected: true,
+        network: { name: "testnet", passphrase: "test", rpcUrl: "x", horizonUrl: "x" },
+        balances: [{ asset: "XLM", balance: "100" }],
+        client: getClient(),
+      };
+      vi.mocked(useSorokit).mockReturnValue(sorokitMock as unknown as ReturnType<typeof useSorokit>);
+
+      const { rerender } = render(<TransactionPanel previewMode={false} />);
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "10" } });
+
+      fireEvent.click(screen.getByTestId("submit-transaction"));
+
+      expect(screen.getByText("Submitting…")).toBeInTheDocument();
+
+      // Mid-transaction, network switches to mainnet
+      vi.mocked(useSorokit).mockReturnValue({
+        ...sorokitMock,
+        network: { name: "mainnet", passphrase: "pub", rpcUrl: "y", horizonUrl: "y" },
+      } as unknown as ReturnType<typeof useSorokit>);
+
+      rerender(<TransactionPanel previewMode={false} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Transaction cancelled due to network switch/i)).toBeInTheDocument();
+      });
+
+      // Transaction state reset: submit button is back and no longer in Submitting... state
+      expect(screen.queryByText("Submitting…")).not.toBeInTheDocument();
+      resolveSubmit!({ data: { hash: "late-hash" }, error: null });
+    });
+  });
+
+  describe("Transaction Templates (#1146)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("saves a template to localStorage when 'Save as Template' is clicked", async () => {
+      render(<TransactionPanel />);
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "15" } });
+
+      const saveBtn = screen.getByTestId("save-template-button");
+      expect(saveBtn).not.toBeDisabled();
+      fireEvent.click(saveBtn);
+
+      const nameInput = screen.getByLabelText("Template Name");
+      fireEvent.change(nameInput, { target: { value: "Donation" } });
+      fireEvent.click(screen.getByTestId("confirm-save-template-button"));
+
+      const raw = localStorage.getItem("sorokit:transaction-templates");
+      expect(raw).toBeTruthy();
+      const templates = JSON.parse(raw!);
+      expect(templates).toHaveLength(1);
+      expect(templates[0].name).toBe("Donation");
+      expect(templates[0].destination).toBe(VALID_DEST);
+      expect(templates[0].amount).toBe("15");
+    });
+
+    it("displays templates in a dropdown and populates form upon selection", async () => {
+      localStorage.setItem(
+        "sorokit:transaction-templates",
+        JSON.stringify([
+          {
+            id: "tpl-1",
+            name: "Office Rent",
+            destination: VALID_DEST,
+            amount: "42",
+            asset: "XLM",
+            memoType: "text",
+            memo: "Rent Nov",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const select = screen.getByTestId("templates-dropdown");
+      expect(select).toBeInTheDocument();
+
+      fireEvent.change(select, { target: { value: "tpl-1" } });
+
+      expect(screen.getByLabelText("Destination Address")).toHaveValue(VALID_DEST);
+      expect(screen.getByLabelText("Amount (XLM)")).toHaveValue(42);
+      expect(screen.getByLabelText("Memo (optional)")).toHaveValue("Rent Nov");
+    });
+
+    it("allows deleting a template from localStorage", async () => {
+      localStorage.setItem(
+        "sorokit:transaction-templates",
+        JSON.stringify([
+          {
+            id: "tpl-del",
+            name: "To Delete",
+            destination: VALID_DEST,
+            amount: "10",
+            asset: "XLM",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const select = screen.getByTestId("templates-dropdown");
+      fireEvent.change(select, { target: { value: "tpl-del" } });
+
+      const deleteBtn = screen.getByTestId("delete-template-btn");
+      expect(deleteBtn).toBeInTheDocument();
+      fireEvent.click(deleteBtn);
+
+      const raw = localStorage.getItem("sorokit:transaction-templates");
+      expect(JSON.parse(raw!)).toEqual([]);
+    });
+  });
+
+  describe("Scheduled Transactions (#1145)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+      vi.useRealTimers();
+    });
+
+    it("has a date/time picker and saves a scheduled transaction to localStorage", async () => {
+      render(<TransactionPanel />);
+      const picker = screen.getByTestId("schedule-datetime-picker");
+      expect(picker).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText("Destination Address"), { target: { value: VALID_DEST } });
+      fireEvent.change(screen.getByLabelText("Amount (XLM)"), { target: { value: "25" } });
+      fireEvent.change(picker, { target: { value: "2026-12-01T10:00" } });
+
+      const submitBtn = screen.getByTestId("submit-transaction");
+      expect(submitBtn).toHaveTextContent("Schedule XLM");
+      fireEvent.click(submitBtn);
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      expect(raw).toBeTruthy();
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled).toHaveLength(1);
+      expect(scheduled[0].amount).toBe("25");
+      expect(scheduled[0].destination).toBe(VALID_DEST);
+      expect(scheduled[0].status).toBe("pending");
+      expect(scheduled[0].scheduledTime).toBe("2026-12-01T10:00");
+    });
+
+    it("renders the scheduled transactions list", async () => {
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-1",
+            destination: VALID_DEST,
+            amount: "50",
+            asset: "XLM",
+            scheduledTime: "2026-12-01T12:00",
+            status: "pending",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const list = screen.getByTestId("scheduled-transactions-list");
+      expect(list).toBeInTheDocument();
+      expect(screen.getByText("50 XLM")).toBeInTheDocument();
+      expect(screen.getByText("pending")).toBeInTheDocument();
+    });
+
+    it("allows cancelling a scheduled transaction", async () => {
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-cancel",
+            destination: VALID_DEST,
+            amount: "30",
+            asset: "XLM",
+            scheduledTime: "2026-12-05T09:00",
+            status: "pending",
+            createdAt: Date.now(),
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+      const cancelBtn = screen.getByTestId("cancel-scheduled-tx-sched-cancel");
+      fireEvent.click(cancelBtn);
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled[0].status).toBe("cancelled");
+    });
+
+    it("automatically executes due scheduled transactions", async () => {
+      const mockSubmit = vi
+        .fn()
+        .mockResolvedValue({ data: { hash: "sched-hash-1", ledger: 200 }, error: null });
+      mockGetClient(mockSubmit);
+
+      // A transaction scheduled in the past
+      localStorage.setItem(
+        "sorokit:scheduled-transactions",
+        JSON.stringify([
+          {
+            id: "sched-due",
+            destination: VALID_DEST,
+            amount: "10",
+            asset: "XLM",
+            scheduledTime: new Date(Date.now() - 1000).toISOString(),
+            status: "pending",
+            createdAt: Date.now() - 5000,
+          },
+        ]),
+      );
+
+      render(<TransactionPanel />);
+
+      await waitFor(() => {
+        expect(mockSubmit).toHaveBeenCalled();
+      });
+
+      const raw = localStorage.getItem("sorokit:scheduled-transactions");
+      const scheduled = JSON.parse(raw!);
+      expect(scheduled[0].status).toBe("executed");
+      expect(scheduled[0].txHash).toBe("sched-hash-1");
     });
   });
 });

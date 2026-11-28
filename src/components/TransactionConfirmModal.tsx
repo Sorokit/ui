@@ -38,8 +38,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/Button";
+import { Separator } from "@/components/ui/Separator";
+import { useI18n } from "@/i18n";
 import { STROOPS_PER_XLM } from "@/lib/staking";
-import { truncateAddress } from "@/lib/utils";
+import { cn, friendlyError, truncateAddress } from "@/lib/utils";
+
+import { HardwareWalletBadge } from "./HardwareWalletBadge";
 
 export interface TransactionOperationSummary {
   /** Short operation type label, e.g. "Payment", "Change Trust" */
@@ -67,6 +71,11 @@ export interface TransactionPreviewData {
   sequenceNumber?: string;
   /** Omitted when unavailable — shown as "Determined by wallet" */
   timeoutLedger?: number;
+  /**
+   * Total outbound amount in stroops. Used with `isHardwareWallet` to decide
+   * whether the extra on-device confirmation step is required (#1153).
+   */
+  totalAmountStroops?: string;
 }
 
 export interface TransactionConfirmModalProps {
@@ -78,7 +87,17 @@ export interface TransactionConfirmModalProps {
   onCancel: () => void;
   /** Shows a loading state on the confirm button and disables both actions */
   isSigning?: boolean;
+  /** Signing happens on a hardware device, so show its badge and extra guard (#1153). */
+  isHardwareWallet?: boolean;
+  /** Override the high-value boundary; accepts a positive integer stroop string. */
+  highValueThresholdStroops?: string;
 }
+
+/**
+ * Payments at or above this value (100 XLM in stroops) require an explicit
+ * on-device review step when a hardware wallet is connected (#1153).
+ */
+export const HARDWARE_HIGH_VALUE_THRESHOLD_STROOPS = "1000000000";
 
 function groupIntegerDigits(digits: string): string {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -103,9 +122,21 @@ function stroopsToXlmLabel(stroops: string): string {
   return `${wholeLabel}.${fractionLabel} XLM`;
 }
 
+/** Integer stroop comparison so large amounts never lose precision. */
+function isHighValueAmount(
+  amount: string | undefined,
+  threshold: string,
+): boolean {
+  if (!amount) return false;
+  const value = amount.trim();
+  const boundary = threshold.trim();
+  if (!/^\d+$/.test(value) || !/^\d+$/.test(boundary)) return false;
+  return BigInt(value) >= BigInt(boundary);
+}
+
 function signingFailureMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === "string" && error.trim()) return error;
+  if (error instanceof Error && error.message.trim()) return friendlyError(error.message);
+  if (typeof error === "string" && error.trim()) return friendlyError(error);
   return "Signing was rejected. Review the transaction and try again.";
 }
 
@@ -115,20 +146,31 @@ export function TransactionConfirmModal({
   onConfirm,
   onCancel,
   isSigning = false,
+  isHardwareWallet = false,
+  highValueThresholdStroops = HARDWARE_HIGH_VALUE_THRESHOLD_STROOPS,
 }: TransactionConfirmModalProps) {
+  const { t } = useI18n();
   const [submitting, setSubmitting] = useState(false);
   const [signingError, setSigningError] = useState<string | null>(null);
+  const [deviceConfirmed, setDeviceConfirmed] = useState(false);
   const [trackedOpen, setTrackedOpen] = useState(open);
 
   if (trackedOpen !== open) {
     setTrackedOpen(open);
-    if (!open) setSigningError(null);
+    if (!open) {
+      setSigningError(null);
+      setDeviceConfirmed(false);
+    }
   }
 
   const showSigning = submitting || (isSigning && signingError === null);
+  const requiresDeviceConfirmation =
+    isHardwareWallet &&
+    isHighValueAmount(transaction?.totalAmountStroops, highValueThresholdStroops);
 
   const handleConfirm = async () => {
     if (showSigning || !transaction) return;
+    if (requiresDeviceConfirmation && !deviceConfirmed) return;
     setSigningError(null);
     setSubmitting(true);
     try {
@@ -154,8 +196,11 @@ export function TransactionConfirmModal({
           aria-describedby="tx-confirm-desc"
         >
           <div className="flex items-center justify-between px-6 pt-6 pb-1 shrink-0">
-            <Dialog.Title className="text-[14px] font-semibold text-ink">
-              Confirm transaction
+            <Dialog.Title className="flex items-center gap-2 text-[14px] font-semibold text-ink">
+              {t("tx.confirmTitle")}
+              {isHardwareWallet && (
+                <HardwareWalletBadge compact testId="tx-hardware-badge" />
+              )}
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
@@ -182,7 +227,7 @@ export function TransactionConfirmModal({
               </p>
 
               <div className="flex-1 overflow-y-auto px-6 flex flex-col gap-5 pb-1">
-                <Section title="Operations">
+                <Section title={t("tx.operations")}>
                   <div className="flex flex-col gap-2">
                     {transaction.operations.map((op, i) => (
                       <div
@@ -203,20 +248,24 @@ export function TransactionConfirmModal({
                   </div>
                 </Section>
 
-                <Section title="Fee breakdown">
+                <Section title={t("tx.feeBreakdown")}>
                   <div className="flex flex-col gap-2 text-[12px]">
                     <FeeRow
-                      label="Base fee"
+                      label={t("tx.baseFee")}
                       stroops={transaction.fee.baseFeeStroops}
                     />
                     {transaction.fee.networkFeeStroops !== undefined && (
-                      <FeeRow
-                        label="Network fee"
-                        stroops={transaction.fee.networkFeeStroops}
-                      />
+                      <>
+                        <Separator spacing="sm" className="border-b border-line" />
+                        <FeeRow
+                          label={t("tx.networkFee")}
+                          stroops={transaction.fee.networkFeeStroops}
+                        />
+                      </>
                     )}
-                    <div className="flex items-center justify-between pt-2 border-t border-line font-semibold">
-                      <span className="text-ink-2">Total</span>
+                    <Separator spacing="sm" className="border-b border-line" />
+                    <div className="flex items-center justify-between font-semibold">
+                      <span className="text-ink-2">{t("tx.total")}</span>
                       <span className="text-ink tabular-nums">
                         {transaction.fee.totalStroops} stroops (
                         {stroopsToXlmLabel(transaction.fee.totalStroops)})
@@ -225,9 +274,9 @@ export function TransactionConfirmModal({
                   </div>
                 </Section>
 
-                <Section title="Details">
+                <Section title={t("tx.details")}>
                   <div className="flex flex-col gap-2 text-[12px]">
-                    <DetailRow label="Source account">
+                    <DetailRow label={t("tx.sourceAccount")}>
                       <span
                         data-address
                         className="font-mono text-ink"
@@ -236,18 +285,39 @@ export function TransactionConfirmModal({
                         {truncateAddress(transaction.sourceAccount, 8, 6)}
                       </span>
                     </DetailRow>
-                    <DetailRow label="Sequence number">
+                    <DetailRow label={t("tx.sequenceNumber")}>
                       <span className="font-mono text-ink">
-                        {transaction.sequenceNumber ?? "Determined by wallet"}
+                        {transaction.sequenceNumber ?? t("tx.determinedByWallet")}
                       </span>
                     </DetailRow>
-                    <DetailRow label="Timeout ledger">
+                    <DetailRow label={t("tx.timeoutLedger")}>
                       <span className="font-mono text-ink">
-                        {transaction.timeoutLedger ?? "Determined by wallet"}
+                        {transaction.timeoutLedger ?? t("tx.determinedByWallet")}
                       </span>
                     </DetailRow>
                   </div>
                 </Section>
+
+                {requiresDeviceConfirmation && (
+                  <div
+                    data-testid="hardware-confirmation"
+                    className="rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-3"
+                  >
+                    <p className="text-[12px] text-ink">
+                      {t("tx.hardwareNotice")}
+                    </p>
+                    <label className="mt-2 flex items-start gap-2 text-[12px] text-ink-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        data-testid="hardware-confirm-checkbox"
+                        checked={deviceConfirmed}
+                        onChange={(event) => setDeviceConfirmed(event.target.checked)}
+                        className="mt-0.5 accent-purple-500"
+                      />
+                      <span>{t("tx.confirmOnDevice")}</span>
+                    </label>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -269,16 +339,20 @@ export function TransactionConfirmModal({
               onClick={onCancel}
               disabled={showSigning}
             >
-              Cancel
+              {t("tx.cancel")}
             </Button>
             <Button
               size="md"
               className="flex-1"
               loading={showSigning}
-              disabled={!transaction || showSigning}
+              disabled={
+                !transaction ||
+                showSigning ||
+                (requiresDeviceConfirmation && !deviceConfirmed)
+              }
               onClick={() => void handleConfirm()}
             >
-              {showSigning ? "Signing…" : "Confirm & Sign"}
+              {showSigning ? t("tx.signing") : t("tx.confirmSign")}
             </Button>
           </div>
         </Dialog.Content>
@@ -307,9 +381,17 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
   );
 }
 
-function FeeRow({ label, stroops }: { label: string; stroops: string }) {
+function FeeRow({
+  label,
+  stroops,
+  className,
+}: {
+  label: string;
+  stroops: string;
+  className?: string;
+}) {
   return (
-    <div className="flex items-center justify-between">
+    <div className={cn("flex items-center justify-between", className)}>
       <span className="text-ink-3">{label}</span>
       <span className="text-ink tabular-nums">
         {stroops} stroops ({stroopsToXlmLabel(stroops)})
